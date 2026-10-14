@@ -1,0 +1,277 @@
+--- /dev/null
++++ b/.agents/skills/domain-modeling/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Matt Pocock
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+--- a/.agents/skills/domain-modeling/agents/openai.yaml
++++ b/.agents/skills/domain-modeling/agents/openai.yaml
+@@ -1,3 +1,6 @@
+ interface:
+   display_name: "Domain Modeling"
+   short_description: "Build and sharpen a domain model"
++  default_prompt: "Use $domain-modeling to clarify the terms and decisions in this design."
++policy:
++  allow_implicit_invocation: true
+--- /dev/null
++++ b/.agents/skills/grill-with-docs/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Matt Pocock
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+--- a/.agents/skills/grill-with-docs/SKILL.md
++++ b/.agents/skills/grill-with-docs/SKILL.md
+@@ -1,7 +1,12 @@
+ ---
+ name: grill-with-docs
+-description: A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.
+-disable-model-invocation: true
++description: Stress-test a plan or domain design through focused questions and record resolved terminology and architectural decisions. Use when the user requests a design interview or substantive design critique with documentation.
+ ---
+ 
+-Call the Skill tool twice, for "grilling" and "domain-modeling".
++# Grill with Docs
++
++Read [grilling](../grilling/SKILL.md) for the interview and [domain-modeling](../domain-modeling/SKILL.md) for terminology and decisions. Apply both within the user's requested scope. These are local Markdown dependencies; no Skill tool or slash-command support is required.
++
++Reuse answers and decisions already present in the conversation and repository. Investigate discoverable facts before asking questions. Record resolved terms in the glossary and create ADRs only when the criteria in domain-modeling hold.
++
++Do not start an interview merely because the user asks to install this skill, save settled research, or consolidate existing documents. Automatic discovery permits relevant use; it does not override the user's current task or require another approval for already authorized work.
+--- a/.agents/skills/grill-with-docs/agents/openai.yaml
++++ b/.agents/skills/grill-with-docs/agents/openai.yaml
+@@ -1,5 +1,6 @@
+ interface:
+   display_name: "Grill with Docs"
+-  short_description: "Grill a design and write its docs"
++  short_description: "Challenge a design and document decisions"
++  default_prompt: "Use $grill-with-docs to test this design and document the resolved terms and decisions."
+ policy:
+-  allow_implicit_invocation: false
++  allow_implicit_invocation: true
+--- /dev/null
++++ b/.agents/skills/grilling/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Matt Pocock
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+--- a/.agents/skills/grilling/SKILL.md
++++ b/.agents/skills/grilling/SKILL.md
+@@ -1,30 +1,16 @@
+ ---
+ name: grilling
+-description: Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.
++description: Stress-test a plan, decision, or idea with focused questions. Use when the user asks for a design interview, challenges to assumptions, or help resolving material design tradeoffs.
+ ---
+ 
+-Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
++# Grilling
+ 
+-Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
++Build shared understanding by mapping the unresolved decisions and their dependencies as a design tree. First inspect the conversation and relevant repository material; keep established choices settled unless new evidence contradicts them.
+ 
+-Format a round like so:
++Work in rounds. A round contains only material questions whose prerequisites are already settled. Give a recommendation and explain its tradeoff. Group independent questions, use the environment's question tool when available, and otherwise ask concise questions directly. Do not ask downstream questions whose answers depend on choices still open in the current round.
+ 
+-```
+-❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
++Discoverable facts are the agent's work: inspect files, sources, or tools rather than asking the user to look them up. Delegate only when the user or applicable instructions authorize delegation. Continue independent investigation while waiting for answers.
+ 
+-➡️ <your recommended answer>
++After each round, update the tree with the user's answers and identify the remaining material decisions. Carry forward existing authorization and preferences; do not repeat permission requests. Stop the interview when the requested decision is clear, no material questions remain, or the user asks to conclude. Summarize any deliberately deferred matters without inventing answers.
+ 
+----
+-
+-❓ **Q2** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
+-
+-➡️ <your recommended answer>
+-```
+-
+-Word each question so "yes" accepts your recommended answer.
+-
+-Each round the user answers reshapes the tree: settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
+-
+-Finding _facts_ is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it; don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report; ask the rest of the frontier now. The _decisions_ are the user's: put each to them and wait.
+-
+-The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.
++An interview is appropriate for substantive design work, not as an automatic prerequisite to saving research, installing tools, or applying a decision the user already made.
+--- a/.agents/skills/grilling/agents/openai.yaml
++++ b/.agents/skills/grilling/agents/openai.yaml
+@@ -1,3 +1,6 @@
+ interface:
+   display_name: "Grilling"
+-  short_description: "Stress-test thinking a round of questions at a time"
++  short_description: "Stress-test plans with focused questions"
++  default_prompt: "Use $grilling to examine the unresolved assumptions and tradeoffs in this plan."
++policy:
++  allow_implicit_invocation: true
+--- /dev/null
++++ b/.agents/skills/typescript-best-practices/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Lauren Tan
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+--- a/.agents/skills/typescript-best-practices/SKILL.md
++++ b/.agents/skills/typescript-best-practices/SKILL.md
+@@ -1,19 +1,17 @@
+ ---
+ name: typescript-best-practices
+-description: TypeScript best practices. Use when reading or editing any .ts or .tsx file.
+-paths: ["**/*.ts", "**/*.tsx"]
+-disable-model-invocation: true
++description: Design, implement, and review TypeScript types and boundaries in .ts and .tsx files. Use for TypeScript code changes or reviews involving domain types, external data, narrowing, and exhaustive handling.
+ ---
+ 
+ # TypeScript best practices
+ 
+-Apply the **type-system-discipline** principle skill first.
++Apply the principles in [references/principles.md](references/principles.md), then use the TypeScript rules below. The principles are bundled locally; no Cursor plugin or separate principle skills are required.
+ 
+ | Rule | Summary |
+ |------|---------|
+ | Discriminated unions | Model variants with a `kind` literal discriminant so impossible states can't be represented. No optional-field bags. |
+ | Branded types | Brand primitives with `& { readonly __brand: "X" }` so they can't be mixed up. Validate once at the boundary. |
+-| Constructive modeling | Build the shape so the illegal value can't be constructed. `[T, ...T[]]` for non-empty, `[T, T][]` for even length, `start` plus `duration` for a range. Not a runtime guard, not a wish for refinement types. |
++| Constructive modeling | Use structural types for structural invariants: `[T, ...T[]]` for non-empty and `[T, T][]` for even length. A range uses `start` plus a validated non-negative finite duration; enforce numeric constraints in its constructor or boundary schema, since `number` alone does not enforce them. |
+ | Simplest total type | Keep `T[]` while every operation on it stays total. Strengthen to `NonEmpty<T>` only where the loose type forces `!`, a cast, or a "should never happen" throw. |
+ | `unknown` over `any` | External data is `unknown`. |
+ | Schemas before guards | Before hand-writing a property-by-property type guard, use the repository's runtime schema library and infer the type from the schema, such as `z.infer`. |
+@@ -22,10 +20,10 @@
+ | Type guards | Must verify the claim. A lying guard is worse than `as` because the bug hides behind a name that says it's safe. Name them `isX` or `hasX`. |
+ | Exhaustiveness | Inline `const _exhaustive: never = x;` in default arms so the compiler errors when a new variant is added. |
+ | `satisfies` over `as` | Validates the value without widening literal types. |
+-| Boundary validation | Parse where data crosses in, into a named domain type. `Record<string, unknown>` (however spelled) stops at that parse. Trust types inside. See the **boundary-discipline** principle skill. |
++| Boundary validation | Parse where data crosses in, into a named domain type. `Record<string, unknown>` (however spelled) stops at that parse. Trust types inside. See [boundary principles](references/principles.md). |
+ | Schema-derived types | Reach for `Pick`/`Omit`/`Parameters`/`ReturnType`/`Awaited`/`typeof` before declaring a new interface. |
+ | Object args | Pass objects, not positional, so argument order is self-documenting. Skip on hot paths (per-frame render, tokenizers, parsers). |
+ | Real tests | Don't mock what you can run. Prefer the framework's real test primitives with leak/disposable checks, and verify UI in a running build. Mock only what you can't run locally. |
+ | Structured telemetry | Prefer structured logger diagnostics with enough context to debug from an id. No `console.log` in shipped code. |
+ 
+-Examples: `references/patterns.md`.
++Read [references/patterns.md](references/patterns.md) when an example is needed.
+--- /dev/null
++++ b/.agents/skills/typescript-best-practices/agents/openai.yaml
+@@ -0,0 +1,6 @@
++interface:
++  display_name: "TypeScript Best Practices"
++  short_description: "Model TypeScript types and boundaries safely"
++  default_prompt: "Use $typescript-best-practices to implement this TypeScript change with sound types and boundary validation."
++policy:
++  allow_implicit_invocation: true
+--- a/.agents/skills/typescript-best-practices/references/patterns.md
++++ b/.agents/skills/typescript-best-practices/references/patterns.md
+@@ -1,6 +1,6 @@
+ # TypeScript patterns
+ 
+-Code examples for each rule in `SKILL.md`. The underlying principles are language-agnostic. See the **type-system-discipline** and **boundary-discipline** principle skills.
++Code examples for each rule in `SKILL.md`. The underlying principles are language-agnostic. See [principles.md](principles.md) for the bundled type-system and boundary guidance.
+ 
+ ## Branded types
+ 
+@@ -77,11 +77,11 @@
+ // Don't: a comment holds the invariant
+ type TimeRange = { start: Date; end: Date }; // start <= end
+ 
+-// Do: a negative range can't be written; derive end when needed
++// Derive end from a duration that was validated as finite and non-negative.
+ type TimeRange = { start: Date; durationMs: number };
+ ```
+ 
+-Keep `durationMs` a plain number. Brand it (per Branded types) only if a raw number could be passed where a duration is expected, not by reflex. Pick the representation that makes the bad state unconstructable, then expose the reading you need on top (`pairs.flat()`, a `rangeEnd()` helper).
++A plain `number` still permits negative values, `NaN`, and infinity. Validate the duration at construction; use an opaque validated type when the invariant must travel across API boundaries. A start-plus-duration representation alone does not enforce a non-negative duration. Expose the intended reading through helpers such as `pairs.flat()` or `rangeEnd()`.
+ 
+ ## Simplest total type
+ 
+@@ -269,7 +269,7 @@
+ 
+ ## Boundary validation
+ 
+-Validate once where data crosses in. Trust types inside. See the **boundary-discipline** principle skill.
++Validate once where data crosses in. Trust types inside. See [principles.md](principles.md).
+ 
+ - **Wire formats** (proto, JSON-RPC): parse with `ignoreUnknownFields` so forward-compatible changes don't break old clients.
+ - **Persisted JSON:** versioned blob with a try/catch around the parse.
+--- /dev/null
++++ b/.agents/skills/typescript-best-practices/references/principles.md
+@@ -0,0 +1,10 @@
++# Type-system and boundary principles
++
++Adapted from Cursor pstack's `principle-type-system-discipline` and `principle-boundary-discipline`, under the accompanying MIT [LICENSE](../LICENSE). Sources are pinned in the installation manifest.
++
++- Model mutually exclusive states as variants and handle each variant exhaustively. Strengthen a type where an operation would otherwise be partial; do not add type machinery without a concrete invariant.
++- Distinguish primitives with different domain meanings where interchange would cause a mistake. Validate raw values when creating the domain value; a type assertion is not validation.
++- Parse external data at network, filesystem, database, configuration, and user-input boundaries. Reuse the repository's runtime schemas and derive types from their authoritative definition.
++- Keep framework and storage representations within adapters. Domain operations consume domain values. Pure transformations make prompt assembly and scoring easier to verify.
++- Trust established internal invariants, but revalidate when data crosses another trust boundary or mutable state can invalidate the claim. A previously parsed value does not authorize a later external action.
++- Treat numeric constraints separately from structural types: a `number` admits negative and non-finite values. Enforce the required invariant at construction or with a validated domain representation.

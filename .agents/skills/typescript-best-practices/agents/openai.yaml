@@ -1,0 +1,6 @@
+interface:
+  display_name: "TypeScript Best Practices"
+  short_description: "Model TypeScript types and boundaries safely"
+  default_prompt: "Use $typescript-best-practices to implement this TypeScript change with sound types and boundary validation."
+policy:
+  allow_implicit_invocation: true

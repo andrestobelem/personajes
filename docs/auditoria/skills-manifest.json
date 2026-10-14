@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "installedOn": "2026-10-14",
+  "scope": "repository",
+  "installRoot": ".agents/skills",
+  "installer": "skill-installer/scripts/install-skill-from-github.py",
+  "localPatch": "docs/auditoria/skills-local.patch",
+  "skills": {
+    "domain-modeling": {
+      "sourceRepository": "https://github.com/mattpocock/skills",
+      "sourceCommit": "d80fa0f4ebe0c5714af0adf8670336065233ecc6",
+      "sourcePath": "skills/engineering/domain-modeling",
+      "license": "MIT",
+      "originalFilesSha256": {
+        "ADR-FORMAT.md": "944c92aa790e8fbdc9199640b170979abb8a34ba8d0fe18c2a01a63bce140ca0",
+        "GLOSSARY-FORMAT.md": "21dcc40cdec8e151a829b98ab1517c1867bc444e3665134a98c6983411996801",
+        "SKILL.md": "7b925d7b1e341a2eeae33ad68a8a8c0ab889a38ddd22a7598e4c240e5a7556a3",
+        "agents/openai.yaml": "f6bf2aa996c6e6f53fdd0708e18a0d16a56aed8322cca59fedbe3c0d2c75f06b"
+      },
+      "installedFilesSha256": {
+        "ADR-FORMAT.md": "944c92aa790e8fbdc9199640b170979abb8a34ba8d0fe18c2a01a63bce140ca0",
+        "GLOSSARY-FORMAT.md": "21dcc40cdec8e151a829b98ab1517c1867bc444e3665134a98c6983411996801",
+        "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "SKILL.md": "7b925d7b1e341a2eeae33ad68a8a8c0ab889a38ddd22a7598e4c240e5a7556a3",
+        "agents/openai.yaml": "fa3b10d0a272ac1836a9a270596352e2b25ecd69ad36693ad1a93d5d716cb5f9"
+      },
+      "implicitInvocation": true
+    },
+    "grill-with-docs": {
+      "sourceRepository": "https://github.com/mattpocock/skills",
+      "sourceCommit": "49dd158d1076134a641b33efb035946536778336",
+      "sourcePath": "skills/engineering/grill-with-docs",
+      "license": "MIT",
+      "originalFilesSha256": {
+        "SKILL.md": "7de372c13488f1ee96cc11cd8907b56b6809cc93eef776eeddd37de6b6cbe3fe",
+        "agents/openai.yaml": "94cd0ab161fb468a836349f5ed482ba58ce8e709a05c57ce533d739dbd35cca9"
+      },
+      "installedFilesSha256": {
+        "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "SKILL.md": "587981fb57e77c9abccaa699e0a5ae7d29d28b273325d36bdb1127d53fa428be",
+        "agents/openai.yaml": "e617dc5f5d19a4ab948a254da7226ea9772549ee3fc010f335e5fd6ba529c842"
+      },
+      "implicitInvocation": true,
+      "localDependencies": [
+        "grilling",
+        "domain-modeling"
+      ]
+    },
+    "grilling": {
+      "sourceRepository": "https://github.com/mattpocock/skills",
+      "sourceCommit": "49dd158d1076134a641b33efb035946536778336",
+      "sourcePath": "skills/productivity/grilling",
+      "license": "MIT",
+      "originalFilesSha256": {
+        "SKILL.md": "befdff1e27a1dfe2a294d5871169ac1afe16d983911daa4f32627514a48c1e15",
+        "agents/openai.yaml": "1411d7df7d99b7e621a1ff8283c8133cc2464be63d064e52d8ce169c6800ee9b"
+      },
+      "installedFilesSha256": {
+        "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "SKILL.md": "209fc0b5116a20c7d7a4ac2e47a5e652c9496d3da51f522fda79cce042aeedcd",
+        "agents/openai.yaml": "cefe0227f8e508031ecdae31bab979ab3e86850baa2ccf38cbc8e155c2ef55bd"
+      },
+      "implicitInvocation": true
+    },
+    "typescript-best-practices": {
+      "sourceRepository": "https://github.com/cursor/plugins",
+      "sourceCommit": "ce649c03ac3b75b6ae80cbd15b7e2c536caedb5a",
+      "sourcePath": "pstack/skills/typescript-best-practices",
+      "license": "MIT",
+      "originalFilesSha256": {
+        "SKILL.md": "28f9e61710e205f6f3c5476f333483cff0e988f6a5b639e2faad536344b40c5e",
+        "references/patterns.md": "faa1362055374452efccac1b629677c61acfb0bcc6c4e3311836b5715638ee18"
+      },
+      "installedFilesSha256": {
+        "LICENSE": "bc957ca6bee02792566a1a028d105e02e247c6e77cf057061674273da77b200e",
+        "SKILL.md": "bf24871d30e7dacbaee922b37078288943ad7b47711c0b6d3b6b882a763627a5",
+        "agents/openai.yaml": "442adeb0a808906d399ea97e79a44a8247c9a8ec5a4643f600a7f56d3aa595f9",
+        "references/patterns.md": "ecfbdc19bd77f988fb7e3be064b96f8034ab1f61c9999c11e3202ae1f435feb9",
+        "references/principles.md": "adef01289f8056a3b53f9beb72e99caad41bd3c561e2e6c5f22ca3dde05b5b96"
+      },
+      "implicitInvocation": true,
+      "bundledPrinciples": [
+        {
+          "sourcePath": "pstack/skills/principle-type-system-discipline/SKILL.md",
+          "sourceCommit": "ce649c03ac3b75b6ae80cbd15b7e2c536caedb5a",
+          "sourceSha256": "2e492cef34bb25a20b9115df61f9ef3a9837e3fda144ffda8079e5f45a1b72e8"
+        },
+        {
+          "sourcePath": "pstack/skills/principle-boundary-discipline/SKILL.md",
+          "sourceCommit": "ce649c03ac3b75b6ae80cbd15b7e2c536caedb5a",
+          "sourceSha256": "62ac2862c2caa22dd14531f51c9c6bb445ceb198ca98a687e25b4d47c1f10a28"
+        }
+      ],
+      "discoveryEvidence": {
+        "source": "cursor/plugins",
+        "sourceType": "github",
+        "skillPath": "pstack/skills/typescript-best-practices/SKILL.md",
+        "computedHash": "f1c25fcfc1616686f387465824b1f4458782d962e64ef2e217b3ffb02bf3650a"
+      },
+      "note": "Installed pinned upstream version rather than copying the different local pstack snapshot; pstack was read only."
+    }
+  },
+  "validation": {
+    "date": "2026-10-14",
+    "quickValidate": "4/4 passed",
+    "implicitInvocation": "4/4 enabled",
+    "relativeLinks": "passed excluding fenced examples",
+    "sourceHashes": "all original files match pinned upstream commits",
+    "patchReplay": "applied to clean temporary upstream copies; all installed hashes match",
+    "reviewCorrection": "TypeScript entrypoint and patterns both require construction/boundary validation for non-negative finite duration."
+  }
+}

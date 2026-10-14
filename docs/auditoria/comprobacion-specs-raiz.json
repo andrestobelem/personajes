@@ -1,0 +1,42 @@
+{
+  "kind": "documentary-check",
+  "date": "2026-10-14",
+  "specHashScope": "Los hashes originales conservan el corte histórico de comprobación/cierre; los hashes actuales incluyen notas posteriores de implementación y no reescriben el baseline liberado.",
+  "specHashes": {
+    "docs/specs/01-dominio-y-catalogo.md": "c14ec021efa6c0e85fdf837b1ba91a372f422bc8837f948ed30e995a4a4209ce",
+    "docs/specs/02-persistencia-e-icm.md": "69676abbb3a8a52fa0abd8ba1a7441e39f4a57e1901c41de3bcf431526fe52cb",
+    "docs/specs/03-pi-y-coordinacion.md": "ba3802c36fd6300040d0227a8342738724aa1b1fbd6557b7e5bb5afb45d80f8f",
+    "docs/specs/04-api-y-autoridad.md": "25b12f448eed8a6bc65944070e8ce895bddbc004ca1948ad93f8f50459621a51",
+    "docs/specs/05-interfaz.md": "763dd61f427b965c8770e00219a89bd47969970ca5b5b76f07229ae5403a702d",
+    "docs/specs/06-voces-y-ritmo.md": "4f970e212f972eb1424b2ee4f80fab39c299b02f4fcbc2076962836f8205da06",
+    "docs/specs/07-verificacion.md": "50f007056a481014ab0cc9d3bdbeb7be09bbca80a71ddbb9acfa1fa8d8a1ff70",
+    "docs/specs/README.md": "bac8b6d0a62fe1642124918d1e82ed7dc46211045eae3834001034db6aee2bd9"
+  },
+  "currentSpecHashes": {
+    "docs/specs/01-dominio-y-catalogo.md": "bb914785405e47745f14865ba22e59a747e15c8c74b12236e2adc997b2341dec",
+    "docs/specs/02-persistencia-e-icm.md": "4b175dcf2ed14de43c1f1cbecf63f371231793a822447269670df3043d9a9ec1",
+    "docs/specs/03-pi-y-coordinacion.md": "a28c27c30eb9b65ed6234d424de8f470265df2fa24b5c798eb16363cc5ebcca4",
+    "docs/specs/04-api-y-autoridad.md": "609e3f315b4b7649177bb9521f5b16c118090546e84f44c98473bf827a15bb8a",
+    "docs/specs/05-interfaz.md": "acc5a6747205af2241390e9283d1a9ceb8871d039377e0e87c476cffb33a782a",
+    "docs/specs/06-voces-y-ritmo.md": "1c05faf8ce57d7d17ed95f63843eb75b2eff28885401b3de51424ed6bd31ea08",
+    "docs/specs/07-verificacion.md": "da5f3df49d1d002009517eb93cdfbf1f68d0c97887476779ed68cd47cf6477db",
+    "docs/specs/README.md": "11f75c29eb576f22ff1e30dd2596a7e564ac84d32def091600d8172ced7d9d5c"
+  },
+  "requirements": 77,
+  "matrixRows": 77,
+  "testMappingMismatches": [],
+  "nodeSQLiteProbe": {
+    "host": "v24.18.0",
+    "database": ":memory:",
+    "preparedInsertAndGet": "observed",
+    "backupExport": "function",
+    "limitation": "API probe only; not durable SQLite/ICM proof, not product test"
+  },
+  "productEvidence": {
+    "partialRequirementRowsUpdated": 35,
+    "acceptanceStatus": "pending for all 77 requirements",
+    "matrix": "docs/auditoria/trazabilidad-prd.md"
+  },
+  "currentPrdHash": "27c2a35521c2527cd248ea14b5dc99050d1fab4e3b546b65e65e05c60f45897c",
+  "currentChangeNote": "La decisión posterior Sol low / Opus medium cambia ACT-03 y contratos de perfil sin retirar ninguno de los 77 requisitos. Hashes baseline se conservan históricos."
+}

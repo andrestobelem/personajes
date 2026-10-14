@@ -1,0 +1,6 @@
+interface:
+  display_name: "Grilling"
+  short_description: "Stress-test plans with focused questions"
+  default_prompt: "Use $grilling to examine the unresolved assumptions and tradeoffs in this plan."
+policy:
+  allow_implicit_invocation: true

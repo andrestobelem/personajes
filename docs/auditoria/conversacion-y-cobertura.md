@@ -1,0 +1,122 @@
+# Auditoría de la conversación y cobertura de los pedidos
+
+Fecha: **14 de octubre de 2026**. Se revisaron los pedidos disponibles en esta conversación, las entregas de sus agentes y los archivos del repositorio. Los pedidos repetidos de crear `docs`, salir de planificación, guardar y revisar se agrupan sin perder sus requisitos. Este documento es una matriz de trazabilidad, no una transcripción literal del chat ni una afirmación de que la aplicación esté construida.
+
+## Cómo interpretar el estado
+
+- **Guardado:** definición, diseño, contrato o investigación escrito en su archivo. No implica implementación.
+- **Realizado:** acción material comprobada, como instalar una skill o guardar una imagen.
+- **Parcial:** hay un resultado útil, pero queda una parte del pedido de investigación sin completar.
+- **Preparado:** estructura o receta disponible para ejecución posterior.
+- **Por definir/implementar:** elección de puesta o producto futuro explícitamente pendiente.
+- **Sin instrucción interpretable:** texto que no permite deducir una tarea concreta; no se inventó su alcance.
+
+El [índice general](../README.md), la [constitución](../constitucion.md), el [registro de agentes](registro-de-agentes.md) y la [revisión integral](revision-integral.md) son las entradas de control.
+
+## 1. Concepto, identidad, agencia y dramaturgia
+
+| ID | Pedido o aclaración del usuario | Evidencia guardada | Estado y límite |
+|---|---|---|---|
+| C01 | Personajes de ficción agénticos; partes textuales y tecnológicas. | [Concepto](../diseno/concepto-y-decisiones.md), [constitución](../constitucion.md). | Guardado. Componentes tecnológicos todavía por implementar. |
+| C02 | La memoria es fundamental, además de identidad e historia. | [Ficha amplia](../diseno/actores-personajes-y-fichas.md), [memoria y tiempo](../diseno/mundo-memoria-y-tiempo.md). | Guardado: biografía, recuerdo, creencia e identidad diferenciados. |
+| C03 | Indicaciones del personaje y metaindicaciones del director. | [Moderación](../diseno/moderacion-y-limites-de-confianza.md), [autoridades ICM](../../obra/_config/autoridades.md). | Guardado. Canales y autoridad no dependen de lo que afirme un texto recibido. |
+| C04 | Deseos como goals que dan agencia; goal principal y posible general. | [Dramaturgia](../diseno/dramaturgia-y-direccion.md), [glosario](../../GLOSSARY.md). | Guardado. Propósito de la obra y objetivo compartido no se confunden; su contenido concreto sigue abierto. |
+| C05 | Acciones como tools, distintas de límites y guardrails. | [Objetos, mensajes y tools](../diseno/objetos-mensajes-y-tools.md), [catálogo de capacidades](../../obra/references/herramientas.md). | Guardado. Intento no garantiza resultado ni aceptación de otro. |
+| C06 | Metáfora teatral; personajes interpretados por actores. | [Actores y fichas](../diseno/actores-personajes-y-fichas.md), glosario. | Guardado. Actor agéntico, personaje e intérprete televisivo son distintos. |
+| C07 | Identidad e historia de vida exhaustivas. | [Modelo de expediente](../diseno/actores-personajes-y-fichas.md), [reparto](../personajes/get-smart/README.md). | Guardado con evidencia disponible y vacíos explícitos; no se inventó canon para completar años desconocidos. |
+| C08 | Cada personaje tiene perspectiva y aprende por interacción. | [Memoria y tiempo](../diseno/mundo-memoria-y-tiempo.md), [percepción ICM](../../obra/stages/01-percepcion/CONTEXT.md). | Guardado. El dossier global y secretos ajenos no son contexto automático del actor. |
+| C09 | Formas de hablar diferentes por personaje. | Expedientes del [reparto](../personajes/get-smart/README.md), [voz y ritmo](../../obra/_config/voz-y-ritmo.md). | Guardado. Rasgos vocales propuestos diferenciados de medición audiovisual. |
+| C10 | La riqueza de los personajes condiciona el argumento. | Constitución, [dramaturgia](../diseno/dramaturgia-y-direccion.md). | Guardado como elecciones con consecuencias; no sólo extensión de biografías. |
+| C11 | Obra con estructura clásica; planteamiento, desarrollo, clímax, desenlace. | Dramaturgia y [Aristóteles](../investigaciones/aristoteles-creacion-de-personajes.md). | Guardado. No se convierte principio/medio/fin en obligación de tres actos. |
+| C12 | Aporte sobre prólogo, párodo, episodios, estásimos y éxodo de tragedia. | [Sófocles: estructura](../investigaciones/sofocles-estructura-dramatica.md), dramaturgia. | Guardado con fuentes y distinción entre conflicto y división formal. |
+| C13 | Aporte sobre comedia antigua, agón, parábasis y consecuencias después del triunfo. | [Aristófanes: estructura](../investigaciones/aristofanes-estructura-y-mundo.md). | Guardado como esquema variable, no seis actos obligatorios. |
+| C14 | Línea de fondo y director que registra cuándo se cumplen etapas. | [Dirección ICM](../../obra/direccion/CONTEXT.md), dramaturgia. | Preparado. Etapas con evidencia y lectura revisable; no forzar decisiones del reparto. |
+| C15 | Uno o más personajes pueden conformar una escena. | [Escenas](../../obra/references/escenas.md), constitución. | Guardado: acción solitaria, monólogo o silencio también son escenas. |
+| C16 | Voz en off como narrador omnisciente. | [Narrador](../diseno/narrador-y-voz-en-off.md), [contrato ICM](../../obra/narrador/CONTEXT.md). | Preparado y opcional; dirigido al público, sin crear hechos ni revelar razonamiento interno. |
+
+## 2. Investigaciones y conservación
+
+| ID | Pedido | Resultado | Estado y límite |
+|---|---|---|---|
+| I01 | Crear `docs`, guardar todo y un documento por investigación. | [Índice](../README.md), archivos independientes y esta matriz. | Realizado. La escritura se completó en Default; no queda como promesa de Plan Mode. |
+| I02 | Workflow agéntico para investigar actores del Método. | [Actuación del Método](../investigaciones/actuacion-del-metodo.md). | Guardado y revisado; Stanislavski, Strasberg, Adler y Meisner diferenciados. |
+| I03 | Agentes para teorías clásicas de creación de personajes. | [Aristóteles](../investigaciones/aristoteles-creacion-de-personajes.md), [Egri](../investigaciones/lajos-egri.md), [Forster y James](../investigaciones/forster-y-henry-james.md), [Propp y Greimas](../investigaciones/propp-y-greimas.md). | Guardado por tema. Cada informe declara fuentes, lecturas parciales y adaptación propia. |
+| I04 | Investigar a Balzac para diseño de mundos. | [Balzac](../investigaciones/balzac-diseno-de-mundos.md). | Guardado: vida material/social, recurrencia, instituciones e información desigual. |
+| I05 | Investigación profunda con subagentes de Sófocles y Aristófanes. | Dos documentos de [Sófocles](../investigaciones/sofocles-personajes.md) y dos de [Aristófanes](../investigaciones/aristofanes-personajes-y-voces.md), enlazados en índice. | Guardado. No se afirma lectura filológica integral de toda fuente ni experiencia de representación. |
+| I06 | Conservar texto pegado sobre Aristófanes. | [Archivo original copiado](../fuentes/aristofanes-personajes-texto-aportado.txt). | Realizado; cotejado byte a byte con el adjunto. |
+| I07 | Investigar exhaustivamente personajes de Superagente 86 con otros agentes. | [27 dossiers](../personajes/get-smart/README.md), [familia](../personajes/get-smart/familia-smart.md), [arcos multipartes](../personajes/get-smart/personajes-de-arcos-multipartes.md). | Entrega documental del reparto seleccionado. No es un censo audiovisual de 138 episodios; lagunas y contradicciones siguen explícitas. |
+| I08 | Conseguir avatar para cada personaje. | [Galería](../assets/avatars/get-smart/index.html), [manifest](../assets/avatars/get-smart/manifest.json), [cobertura](../personajes/get-smart/avatares.md). | Realizado: 27/27 referencias individuales y una imagen familiar adicional. No son sprites animados; créditos y derechos documentados. |
+| I09 | Investigar entornos gráficos abiertos donde agentes interactúen. | [Comparación](../investigaciones/entornos-graficos-open-source.md). | Guardado. AI Town candidata condicional; también Smallville y AgentSociety. No se eligió ni ejecutó un motor. |
+| I10 | Buscar ICM en internet, guardar investigación y paper. | [Estudio ICM](../investigaciones/icm-contexto-interpretable.md), [PDF v2](../fuentes/icm/van-clief-mcdermott-2026-icm-arxiv-2603.16021v2.pdf), [procedencia](../fuentes/icm/README.md). | Realizado. PDF y hash comprobados; evidencia del paper y adaptación del proyecto distinguidas. |
+| I11 | Investigación profunda de Pi SDK, system prompt y herramientas. | [Pi Coding Agent](../investigaciones/pi-coding-agent-runtime.md). | Guardado y cotejado documentalmente con código/versiones; no login ni sesión ejecutados. |
+| I12 | Investigación profunda de ICM Memory con SQLite. | [ICM Memory](../investigaciones/icm-memory-sqlite.md). | Guardado. Proyecto distinto del ICM de carpetas; backend/base fijados por host, ámbitos no equivalen a permisos. |
+| I13 | Investigar en YouTube longitud de respuestas y ritmo de episodio. | [Investigación](../investigaciones/get-smart-ritmo-youtube.md), [inventario](../fuentes/youtube-get-smart/inventario.csv). | **Parcial:** cuatro cargas localizadas, metadatos y tres fotogramas; sin audio interpretable o transcripciones. Falta medir réplicas, pausas y ritmo por escucha. |
+| I14 | Añadir a cada personaje cómo crear una voz ElevenLabs. | [Guía](../investigaciones/elevenlabs-diseno-de-voces.md) y secciones individuales de los dossiers. | Preparado: 26 recetas de voz humana; Fang con efectos caninos; familia y narrador aparte. No se generaron previews, voces ni audio. |
+
+## 3. Escenario, interfaz, interacción y moderación
+
+| ID | Pedido | Evidencia | Estado y límite |
+|---|---|---|---|
+| E01 | Implementación del mundo donde moverse e interactuar. | [Diseño del Escenario](../diseno/mundo-memoria-y-tiempo.md), [world.ts](../../src/domain/world.ts), [pruebas del mundo](../../tests/world.test.ts), [contrato ICM](../../obra/escenario/CONTEXT.md). | **Parcial:** hay resolución pura de movimiento, objetos, dispositivos, comunicaciones, percepción y duración con pruebas; la puesta, el ciclo de jobs y la integración del host aún no la ejecutan como representación. |
+| E02 | Ver interacciones, conversaciones y evolución. | [Interfaz](../diseno/interfaz-funcional-y-visual.md), [observación ICM](../../obra/observacion/CONTEXT.md), [App de biblioteca](../../src/web/App.tsx). | **Parcial:** biblioteca visual navegable; faltan escenario gráfico, conversación, historia/replay, evolución e inspector de una corrida. |
+| E03 | Hablar con los personajes e influir en ellos, entrando con identidad ficticia propia. | [Participación humana](../../obra/participacion/CONTEXT.md), [schemas de intervención e identidad](../../src/domain/interaction.ts), [preflight](../../src/application/production-preflight.ts), [journal](../../src/adapters/journal.ts), [brecha de integración](participacion-humana.md), [contrato de comunicaciones](../../src/domain/world.ts), moderación. | **Parcial:** perfil validado y durable, endpoint protegido, commit idempotente, testimonios privados y entrega recuperable están conectados al host. El ledger v11 congela inbox y corte World del primer claim, conserva ambos tras recovery y exige lease vigente para propuestas; el commit requiere receipt Pi exacto. El worker actoral ya conecta preparación, Pi, revisión, aceptación y commit en pruebas locales; todavía faltan coordinador/Continuista productivos, puesta desde GUI y conversación visible. Persuasión nunca garantiza obediencia. |
+| E04 | Ritmo circadiano. | [Tiempo](../diseno/mundo-memoria-y-tiempo.md), [rutinas y reloj del Escenario](../../src/domain/world.ts), estado del Escenario. | **Parcial:** el reloj ficticio avanza por duraciones de acciones y la disponibilidad evalúa rutina; faltan pulso durable, descanso/ciclo diario y control de pausa/reanudación en la representación. |
+| E05 | Un guardián/director/continuista evita salir del personaje por inyección. | [Límites de confianza](../diseno/moderacion-y-limites-de-confianza.md), [continuista](../../obra/continuista/CONTEXT.md). | Preparado. Control de autoridad y coherencia separados; requiere enforcement de runtime, sin garantía absoluta por prompt. |
+| E06 | El continuista juzga si puede responder; pensar ejemplos. | Moderación, constitución, [verificación ICM](../../obra/references/verificacion.md). | Guardado. Puede saber y no querer revelar; mentir o errar en ficción no equivale a error técnico. |
+| E07 | Preguntar a Max por Fibonacci y comparar con el robot. | Ejemplos de [moderación](../diseno/moderacion-y-limites-de-confianza.md). | Guardado como adaptación original: no citas canónicas ni saber ilimitado de Hymie; Fibonacci no es anacrónico por sí solo. |
+| E08 | Fecha y lugar de la acción importantes. | Constitución, [continuidad](../../obra/_config/continuidad.md), [relaciones](../personajes/get-smart/relaciones-y-continuidad.md). | Guardado. Fecha/lugar concretos de primera puesta siguen sin elegir. |
+| E09 | Hablan doblado al español. | [Voz y ritmo](../../obra/_config/voz-y-ritmo.md), expedientes. | Requisito fijado. Variedad latinoamericana es propuesta, no decisión expresa; audio pendiente. |
+| E10 | El mundo puede llamarse Escenario; no es escenografía. | [Glosario](../../GLOSSARY.md), [distinción](../../obra/references/escenario-y-escenografia.md), carpeta `obra/escenario/`. | Realizado en términos y rutas operativas. Títulos históricos de investigaciones pueden decir mundo. |
+| E11 | La interfaz gráfica será completa. | [Contrato de interfaz](../../obra/interfaz/references/contrato.md), [diseño integrado](../diseno/interfaz-funcional-y-visual.md), [App](../../src/web/App.tsx). | **Parcial:** la biblioteca gráfica funciona; el producto todavía no permite configurar, iniciar, observar, conversar, dirigir, controlar ni revisar una representación completa. |
+| E12 | Principalmente funcional y visual. | Diseño de interfaz, constitución y puntos de entrada de obra. | **Parcial:** búsqueda y lectura son operaciones visuales reales; la disposición de Escenario y los controles requeridos aún no están construidos. No se atribuye al usuario un estilo visual no elegido. |
+
+## 4. Arquitectura, memoria y operación
+
+| ID | Pedido | Evidencia | Estado y límite |
+|---|---|---|---|
+| T01 | Objetos y mensajes, que también son objetos; composición sin herencia. | [Modelo de objetos](../diseno/objetos-mensajes-y-tools.md), constitución. | Guardado para dominio propio; no prohíbe mecanismos internos de dependencias. |
+| T02 | Crear carpeta `obra` usando ICM para agentes en Markdown. | [Obra](../../obra/README.md), ruteo, ocho etapas, contratos y registros. | Realizado como workspace documental: 27 contextos individuales, inicialmente inactivos. |
+| T03 | Pi permite SDK, system prompt y tools elegidas. | [Investigación Pi](../investigaciones/pi-coding-agent-runtime.md), [organización técnica](../diseno/organizacion-de-pi-y-escenario.md). | Guardado. Herramientas de coding por defecto no son capacidades automáticas de personajes. |
+| T04 | Integrar la memoria investigada con Pi. | Investigaciones Pi/ICM Memory y arquitectura, [proyección ICM](../../src/application/project-memory.ts), [journal](../../src/adapters/journal.ts), [progreso de integración](integracion-memoria.md), [ledger Pi](implementacion-progreso.md#quinto-corte-cursor-pi-durable-y-gate-global). | **Parcial:** journal/outbox, adapter CLI ICM, ledger Pi con cursor exacto y tool aislada `recall_memory` pasan pruebas locales con ICM real. Falta unirlos al loop del host y provisionar/abrir una memoria privada por actor. No se afirma que ICM implemente hooks automáticos de Pi. |
+| T05 | La decisión inicial pedía Luna 6 xhigh para cada agente. | [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) y [configuración común](../../obra/_config/agentes.md). | **Sustituido para nuevas representaciones:** se elige Sol 6.1 low (predeterminado) u Opus 5.5 medium por representación. Luna/xhigh queda sólo para leer historia. |
+| T06 | Pi debía conectar a OpenAI Codex por login. | Investigación Pi, [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) y configuración común. | Codex OAuth es la ruta del perfil Sol predeterminado; Opus usa acceso propio de Anthropic. No se realizó login ni se cambió de proveedor silenciosamente. |
+| T07 | Cada personaje es una instancia distinta de Pi. | [Instancias](../../obra/_config/instancias-pi.md), [adapter Pi](../../src/adapters/pi.ts), [pruebas Pi](../../tests/pi.test.ts), arquitectura y constitución. | **Parcial:** hay factory de sesiones independientes y pruebas controladas del SDK; el host aún no administra la vida de una instancia por personaje ni usa OAuth/inferencia real en una obra. |
+| T08 | Puede haber coordinador que marque el pulso. | [Coordinador](../../obra/coordinador/CONTEXT.md), [pulso](../../obra/references/pulso.md), S03 §“Pulso y lifecycle”, [supervisor de entrega](../../src/application/world-delivery-supervisor.ts), [ledger de jobs](../../src/adapters/journal.ts). | **Parcial:** hay cuotas durables, jobs actorales y un coordinador local v14 que abre/cierra pulsos por causa y convoca el worker mediante un puerto. Faltan integración con launcher, roles administrativos y disparadores autónomos por rutinas/metas. |
+| T09 | Pensar cómo acomodar Pi y mundo en carpetas ICM. | [Organización de Pi y Escenario](../diseno/organizacion-de-pi-y-escenario.md), estructura `obra`. | Guardado. Estado documental actual separado de propuesta futura de journal SQLite y frontend. |
+| T10 | Confirmar que memoria ICM SQLite quede anotada. | Investigación de memoria, concepto, constitución, arquitectura e índices. | Realizado. También límites de backend, reloj, scopes, recuperación y backups. |
+
+## 5. Skills, agentes, revisión y continuidad del trabajo
+
+| ID | Pedido | Evidencia | Estado y límite |
+|---|---|---|---|
+| A01 | Instalar domain-modeling de Matt Pocock en el repo. | [Skill local](../../.agents/skills/domain-modeling/SKILL.md), [fuentes](skills-instaladas.md). | Realizado con fuente, commit y licencia. |
+| A02 | Instalar grill-with-docs. | [Skill local](../../.agents/skills/grill-with-docs/SKILL.md) y dependencia [grilling](../../.agents/skills/grilling/SKILL.md). | Realizado. Dependencias legibles por archivo, sin necesitar comando externo no disponible. |
+| A03 | Instalar TypeScript de Cursor que forma parte de pstack. | [typescript-best-practices](../../.agents/skills/typescript-best-practices/SKILL.md). | Realizado desde fuente Cursor; no se modificó el otro proyecto pstack. |
+| A04 | Que todas puedan ser usadas por el modelo. | [Manifiesto](skills-manifest.json), metadatos y [parche](skills-local.patch). | Realizado para cuatro skills: invocación implícita habilitada y dependencias adaptadas. |
+| A05 | Lanzar agente para revisar todo y corregir inconsistencias. | [Revisión integral](revision-integral.md). | Realizado sobre fuentes, contratos, cobertura y archivos. Incluye rectificación de un falso positivo sobre API de Pi. |
+| A06 | Agente de constitución con domain-modeling y grill; otro responde desde el concepto. | [Constitución](../constitucion.md), [diálogo](dialogo-constitucional.md), [respuestas](respuestas-del-concepto.md). | Realizado: cinco rondas y quince preguntas efectivas. Adendas de usuario no se presentan como rondas nuevas. |
+| A07 | Agentes Luna en paralelo revisando y corrigiendo documentos. | Revisiones [literaria](revision-luna-investigaciones.md), [personajes](revision-luna-personajes.md) y [técnica](revision-luna-tecnica.md). | Realizado con tres agentes `gpt-6-luna`, esfuerzo `xhigh`. Otros investigadores no se atribuyen a ese modelo sin registro. |
+| A08 | Revisar toda conversación y todos los agentes, completar omisiones. | Esta matriz, [registro](registro-de-agentes.md), índices y revisión integral. | Realizado como consolidación documental. I13 conserva la parte de investigación todavía pendiente. |
+| A09 | Revisar punto por punto lo que falta definir y agregar olvidos. | [Decisiones abiertas](../diseno/decisiones-abiertas.md). | Guardado: 30 puntos, 12 verificaciones y decisiones previas a escena. No vuelve a preguntar por requisitos ya fijados. |
+| A10 | Repetir el procedimiento de grill-with-docs cuando haga falta. | [Procedimiento](../diseno/procedimiento-grill-with-docs.md), [AGENTS](../../AGENTS.md). | Guardado: entrevistador y custodio, evidencia, preguntas reales y decisiones no atribuidas al humano. |
+| A11 | «Ya saqué modo plan», «salir de modo plan», «ahora creá», «ni siquiera creaste docs». | Archivos existentes y estado de esta entrega. | La conversación está en Default y se escribieron archivos. Se conserva la corrección de rumbo, sin afirmar que existían antes de escribirlos. |
+| A12 | `/lareal` y `/meta`. | Registro aquí de los textos recibidos. | Sin instrucción interpretable suficiente; no se inventó una skill, comando o requisito asociado. No bloquean los demás pedidos. |
+| A13 | «Me voy a dormir». | Cierre autónomo del trabajo ya autorizado. | No solicita cancelar ni programar una automatización; se continúa la consolidación sin pedir decisiones nuevas. |
+
+## Actualización del encargo activo
+
+Después de este cierre documental, el usuario definió un objetivo de ocho pasos: leer todo, corregir, redactar/revisar PRD, redactar/revisar specs e implementar/revisar hasta terminar. La aplicación completa forma parte del alcance actual. El [PRD](../PRD.md) y [registro de progreso](objetivo-y-progreso.md) documentan esa continuación; los pendientes siguientes conservan la fecha de corte previa y no excluyen implementación.
+
+## 6. Pendientes actuales de implementación e investigación
+
+1. **Ritmo audiovisual:** completar escucha y anotación de intervenciones, pausas, solapamientos y acciones en material interpretable. La búsqueda en YouTube está hecha; la calibración pedida no se da por concluida.
+2. **Puesta inicial:** elegir fecha, lugar, continuidad, reparto activo, situación, objetivos y reglas mínimas de reloj/participación. La [matriz](../diseno/decisiones-abiertas.md) separa ocho decisiones previas a escena de otras posteriores.
+3. **Integración de producto:** asignar/cerrar intenciones mediante jobs y pulsos durables; conectar sesiones Pi, contexto/memoria privados, Continuista y publicación por Escenario; construir GUI completa y verificar el recorrido. La entrega mecánica y el endpoint humano ya existen, pero no provocan una respuesta de personaje.
+4. **Realización sonora y visual:** seleccionar/probar voces y generar audio cuando se pase a ejecución; definir arte y animaciones. Las recetas y los retratos de referencia ya están guardados.
+5. **Profundización del canon:** las lagunas y discrepancias de cada expediente necesitan contraste audiovisual específico si se vuelven relevantes para una puesta. No rellenarlas con invención sin marcar adaptación.
+
+La revisión documental comprueba coherencia y trazabilidad; no prueba rendimiento, costes, fidelidad de actuación, aislamiento efectivo ni resistencia completa a inyección en un sistema que aún no se ejecutó.
+
+## Cambio posterior de perfiles
+
+La persona usuaria pidió probar GPT-6.1 Sol con esfuerzo bajo y agregar Claude Opus 5.5 con esfuerzo medio como opción. [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) reemplaza el requisito inicial Luna/xhigh; PRD ACT-03 y las specs de Pi/API/UI registran esa selección por representación, sin fallback y con autenticación por proveedor. Las auditorías anteriores son evidencia de su corte, no prueba del perfil nuevo. La verificación de implementación se registra separadamente al cerrar el corte.

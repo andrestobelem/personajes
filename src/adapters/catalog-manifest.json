@@ -1,0 +1,508 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "get-smart-original-1965-1970-2026-10-14.1",
+  "characters": [
+    {
+      "characterId": "maxwell-smart",
+      "displayName": "Maxwell Smart",
+      "path": "docs/personajes/get-smart/maxwell-smart.md",
+      "avatarSlug": "maxwell-smart",
+      "sha256": "fa0556c3bf5e52a1fa771586fc87fff50d6c43d3ddd320fc043f49454f0d169d"
+    },
+    {
+      "characterId": "agente-99",
+      "displayName": "Agente 99",
+      "path": "docs/personajes/get-smart/agente-99.md",
+      "avatarSlug": "agente-99",
+      "sha256": "db42ef27bfaa7959bcc89d9a7688f44e8c709cf1489a7854d1e6693d121ead31"
+    },
+    {
+      "characterId": "jefe",
+      "displayName": "Jefe",
+      "path": "docs/personajes/get-smart/jefe.md",
+      "avatarSlug": "jefe",
+      "sha256": "e47f61cb024808a67976e77eefacf0946c25c4936238a0dc90d4ca3c10a8021a"
+    },
+    {
+      "characterId": "larrabee",
+      "displayName": "Larrabee",
+      "path": "docs/personajes/get-smart/larrabee.md",
+      "avatarSlug": "larrabee",
+      "sha256": "845c1e96bec9b464d4b1eb536d17738e9e62c50717b88527d03b7f8c78c0c921"
+    },
+    {
+      "characterId": "hymie",
+      "displayName": "Hymie",
+      "path": "docs/personajes/get-smart/hymie.md",
+      "avatarSlug": "hymie",
+      "sha256": "f16ac3b2754d2c5b364e349ab19f78c135ef34f0fecdd8cf501e44ec225ab8a2"
+    },
+    {
+      "characterId": "agente-13",
+      "displayName": "Agente 13",
+      "path": "docs/personajes/get-smart/agente-13.md",
+      "avatarSlug": "agente-13",
+      "sha256": "5ada44ca11861c67c1ba87758c49e981b8606d2c87ac4803fad231338ca7fd55"
+    },
+    {
+      "characterId": "agente-44",
+      "displayName": "Agente 44",
+      "path": "docs/personajes/get-smart/agente-44.md",
+      "avatarSlug": "agente-44",
+      "sha256": "ba588819002c9bad9dea50955e8eb2816095cf462a7175b5180451e69efc66b4"
+    },
+    {
+      "characterId": "siegfried",
+      "displayName": "Siegfried",
+      "path": "docs/personajes/get-smart/siegfried.md",
+      "avatarSlug": "siegfried",
+      "sha256": "575fd86ae839aeb1fbc31e5623f6610613d9ca4a4955b4e53ba0cb7c4b1dadb9"
+    },
+    {
+      "characterId": "shtarker",
+      "displayName": "Shtarker",
+      "path": "docs/personajes/get-smart/shtarker.md",
+      "avatarSlug": "shtarker",
+      "sha256": "d3b73732a7fd0b328814b2888435690d9f478dc57b590f52d5060b823d5e0ad7"
+    },
+    {
+      "characterId": "claw",
+      "displayName": "The Claw",
+      "path": "docs/personajes/get-smart/claw.md",
+      "avatarSlug": "claw",
+      "sha256": "70821fca32e4c134a3195363fc154333e529c26d8a98e191afb6b18e3c37b67c"
+    },
+    {
+      "characterId": "bobo",
+      "displayName": "Bobo",
+      "path": "docs/personajes/get-smart/bobo.md",
+      "avatarSlug": "bobo",
+      "sha256": "cb26917d18d5afb828760bd3707c2ecd27e49697c52e9338c159e16b7da2acf2"
+    },
+    {
+      "characterId": "doctor-ratton",
+      "displayName": "Doctor Ratton",
+      "path": "docs/personajes/get-smart/doctor-ratton.md",
+      "avatarSlug": "doctor-ratton",
+      "sha256": "63558e6fb1f81650234e2d410ec0385e75c70347c593c7d6f08136a188e3ef32"
+    },
+    {
+      "characterId": "fang",
+      "displayName": "Fang",
+      "path": "docs/personajes/get-smart/fang.md",
+      "avatarSlug": "fang",
+      "sha256": "31a85e5984a6e930c2b9e2b47ec0137b6a3993e0e321ffbaff4502a2738c1c25"
+    },
+    {
+      "characterId": "carlson",
+      "displayName": "Carlson",
+      "path": "docs/personajes/get-smart/carlson.md",
+      "avatarSlug": "carlson",
+      "sha256": "250f164b56afaaba8ceaa4fbb1069e18d5655cc0f471446a523ca818c89e0b12"
+    },
+    {
+      "characterId": "carleton",
+      "displayName": "Carleton",
+      "path": "docs/personajes/get-smart/carleton.md",
+      "avatarSlug": "carleton",
+      "sha256": "eb23c59ed49c276a62663e7c57a43751eb4f450ac4b76bf3bd94876b09dadc34"
+    },
+    {
+      "characterId": "almirante-hargrade",
+      "displayName": "Almirante Hargrade",
+      "path": "docs/personajes/get-smart/almirante-hargrade.md",
+      "avatarSlug": "almirante-hargrade",
+      "sha256": "9d92a6417febd77806b2d7f42dec6a0c4b66b537a891359c14eb2e56b1c5cf50"
+    },
+    {
+      "characterId": "madre-de-99",
+      "displayName": "Madre de 99",
+      "path": "docs/personajes/get-smart/madre-de-99.md",
+      "avatarSlug": "madre-de-99",
+      "sha256": "2c765e2efaa0c1b86928c8383335481b30b2fd5fac34bf416fb9fd523744ecb4"
+    },
+    {
+      "characterId": "doctora-steele",
+      "displayName": "Doctora Steele",
+      "path": "docs/personajes/get-smart/doctora-steele.md",
+      "avatarSlug": "doctora-steele",
+      "sha256": "487533ca39b8a9c1604a619639318da66e2953162416dc96457fba53976d2bd1"
+    },
+    {
+      "characterId": "profesor-parker",
+      "displayName": "Profesor Parker",
+      "path": "docs/personajes/get-smart/profesor-parker.md",
+      "avatarSlug": "profesor-parker",
+      "sha256": "c4c1440d20374c0480d1fcca61436fa3eb4324166b9f39de0fb6103d6ab8c746"
+    },
+    {
+      "characterId": "profesor-windish",
+      "displayName": "Profesor Windish",
+      "path": "docs/personajes/get-smart/profesor-windish.md",
+      "avatarSlug": "profesor-windish",
+      "sha256": "501b7ad2afb134dd0686829a06d1c2cfcc49cf6e34b183b8ecc89d639fbb7e01"
+    },
+    {
+      "characterId": "hodgkins",
+      "displayName": "Hodgkins",
+      "path": "docs/personajes/get-smart/hodgkins.md",
+      "avatarSlug": "hodgkins",
+      "sha256": "9b32ed759d02ab71a1e0a871657d034c337eb464b9b9a5bd8fb1b21c7666c04f"
+    },
+    {
+      "characterId": "hobson",
+      "displayName": "Hobson",
+      "path": "docs/personajes/get-smart/hobson.md",
+      "avatarSlug": "hobson",
+      "sha256": "c9c639df0fa4160a39dac38113e501a7f6a47c539cf3ce9ed182db6d58d80628"
+    },
+    {
+      "characterId": "doctora-simon",
+      "displayName": "Doctora Simon",
+      "path": "docs/personajes/get-smart/doctora-simon.md",
+      "avatarSlug": "doctora-simon",
+      "sha256": "df33513c2d343d5b0071a5592376a71fcae61a72cd783063050f3f8ea3112016"
+    },
+    {
+      "characterId": "harry-hoo",
+      "displayName": "Harry Hoo",
+      "path": "docs/personajes/get-smart/harry-hoo.md",
+      "avatarSlug": "harry-hoo",
+      "sha256": "7a34f55cd7650de4a444afdb8017ff13bd0db26d82794804715c3e722ada1c17"
+    },
+    {
+      "characterId": "charlie-watkins",
+      "displayName": "Charlie Watkins",
+      "path": "docs/personajes/get-smart/charlie-watkins.md",
+      "avatarSlug": "charlie-watkins",
+      "sha256": "0b85121564692e89bd5f27c49e49ac124572790bc65946e5473a73933babe845"
+    },
+    {
+      "characterId": "coronel-von-klaus",
+      "displayName": "Coronel von Klaus",
+      "path": "docs/personajes/get-smart/coronel-von-klaus.md",
+      "avatarSlug": "coronel-von-klaus",
+      "sha256": "e38a6f62373d766361ea0d970ca220ad95da697896b61321a6a8b6a3698c0b40"
+    },
+    {
+      "characterId": "rey-charles-ix",
+      "displayName": "Rey Charles IX",
+      "path": "docs/personajes/get-smart/rey-charles-ix.md",
+      "avatarSlug": "rey-charles-ix",
+      "sha256": "b8e5bbc44ddc3b7798d14dea606e850ced113689c718f265df9fc14734b04746"
+    }
+  ],
+  "documents": [
+    {
+      "id": "get-smart-index",
+      "title": "Índice del corpus Get Smart",
+      "kind": "index",
+      "path": "docs/personajes/get-smart/README.md",
+      "sha256": "3faa5fc8ac9417b31a1f009395d7d67d28bf54ce1caa10e91e0b785504673d60"
+    },
+    {
+      "id": "familia-smart",
+      "title": "Familia Smart y mellizos",
+      "kind": "family",
+      "path": "docs/personajes/get-smart/familia-smart.md",
+      "sha256": "8c2f33d92c9e52a623b7e2bb2a88106885cf2af340fb7d1ede52e2ca970def23"
+    },
+    {
+      "id": "arcos-multipartes",
+      "title": "Personajes de arcos multipartes",
+      "kind": "appendix",
+      "path": "docs/personajes/get-smart/personajes-de-arcos-multipartes.md",
+      "sha256": "ee891eb5d251999f29008935027be510dfd900168807460f53443fd5bbc72f1c"
+    },
+    {
+      "id": "relaciones-continuidad",
+      "title": "Relaciones y continuidad",
+      "kind": "cross-character",
+      "path": "docs/personajes/get-smart/relaciones-y-continuidad.md",
+      "sha256": "32876b345d0260b70808be696c9e185b0812eafe8af97617963ac996af840cc7"
+    },
+    {
+      "id": "avatares-procedencia",
+      "title": "Avatares y procedencia",
+      "kind": "avatar-provenance",
+      "path": "docs/personajes/get-smart/avatares.md",
+      "sha256": "3abc072f5da0dbdadddd98e3a1e9a771b5a58e6d31166179ef153525290a6ce5"
+    },
+    {
+      "id": "research-actuacion-metodo",
+      "title": "Actuación del método y actores agénticos",
+      "kind": "research",
+      "path": "docs/investigaciones/actuacion-del-metodo.md",
+      "sha256": "101c637724258dd28827df9a3f1c3fc43bf10bc12aa96f999a9c8e2241e620c7"
+    },
+    {
+      "id": "research-aristofanes-estructura",
+      "title": "Aristófanes: estructura y mundo",
+      "kind": "research",
+      "path": "docs/investigaciones/aristofanes-estructura-y-mundo.md",
+      "sha256": "8e35b0719ec218bc066349015dab6a905a7943bfa79f073d9cba88411cfac1cc"
+    },
+    {
+      "id": "research-aristofanes-personajes",
+      "title": "Aristófanes: personajes y voces",
+      "kind": "research",
+      "path": "docs/investigaciones/aristofanes-personajes-y-voces.md",
+      "sha256": "74de57094dadfc96e46fdabb0a0a5c382275e25febeb248300f24c2c27f87e4e"
+    },
+    {
+      "id": "research-aristoteles",
+      "title": "Aristóteles y creación de personajes",
+      "kind": "research",
+      "path": "docs/investigaciones/aristoteles-creacion-de-personajes.md",
+      "sha256": "81f6bed198f46d0fe25d4ac6ce23d9a361e22baf20071e632d9a6f0be18d09b7"
+    },
+    {
+      "id": "research-balzac",
+      "title": "Balzac y diseño de mundos",
+      "kind": "research",
+      "path": "docs/investigaciones/balzac-diseno-de-mundos.md",
+      "sha256": "e34880ad0eb0357d101667e930b5e7f078372f606f838f19cc966a770ea26488"
+    },
+    {
+      "id": "research-elevenlabs",
+      "title": "Diseño de voces con ElevenLabs",
+      "kind": "research",
+      "path": "docs/investigaciones/elevenlabs-diseno-de-voces.md",
+      "sha256": "545c296884a088b818c33a32c56b9bb82c6e02c8928c39fb0f27d2e5a5860cea"
+    },
+    {
+      "id": "research-gui-open-source",
+      "title": "Entornos gráficos open source",
+      "kind": "research",
+      "path": "docs/investigaciones/entornos-graficos-open-source.md",
+      "sha256": "414a17c461f5c2676bd32876f116b6dca8aa1b539865502e250bf14a94a89de4"
+    },
+    {
+      "id": "research-forster-james",
+      "title": "Forster y Henry James",
+      "kind": "research",
+      "path": "docs/investigaciones/forster-y-henry-james.md",
+      "sha256": "8cd0522cd0aa259251c6d09db0ac62827896f2c774cda07f289ba5abdb2dee3a"
+    },
+    {
+      "id": "research-get-smart-ritmo",
+      "title": "Get Smart: ritmo y YouTube",
+      "kind": "research",
+      "path": "docs/investigaciones/get-smart-ritmo-youtube.md",
+      "sha256": "0a904246fdaf1523721fe1c967ee53d8ca249f4c9139f7afd92bac6b36ae191e"
+    },
+    {
+      "id": "research-icm-contexto",
+      "title": "ICM: contexto interpretable",
+      "kind": "research",
+      "path": "docs/investigaciones/icm-contexto-interpretable.md",
+      "sha256": "29866e7befe9ba0181754b381724680fc021073580e54033c880c03eb6d4beec"
+    },
+    {
+      "id": "research-icm-memory",
+      "title": "ICM Memory y SQLite",
+      "kind": "research",
+      "path": "docs/investigaciones/icm-memory-sqlite.md",
+      "sha256": "a71badc1a0635b36bb713571669617f37a2236432009d5dedc02880f625126cf"
+    },
+    {
+      "id": "research-egri",
+      "title": "Lajos Egri",
+      "kind": "research",
+      "path": "docs/investigaciones/lajos-egri.md",
+      "sha256": "ec5f12cc71aa1520b91bceb07c27b0956c7791eb177f0e8b682e1ca5be138058"
+    },
+    {
+      "id": "research-pi-runtime",
+      "title": "Pi Coding Agent runtime",
+      "kind": "research",
+      "path": "docs/investigaciones/pi-coding-agent-runtime.md",
+      "sha256": "7a37ea6553a663b27d2e8ab6bdc299992fcb3a5cd3144b5634f2d7c090976d53"
+    },
+    {
+      "id": "research-propp-greimas",
+      "title": "Propp y Greimas",
+      "kind": "research",
+      "path": "docs/investigaciones/propp-y-greimas.md",
+      "sha256": "2cb0ed81400fa7786e26684237c85226c086d2d6b2eb0209502ff2842ded8a8e"
+    },
+    {
+      "id": "research-sofocles-estructura",
+      "title": "Sófocles: estructura dramática",
+      "kind": "research",
+      "path": "docs/investigaciones/sofocles-estructura-dramatica.md",
+      "sha256": "5b54b134fbca57a61ae908a37e4c06edad8fa5e63ac466543c2b76565af360d7"
+    },
+    {
+      "id": "research-sofocles-personajes",
+      "title": "Sófocles: personajes",
+      "kind": "research",
+      "path": "docs/investigaciones/sofocles-personajes.md",
+      "sha256": "53d653dba4982633a36c71bf795aee0928546771cc4042140451b571d7f93ec5"
+    },
+    {
+      "id": "paper-icm",
+      "title": "Paper ICM arXiv 2603.16021v2",
+      "kind": "paper",
+      "path": "docs/fuentes/icm/van-clief-mcdermott-2026-icm-arxiv-2603.16021v2.pdf",
+      "sha256": "7f57262dd6b74782f906f98fb66c09be7c0fa73931d164047dca8ae6d51bf95f"
+    },
+    {
+      "id": "icm-bibliography",
+      "title": "Bibliografía ICM",
+      "kind": "bibliography",
+      "path": "docs/fuentes/icm/icm.bib",
+      "sha256": "d99ecb417089d53e5c3aa2375c283931eb1700e17b7666a41cb5122d1b9f21f3"
+    },
+    {
+      "id": "icm-license",
+      "title": "Licencia del repositorio ICM",
+      "kind": "source",
+      "path": "docs/fuentes/icm/icm-repository-MIT-LICENSE.txt",
+      "sha256": "e55a39df67e3c95f6c394079262a21b194900911cda31acb40735f556c2bb63c"
+    },
+    {
+      "id": "icm-source-index",
+      "title": "Fuentes ICM: verificación y procedencia",
+      "kind": "source-index",
+      "path": "docs/fuentes/icm/README.md",
+      "sha256": "8b5691f1cfc888620984736a7bf03d0185a67619a3781bf2eab7735d492b9357"
+    },
+    {
+      "id": "source-index",
+      "title": "Índice de fuentes conservadas",
+      "kind": "source-index",
+      "path": "docs/fuentes/README.md",
+      "sha256": "ce528897805f6f85cb1945b27997832cb3bb3a8c1c8db8c8a1f73622c807d2ad"
+    },
+    {
+      "id": "aristofanes-user-material",
+      "title": "Texto de Aristófanes aportado por el usuario",
+      "kind": "source",
+      "path": "docs/fuentes/aristofanes-personajes-texto-aportado.txt",
+      "sha256": "4d7648013ef0e4b0f927839fb6a345bd407a99820eba456a9f91e2098423ea48"
+    },
+    {
+      "id": "youtube-inventory",
+      "title": "Inventario de videos de Get Smart",
+      "kind": "external-material-inventory",
+      "path": "docs/fuentes/youtube-get-smart/inventario.csv",
+      "sha256": "93c94fe8eea374b4d411fc6a71f169393c5ade8f296e88ff2e77573661974d26"
+    }
+  ],
+  "avatarManifestPath": "docs/assets/avatars/get-smart/manifest.json",
+  "avatars": [
+    {
+      "slug": "maxwell-smart",
+      "path": "docs/assets/avatars/get-smart/maxwell-smart.gif"
+    },
+    {
+      "slug": "agente-99",
+      "path": "docs/assets/avatars/get-smart/agente-99.gif"
+    },
+    {
+      "slug": "jefe",
+      "path": "docs/assets/avatars/get-smart/jefe.gif"
+    },
+    {
+      "slug": "larrabee",
+      "path": "docs/assets/avatars/get-smart/larrabee.gif"
+    },
+    {
+      "slug": "hymie",
+      "path": "docs/assets/avatars/get-smart/hymie.gif"
+    },
+    {
+      "slug": "agente-13",
+      "path": "docs/assets/avatars/get-smart/agente-13.gif"
+    },
+    {
+      "slug": "siegfried",
+      "path": "docs/assets/avatars/get-smart/siegfried.gif"
+    },
+    {
+      "slug": "shtarker",
+      "path": "docs/assets/avatars/get-smart/shtarker.gif"
+    },
+    {
+      "slug": "agente-44",
+      "path": "docs/assets/avatars/get-smart/agente-44.gif"
+    },
+    {
+      "slug": "almirante-hargrade",
+      "path": "docs/assets/avatars/get-smart/almirante-hargrade.gif"
+    },
+    {
+      "slug": "fang",
+      "path": "docs/assets/avatars/get-smart/fang.gif"
+    },
+    {
+      "slug": "carlson",
+      "path": "docs/assets/avatars/get-smart/carlson.gif"
+    },
+    {
+      "slug": "profesor-parker",
+      "path": "docs/assets/avatars/get-smart/profesor-parker.gif"
+    },
+    {
+      "slug": "profesor-windish",
+      "path": "docs/assets/avatars/get-smart/profesor-windish.gif"
+    },
+    {
+      "slug": "carleton",
+      "path": "docs/assets/avatars/get-smart/carleton.gif"
+    },
+    {
+      "slug": "claw",
+      "path": "docs/assets/avatars/get-smart/claw.webp"
+    },
+    {
+      "slug": "bobo",
+      "path": "docs/assets/avatars/get-smart/bobo.webp"
+    },
+    {
+      "slug": "doctor-ratton",
+      "path": "docs/assets/avatars/get-smart/doctor-ratton.webp"
+    },
+    {
+      "slug": "madre-de-99",
+      "path": "docs/assets/avatars/get-smart/madre-de-99.webp"
+    },
+    {
+      "slug": "doctora-steele",
+      "path": "docs/assets/avatars/get-smart/doctora-steele.webp"
+    },
+    {
+      "slug": "hodgkins",
+      "path": "docs/assets/avatars/get-smart/hodgkins.webp"
+    },
+    {
+      "slug": "hobson",
+      "path": "docs/assets/avatars/get-smart/hobson.webp"
+    },
+    {
+      "slug": "doctora-simon",
+      "path": "docs/assets/avatars/get-smart/doctora-simon.webp"
+    },
+    {
+      "slug": "harry-hoo",
+      "path": "docs/assets/avatars/get-smart/harry-hoo.webp"
+    },
+    {
+      "slug": "charlie-watkins",
+      "path": "docs/assets/avatars/get-smart/charlie-watkins.webp"
+    },
+    {
+      "slug": "coronel-von-klaus",
+      "path": "docs/assets/avatars/get-smart/coronel-von-klaus.webp"
+    },
+    {
+      "slug": "rey-charles-ix",
+      "path": "docs/assets/avatars/get-smart/rey-charles-ix.webp"
+    },
+    {
+      "slug": "familia-smart",
+      "path": "docs/assets/avatars/get-smart/familia-smart.webp"
+    }
+  ]
+}

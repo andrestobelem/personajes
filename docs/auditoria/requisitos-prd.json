@@ -1,0 +1,1465 @@
+{
+  "prdVersion": "1.0",
+  "classificationAuthor": "integrador",
+  "classifiedOn": "2026-10-14",
+  "note": "Espejo de trazabilidad, no evidencia de cumplimiento. Las fuentes y categorías se revisan semánticamente.",
+  "requirements": [
+    {
+      "id": "CAT-01",
+      "requirement": "Mostrar el corpus versionado actualmente preparado: 27 expedientes individuales, familia y apéndice multipartes, con búsqueda/selección.",
+      "acceptance": "Paridad de identidades entre manifiesto de esa versión, fuentes y UI; cada expediente abre completo. La cifra no es un límite del dominio ni del elenco activo.",
+      "category": "E+D+P",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "I07",
+        "E02"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P01"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-03"
+      ]
+    },
+    {
+      "id": "CAT-02",
+      "requirement": "Conservar ficha, biografía, relaciones, recuerdos, identidad, voz, metas, capacidades, fuentes, vacíos y discrepancias.",
+      "acceptance": "Vista de secciones y fuentes sin pérdida al importar/exportar; evidencia distinta de adaptación.",
+      "category": "E+P",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "C07",
+        "C02",
+        "C09"
+      ],
+      "parents": [
+        "UI-10"
+      ],
+      "plannedTests": [
+        "P01",
+        "P24"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-07"
+      ]
+    },
+    {
+      "id": "CAT-03",
+      "requirement": "Conservar avatar, procedencia, créditos y estado de uso por identidad.",
+      "acceptance": "27 retratos y referencia familiar accesibles; Max y rey no se fusionan; imagen no se anuncia como sprite terminado.",
+      "category": "E+D",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "I08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P01"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "CAT-04",
+      "requirement": "Separar personaje, intérprete humano, alias y actor Pi.",
+      "acceptance": "Cambio de intérprete no duplica identidad; alias no se convierte en nombre civil; dos papeles no se fusionan.",
+      "category": "D",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "C06",
+        "I07"
+      ],
+      "parents": [
+        "CAT-02",
+        "CAT-03"
+      ],
+      "plannedTests": [
+        "P01"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "CAT-05",
+      "requirement": "Preparar contextos por continuidad y conocimiento permitido.",
+      "acceptance": "Contexto inicial no contiene hechos futuros ni expedientes ajenos; fuentes y corte quedan registrados.",
+      "category": "E+D",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "C08",
+        "E08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P02"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "CAT-06",
+      "requirement": "Editar versiones de preparación e incorporar adaptaciones explícitas.",
+      "acceptance": "Original investigado preservado; autor/motivo/fecha/antes-después de cada adaptación consultables.",
+      "category": "D",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "C07"
+      ],
+      "parents": [
+        "CAT-02",
+        "CAT-05"
+      ],
+      "plannedTests": [
+        "P02",
+        "P24"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "CAT-07",
+      "requirement": "Distinguir elegible, preparado, activo/inactivo y fuera de escena.",
+      "acceptance": "Catálogo completo no implica presencia ni ejecución de los 27; activación requiere contexto válido.",
+      "category": "D+P",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "I07",
+        "T07"
+      ],
+      "parents": [
+        "CAT-01",
+        "ACT-01",
+        "ESC-04"
+      ],
+      "plannedTests": [
+        "P02",
+        "P03"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-03"
+      ]
+    },
+    {
+      "id": "CAT-08",
+      "requirement": "Promover cambios persistentes de identidad mediante Configurador con evidencia.",
+      "acceptance": "Evolución ya vivida conserva efectos; revisión de ficha no borra historia ni transforma una creencia en canon.",
+      "category": "D",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "C07",
+        "C10"
+      ],
+      "parents": [
+        "CAT-02",
+        "ESC-09",
+        "MEM-03"
+      ],
+      "plannedTests": [
+        "P22"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "CAT-09",
+      "requirement": "Dar acceso navegable a las 16 investigaciones, paper, fuentes, bibliografía y límites de lectura.",
+      "acceptance": "Índice completo en biblioteca de investigador/configuración, con enlaces y procedencia; no se entrega ese corpus a los actores.",
+      "category": "P",
+      "sourceSection": 2,
+      "sourceRequestIds": [
+        "I01"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P01"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-01",
+        "DP-03"
+      ]
+    },
+    {
+      "id": "ESC-01",
+      "requirement": "Crear/guardar una puesta con fecha, hora, lugar, continuidad, reparto, conflicto, propósito y reglas.",
+      "acceptance": "Validación visible de campos obligatorios; no deducir fecha ficticia del equipo ni de emisión.",
+      "category": "E+D+P",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "E01",
+        "E08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P03"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-06"
+      ]
+    },
+    {
+      "id": "ESC-02",
+      "requirement": "Representar lugares conectados, ubicación, puertas, objetos, inventario, posesión y disponibilidad.",
+      "acceptance": "Movimiento y uso dependen de reglas/estado; cámara o CSS no alteran estado operativo.",
+      "category": "E+D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "E01",
+        "C05"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P09"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-03",
+      "requirement": "Resolver propuestas antes de confirmar efectos.",
+      "acceptance": "Una puerta no se abre por narración; una persuasión no escribe aceptación de otro actor.",
+      "category": "D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C05"
+      ],
+      "parents": [
+        "ESC-02",
+        "ACT-05"
+      ],
+      "plannedTests": [
+        "P09"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-04",
+      "requirement": "Admitir escenas con uno o múltiples personajes y comunicación presencial/remota.",
+      "acceptance": "Escena solitaria silenciosa, diálogo de más de dos y entrada tardía sin conocimiento retroactivo.",
+      "category": "E+D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C15"
+      ],
+      "parents": [
+        "ESC-05"
+      ],
+      "plannedTests": [
+        "P04",
+        "P05"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-05",
+      "requirement": "Definir percepción/audibilidad/alcance por situación y canal.",
+      "acceptance": "Secreto detrás de puerta accesible a 99 no se entrega a Max; recepción y audiencia quedan registradas.",
+      "category": "E+D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P05",
+        "P06",
+        "P10"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-06",
+      "requirement": "Proporcionar capacidades acotadas según personaje, inventario, medio y puesta.",
+      "acceptance": "Observar, mover, hablar/emitir, escuchar, tomar/entregar, usar dispositivo, recordar, esperar/descansar y proponer colaboración tienen precondiciones/resultados; tools del actor sólo producen efectos dentro del Escenario.",
+      "category": "E+D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C05"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P09"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-07",
+      "requirement": "Mantener límites, preferencias y capacidades como conceptos distintos.",
+      "acceptance": "Puede rechazar una acción posible o fracasar en una acción permitida; Fang no recibe habla humana por defecto.",
+      "category": "D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C05",
+        "I07"
+      ],
+      "parents": [
+        "ESC-06",
+        "ACT-04"
+      ],
+      "plannedTests": [
+        "P09"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-08",
+      "requirement": "Revalidar propuestas sobre estado obsoleto y resolver conflictos serialmente.",
+      "acceptance": "Dos intentos incompatibles sobre un objeto no producen dos posesiones; no se bloquea una transacción mientras espera un LLM.",
+      "category": "D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "E01"
+      ],
+      "parents": [
+        "ESC-03",
+        "MEM-05"
+      ],
+      "plannedTests": [
+        "P09",
+        "P13"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-09",
+      "requirement": "Registrar objetivos individuales, duraderos/situados y posibles compartidos, con prioridad y revisión.",
+      "acceptance": "Objetivo de dirección no se distribuye como deseo secreto universal; ajustes remiten a experiencia.",
+      "category": "E",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C04"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P08",
+        "P22"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ESC-10",
+      "requirement": "Guardar cierre de escena/episodio y consecuencias que continúan.",
+      "acceptance": "Fin local no exige resolver toda línea; un reinicio o bifurcación se identifica como continuidad distinta.",
+      "category": "D",
+      "sourceSection": 6,
+      "sourceRequestIds": [
+        "C11",
+        "C15"
+      ],
+      "parents": [
+        "DIR-01",
+        "ESC-04"
+      ],
+      "plannedTests": [
+        "P04",
+        "P19"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-01",
+      "requirement": "Usar SDK Pi con una instancia independiente por personaje activo.",
+      "acceptance": "IDs de sesión, prompt, contexto, historial y tools distintos durante creación y reanudación.",
+      "category": "E",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T07"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P18"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-02",
+      "requirement": "Conectar mediante login OAuth `openai-codex`.",
+      "acceptance": "Flujo de login y estado real de cuenta; refresh/caducidad/cancelación controlados, sin tokens en actor/UI/log de contenido.",
+      "category": "E",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T06"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P18"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-03",
+      "requirement": "Exigir el perfil seleccionado: `gpt-6.1-sol`/`low` o `claude-opus-5-5`/`medium`, solicitado y efectivo.",
+      "acceptance": "Creación/reanudación verifica proveedor/modelo/esfuerzo y falla visiblemente si no coincide; no fallback.",
+      "category": "E",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T05"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P18"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-04",
+      "requirement": "Preparar como actores del Método mediante adaptación explícita: identidad, circunstancias, biografía pertinente, memoria, deseos, escucha, relación y táctica ante obstáculos.",
+      "acceptance": "Misma petición con cambio de circunstancia/relación/objetivo relevante: evaluar escucha, elección/táctica, voz y consecuencias; no exigir divergencia siempre ni afirmar memoria sentida, conciencia o una única escuela teatral.",
+      "category": "E+D",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "I02",
+        "C07"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P08"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-05",
+      "requirement": "Permitir iniciativa, espera, silencio, retirada, engaño y cambio coherente.",
+      "acceptance": "El actor elige sus tácticas; coordinador/director no escribe respuestas obligatorias.",
+      "category": "E+D",
+      "sourceSection": 4,
+      "sourceRequestIds": [
+        "C04",
+        "C10"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P04",
+        "P08"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-06",
+      "requirement": "Marcar pulsos y convocar sólo instancias pertinentes.",
+      "acceptance": "Planificación por acontecimientos/rutinas; pulso, llamada de modelo y hora ficticia distintos; presupuesto respetado.",
+      "category": "E+D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P16",
+        "P17"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-07",
+      "requirement": "Revisar versión exacta de respuesta antes de publicar.",
+      "acceptance": "Continuista y control de autoridad se refieren al mismo ID/versión; borradores/rechazos no aparecen como diálogo pronunciado.",
+      "category": "E+D",
+      "sourceSection": 8,
+      "sourceRequestIds": [
+        "E05",
+        "E06"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P10"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-08",
+      "requirement": "Reformular desde el mismo actor con feedback filtrado y límite de intentos.",
+      "acceptance": "Límite configurable antes de la puesta entre cero y dos reformulaciones, con default dos y techo tres versiones totales adoptado del protocolo actual por el integrador (DP-08); agotamiento queda pendiente técnico, sin respuesta inventada.",
+      "category": "D+P",
+      "sourceSection": 8,
+      "sourceRequestIds": [
+        "E06"
+      ],
+      "parents": [
+        "ACT-07",
+        "ACT-10"
+      ],
+      "plannedTests": [
+        "P10"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-08"
+      ]
+    },
+    {
+      "id": "ACT-09",
+      "requirement": "Evaluar saber, continuidad, época/lugar, identidad, voz, motivación y ritmo.",
+      "acceptance": "Casos Max/Hymie/Fibonacci, 99 que oculta, fanfarronería sin secreto y dispositivo anacrónico con criterios distintos.",
+      "category": "E+D",
+      "sourceSection": 8,
+      "sourceRequestIds": [
+        "E06",
+        "E07",
+        "E08",
+        "E09"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P02",
+        "P07",
+        "P10"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-10",
+      "requirement": "Preservar autoridad ante inyección en diálogo, memoria y resultados de tools.",
+      "acceptance": "Contenido ficticio no cambia prompt/permisos/base/identidad ni habilita shell, lectura privada o escritura arbitraria.",
+      "category": "E+D",
+      "sourceSection": 8,
+      "sourceRequestIds": [
+        "E05"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P06",
+        "P11"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-11",
+      "requirement": "Gestionar cancelación, timeout, error, rate limit y acceso insuficiente.",
+      "acceptance": "Estado diagnóstico y trabajo recuperable; errores de proveedor no se convierten en decisiones ficticias ni en otro modelo.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T03"
+      ],
+      "parents": [
+        "ACT-01",
+        "ACT-03",
+        "MEM-08"
+      ],
+      "plannedTests": [
+        "P14",
+        "P15",
+        "P17"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "ACT-12",
+      "requirement": "Aplicar el mismo perfil a todo rol que invoque LLM.",
+      "acceptance": "Todo componente que efectivamente infiera —actores, Director, Continuista, Regidor, Configurador, Coordinador y Narrador, según su realización— verifica perfil efectivo requerido. Escenario/resolución y proyecciones mecánicas no necesitan LLM. El observador humano no es un rol de modelo; cualquier asistente LLM del operador se distinguirá y tendrá el mismo perfil.",
+      "category": "E+D+P",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T05"
+      ],
+      "parents": [
+        "ACT-03"
+      ],
+      "plannedTests": [
+        "P18"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-05"
+      ]
+    },
+    {
+      "id": "MEM-01",
+      "requirement": "Proveer memoria persistente privada por actor mediante la integración ICM Memory/SQLite adoptada para este producto.",
+      "acceptance": "Adaptador real almacena/recupera sin cruce de identidades/continuidades; actor no puede seleccionar base/backend, scopes no son permisos. La selección técnica y topología física por corrida se documentan como decisión del proyecto en specs, no como preferencia humana.",
+      "category": "E+D+P",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "T04",
+        "T10"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P12"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-04"
+      ]
+    },
+    {
+      "id": "MEM-02",
+      "requirement": "Distinguir hechos, percepciones, testimonios, inferencias, creencias y recuerdos.",
+      "acceptance": "Mismo evento admite memorias subjetivas distintas; rumor no se confirma al resumirse.",
+      "category": "E+D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "C02",
+        "C08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P06",
+        "P12"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-03",
+      "requirement": "Conservar procedencia, momento de recepción, referencia de evento, confianza y revisiones.",
+      "acceptance": "Recuperación/inspección explica cómo se adquirió un dato y preserva negación/incertidumbre.",
+      "category": "D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "C08"
+      ],
+      "parents": [
+        "MEM-02",
+        "ESC-05"
+      ],
+      "plannedTests": [
+        "P06",
+        "P12"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-04",
+      "requirement": "Recuperar sólo experiencia propia pertinente; controlar selección/resumen/olvido.",
+      "acceptance": "Consulta de actor no filtra secretos; olvido activo no borra archivo histórico; reloj real no simula circadianidad.",
+      "category": "E+D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "C08"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P06",
+        "P12"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-05",
+      "requirement": "Mantener una autoridad durable de hechos con eventos ordenados y revisión de estado.",
+      "acceptance": "Corrida con ID durable no reciclado; commit atómico; unicidad por corrida+ID base de propuesta/comando autorizado; versión aprobada como atributo, conflicto de versión rechazado y reintento devuelve resultado existente. Reloj/rutinas/control tienen origen humano/sistema propio, no actor inventado.",
+      "category": "D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "T09",
+        "E01"
+      ],
+      "parents": [
+        "ESC-03",
+        "MEM-08"
+      ],
+      "plannedTests": [
+        "P13"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-06",
+      "requirement": "Entregar eventos a memorias y vistas mediante registros reintentables.",
+      "acceptance": "Fallo después de commit no pierde evento; entregas pendientes, fallidas o parciales visibles, deduplicadas por corrida/evento/receptor. Emitido y recibido se distinguen.",
+      "category": "D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "C08"
+      ],
+      "parents": [
+        "ESC-05",
+        "MEM-02"
+      ],
+      "plannedTests": [
+        "P12",
+        "P13"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-07",
+      "requirement": "Conservar organización ICM Markdown, contratos, referencias y artefactos exportables.",
+      "acceptance": "Compilación de contexto usa rutas autorizadas; export/proyecciones no mantienen una segunda verdad conflictiva.",
+      "category": "E+D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T02",
+        "I10"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P14",
+        "P24"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-08",
+      "requirement": "Guardar snapshots, restauración, reanudación y esquema versionado.",
+      "acceptance": "Interrupciones antes/después de commit recuperan frontera exacta; backup conserva bases y metadatos coherentes.",
+      "category": "D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "T03",
+        "E02"
+      ],
+      "parents": [
+        "ACT-01",
+        "UI-01"
+      ],
+      "plannedTests": [
+        "P14",
+        "P24"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-09",
+      "requirement": "Producir vistas históricas y replay sin nuevas ejecuciones.",
+      "acceptance": "No nuevas inferencias, acciones de tools o síntesis TTS durante replay; se permite reproducir audio ya almacenado. Sólo conocimiento del momento elegido; caducidad OAuth no impide inspección.",
+      "category": "E+D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "E02"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P15"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "MEM-10",
+      "requirement": "Separar memoria Pi conversacional, experiencia ficticia y archivo de investigador.",
+      "acceptance": "Compactación/reanudación no mezcla actores, no filtra hechos futuros y no convierte feedback técnico en recuerdo.",
+      "category": "D",
+      "sourceSection": 5,
+      "sourceRequestIds": [
+        "C02",
+        "C08",
+        "T03"
+      ],
+      "parents": [
+        "MEM-02",
+        "ACT-01"
+      ],
+      "plannedTests": [
+        "P02",
+        "P06",
+        "P12"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "DIR-01",
+      "requirement": "Mantener línea dramática y registrar etapas con evidencia y revisiones.",
+      "acceptance": "Etapa remite a eventos/decisiones; no se declara clímax por turnos ni se obliga a tres actos.",
+      "category": "E+D",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "C14"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P19"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "DIR-02",
+      "requirement": "Permitir metaindicaciones autorizadas y cambios de circunstancia versionados.",
+      "acceptance": "Efectos pasan por Escenario; director no decide deseos privados ni la respuesta de otro.",
+      "category": "E+D",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "C03"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P19"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "DIR-03",
+      "requirement": "Ofrecer narrador omnisciente opcional y autorizado.",
+      "acceptance": "Canal público separado, estados ficticios tratados como tales; no crea evento ni informa automáticamente al reparto.",
+      "category": "E+D",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "C16"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P20"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "DIR-04",
+      "requirement": "Mantener escenas, actos, progresión y formas griegas como dimensiones distinguibles.",
+      "acceptance": "Configuración puede usar referencias trágicas/cómicas sin plantilla obligatoria ni resolver conflicto antes de tiempo.",
+      "category": "E+D",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "C11",
+        "C12",
+        "C13"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P19"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "TIM-01",
+      "requirement": "Operar reloj ficticio, día/noche, rutinas y disponibilidad.",
+      "acceptance": "Horarios/descanso influyen en encuentros y percepción; no se sincroniza por defecto con equipo o latencia.",
+      "category": "E+D",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "E04"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P16"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "TIM-02",
+      "requirement": "Definir inicio/pausa/reanuda/paso/detención y trabajo en curso.",
+      "acceptance": "Semántica de §4.6: pausa congela reloj y nuevas convocatorias, conserva trabajo pendiente sin efectos tardíos; paso ejecuta un pulso acotado, detener cancela y preserva, cerrar finaliza sin borrar.",
+      "category": "D+P",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "E11",
+        "E12"
+      ],
+      "parents": [
+        "UI-01",
+        "TIM-01"
+      ],
+      "plannedTests": [
+        "P16"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-06"
+      ]
+    },
+    {
+      "id": "TIM-03",
+      "requirement": "Configurar duración de acciones/escala temporal y avance fuera de línea.",
+      "acceptance": "Política explícita por puesta; por defecto no se adelanta historia al cerrar aplicación sin regla habilitada.",
+      "category": "P",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "E04"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P16"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-06"
+      ]
+    },
+    {
+      "id": "TIM-04",
+      "requirement": "Respetar presupuesto de llamadas, tiempo operativo y activación.",
+      "acceptance": "Al agotarlo se pausa con diagnóstico; no rebaja perfil ni hace actuar continuamente al catálogo entero.",
+      "category": "D",
+      "sourceSection": 9,
+      "sourceRequestIds": [
+        "T05",
+        "T08"
+      ],
+      "parents": [
+        "ACT-06",
+        "ACT-03"
+      ],
+      "plannedTests": [
+        "P17"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-01",
+      "requirement": "Recorrido completo de biblioteca, puesta, observación, participación, dirección, control e historia desde GUI.",
+      "acceptance": "Prueba de recorrido con aplicación real; editar Markdown no es requisito de uso habitual.",
+      "category": "E",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E11",
+        "E12"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P03",
+        "P23"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-02",
+      "requirement": "Representación visual navegable con personajes/objetos/ubicaciones y movimientos confirmados.",
+      "acceptance": "Selección y cambios operativos visibles; leyendas/texto además de color; cámara sin efectos ficticios.",
+      "category": "E+D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E02"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P09",
+        "P23"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-03",
+      "requirement": "Conversaciones en vivo y filtros por escena/personaje/canal/fecha.",
+      "acceptance": "Hablante, destinatarios, audiencia, entrega y momento claros; scroll/historia conservan IDs.",
+      "category": "E+D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E02"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P05",
+        "P15"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-04",
+      "requirement": "Hablar con personajes mediante identidad y canal explícitos.",
+      "acceptance": "Entrada humana distribuida sólo a receptores; influencia registrada sin obediencia garantizada.",
+      "category": "E",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E03"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P05"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-05",
+      "requirement": "Consultar ficha e historia, saber/creer/recordar y evolución con evidencia.",
+      "acceptance": "Vista del observador autorizada y diferenciada del actor; compare antes/después sin futuras memorias.",
+      "category": "E+D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "C07",
+        "E02"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P06",
+        "P15",
+        "P22"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-06",
+      "requirement": "Distinguir modos observar/hablar/dirigir y acceso a secretos.",
+      "acceptance": "Control fuera del contenido textual, modo visible y mensajes al canal correcto.",
+      "category": "D+P",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "C03",
+        "E05"
+      ],
+      "parents": [
+        "UI-04",
+        "ACT-10"
+      ],
+      "plannedTests": [
+        "P06",
+        "P19"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-05"
+      ]
+    },
+    {
+      "id": "UI-07",
+      "requirement": "Exponer borrador/revisión/espera/error/pausa/cancelación como estado técnico separado.",
+      "acceptance": "No se disfraza error de silencio ni borrador de palabra pronunciada; rutas de recuperación visibles.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E12"
+      ],
+      "parents": [
+        "UI-01",
+        "ACT-11"
+      ],
+      "plannedTests": [
+        "P10"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-08",
+      "requirement": "Operar mediante teclado y controles etiquetados, texto legible y estados no dependientes sólo de color.",
+      "acceptance": "Recorrido con foco visible y labels; mapas acompañados de información accesible de entidades.",
+      "category": "P",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E12"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P23"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-07"
+      ]
+    },
+    {
+      "id": "UI-09",
+      "requirement": "Consultar y editar configuración, revisar cambios y diagnosticar acceso/perfil desde GUI.",
+      "acceptance": "No requiere terminal para preparar/continuar uso normal; no muestra credenciales en contenido.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E11"
+      ],
+      "parents": [
+        "UI-01",
+        "ESC-01"
+      ],
+      "plannedTests": [
+        "P03",
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "UI-10",
+      "requirement": "Exportar/importar configuración y consultar historial durable con confirmación de operaciones destructivas.",
+      "acceptance": "Import validado/versionado; no sobrescribe otra continuidad ni ejecuta contenido importado como instrucciones administrativas.",
+      "category": "P",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T02",
+        "E11"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P24"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-07"
+      ]
+    },
+    {
+      "id": "UI-11",
+      "requirement": "Mostrar línea dramática, etapas, evidencia, asuntos abiertos y rectificaciones.",
+      "acceptance": "Vista del Director fechada, con eventos/personajes relacionados, lectura insuficiente o revisable distinguida de hechos; no obliga al reparto a alcanzar la etapa.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "C14",
+        "E02"
+      ],
+      "parents": [
+        "DIR-01",
+        "UI-03"
+      ],
+      "plannedTests": [
+        "P19"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "VOZ-01",
+      "requirement": "Actuar en español de doblaje con voz textual diferenciada.",
+      "acceptance": "Respuestas situadas, vocabulario/tratamiento por personaje; variedad seleccionada explícitamente.",
+      "category": "E+D+P",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "E09",
+        "C09"
+      ],
+      "parents": [
+        "ACT-04"
+      ],
+      "plannedTests": [
+        "P05",
+        "P07",
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-09"
+      ]
+    },
+    {
+      "id": "VOZ-02",
+      "requirement": "Regular extensión, pausa, interrupción, silencio y acción según función dramática.",
+      "acceptance": "Política configurable y ensayos etiquetados; no cifras supuestamente medidas sin audio anotado.",
+      "category": "E+D",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "I13"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "VOZ-03",
+      "requirement": "Mantener y consultar una receta documentada ElevenLabs por identidad del corpus.",
+      "acceptance": "Cobertura de recetas y muestras propuestas, incluida Fang como efectos, sin habla humana; receta no exige preview, voz guardada ni audio por cada personaje.",
+      "category": "E",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "I14"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "VOZ-04",
+      "requirement": "Incluir capacidad de síntesis/reproducción ElevenLabs con voz seleccionada y subtítulos, desactivable por puesta.",
+      "acceptance": "Adaptador configurable, ID/idioma/modelo y variedad confirmada validados; audio asociado a diálogo/narración publicados y estados visibles, con convención seleccionada comprobada en preview/síntesis. Capacidad incluida por decisión del integrador; desactivarla en una puesta no la excluye del producto ni prueba su integración live.",
+      "category": "P",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "I14"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P20",
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-02"
+      ]
+    },
+    {
+      "id": "VOZ-05",
+      "requirement": "Permitir desactivar audio y mantener acceso textual completo.",
+      "acceptance": "Ausencia de key/voz o fallo TTS no fabrica audio, no reejecuta actuación ni pierde diálogo.",
+      "category": "D+P",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "E11"
+      ],
+      "parents": [
+        "VOZ-04",
+        "UI-03"
+      ],
+      "plannedTests": [
+        "P20",
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-02"
+      ]
+    },
+    {
+      "id": "VOZ-06",
+      "requirement": "Conservar investigación/calibración del ritmo y corpus elegido.",
+      "acceptance": "Inventario y anotaciones accesibles; escucha/cotejo pendientes no se dan por terminados mediante un contador de palabras.",
+      "category": "E",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "I13"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "VOZ-07",
+      "requirement": "Ofrecer configuración de voz y solicitudes administrativas de preview/selección/guardado.",
+      "acceptance": "Capacidad de producto adoptada por el integrador: solicitud explícita, credenciales de host, variedad confirmada y muestra provista/seleccionada; propuesta regional no confirmada bloquea preview/síntesis, resultado verificable y elección antes de guardar; no crear automáticamente voces para todo el corpus.",
+      "category": "P",
+      "sourceSection": 3,
+      "sourceRequestIds": [
+        "I14"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": [
+        "DP-02"
+      ]
+    },
+    {
+      "id": "NFR-01",
+      "requirement": "Dominio compuesto de objetos y mensajes, también mensajes como objetos, sin herencia propia.",
+      "acceptance": "Revisión de código y tipos; librerías externas pueden conservar implementación interna.",
+      "category": "E",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T01"
+      ],
+      "parents": [],
+      "plannedTests": [
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-02",
+      "requirement": "Datos externos validados en fronteras y estados imposibles evitados.",
+      "acceptance": "Schemas/uniones discriminadas, IDs relacionados y migraciones; inputs inválidos no ejecutan efectos.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E05",
+        "T03"
+      ],
+      "parents": [
+        "ACT-10",
+        "ESC-03"
+      ],
+      "plannedTests": [
+        "P03",
+        "P11",
+        "P24",
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-03",
+      "requirement": "Persistencia local durable y recuperación comprobada.",
+      "acceptance": "Pruebas reales de transacciones, interrupciones, deduplicación, backups y restauración; no sólo tests con mocks.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T04",
+        "E01"
+      ],
+      "parents": [
+        "MEM-05",
+        "MEM-08"
+      ],
+      "plannedTests": [
+        "P12",
+        "P13",
+        "P14"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-04",
+      "requirement": "Fallos aislados y diagnósticos trazables.",
+      "acceptance": "IDs de corrida/actor/propuesta/evento permiten relacionar estados; logs no contienen tokens ni razonamiento interno.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E12"
+      ],
+      "parents": [
+        "UI-07",
+        "ACT-11"
+      ],
+      "plannedTests": [
+        "P14",
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-05",
+      "requirement": "UI permanece operable mientras hay inferencia.",
+      "acceptance": "Acceso a historial/configuración/pausa durante trabajos en curso; indicadores de latencia real sin confundirla con tiempo ficticio.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E11"
+      ],
+      "parents": [
+        "UI-01",
+        "ACT-11"
+      ],
+      "plannedTests": [
+        "P17",
+        "P23"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-06",
+      "requirement": "Coste y activación controlables.",
+      "acceptance": "Configuración previa de límites, contador observado y pausa al agotarlos; mediciones del proveedor pendientes no se inventan.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "T05"
+      ],
+      "parents": [
+        "TIM-04"
+      ],
+      "plannedTests": [
+        "P17"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-07",
+      "requirement": "Dependencias/versiones y ejecución reproducibles.",
+      "acceptance": "Lockfile, scripts de desarrollo/build/tests, requisitos de host y guía de operación que funcionen.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "A04",
+        "T03"
+      ],
+      "parents": [
+        "UI-01",
+        "ACT-01"
+      ],
+      "plannedTests": [
+        "P18",
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-08",
+      "requirement": "Recursos y fuentes con procedencia.",
+      "acceptance": "Fotos/paper/skills retienen condiciones propias; arte final no se declara libre sin evidencia.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "I08",
+        "I10",
+        "A01"
+      ],
+      "parents": [
+        "CAT-03",
+        "CAT-09"
+      ],
+      "plannedTests": [
+        "P01",
+        "P21"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-09",
+      "requirement": "Separación servidor/cliente y acceso de control.",
+      "acceptance": "Credenciales sólo host; endpoint/cookie/control impiden elevar rol desde diálogo o import; exposición pública no activada por defecto.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "E05",
+        "T06"
+      ],
+      "parents": [
+        "ACT-10",
+        "ACT-02"
+      ],
+      "plannedTests": [
+        "P11",
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    },
+    {
+      "id": "NFR-10",
+      "requirement": "Calidad revisada por escenario completo.",
+      "acceptance": "Tests de dominio/integración, uso de GUI real y pruebas live cuando haya acceso; cobertura requisito por requisito.",
+      "category": "D",
+      "sourceSection": 10,
+      "sourceRequestIds": [
+        "A05",
+        "A08"
+      ],
+      "parents": [
+        "UI-01",
+        "ACT-03",
+        "MEM-08"
+      ],
+      "plannedTests": [
+        "P25"
+      ],
+      "evidenceStatus": "pending",
+      "decisions": []
+    }
+  ]
+}

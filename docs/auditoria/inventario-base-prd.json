@@ -1,0 +1,3373 @@
+{
+  "scope": "Corpus previo al PRD; excluye Git y artefactos nuevos de esta revisión. Las huellas actuales incluyen correcciones aplicadas después de la lectura inicial. Inventario no prueba lectura por sí solo.",
+  "date": "2026-10-14",
+  "counts": {
+    "concepto": 16,
+    "investigaciones": 23,
+    "obra": 73,
+    "personajes": 279,
+    "raiz": 29
+  },
+  "files": [
+    {
+      "path": ".agents/skills/domain-modeling/ADR-FORMAT.md",
+      "sha256": "944c92aa790e8fbdc9199640b170979abb8a34ba8d0fe18c2a01a63bce140ca0",
+      "bytes": 2733,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/domain-modeling/GLOSSARY-FORMAT.md",
+      "sha256": "21dcc40cdec8e151a829b98ab1517c1867bc444e3665134a98c6983411996801",
+      "bytes": 2300,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/domain-modeling/LICENSE",
+      "sha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+      "bytes": 1068,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/domain-modeling/SKILL.md",
+      "sha256": "7b925d7b1e341a2eeae33ad68a8a8c0ab889a38ddd22a7598e4c240e5a7556a3",
+      "bytes": 3346,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/domain-modeling/agents/openai.yaml",
+      "sha256": "fa3b10d0a272ac1836a9a270596352e2b25ecd69ad36693ad1a93d5d716cb5f9",
+      "bytes": 235,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/grill-with-docs/LICENSE",
+      "sha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+      "bytes": 1068,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/grill-with-docs/SKILL.md",
+      "sha256": "587981fb57e77c9abccaa699e0a5ae7d29d28b273325d36bdb1127d53fa428be",
+      "bytes": 1078,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/grill-with-docs/agents/openai.yaml",
+      "sha256": "e617dc5f5d19a4ab948a254da7226ea9772549ee3fc010f335e5fd6ba529c842",
+      "bytes": 260,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/grilling/LICENSE",
+      "sha256": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+      "bytes": 1068,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/grilling/SKILL.md",
+      "sha256": "209fc0b5116a20c7d7a4ac2e47a5e652c9496d3da51f522fda79cce042aeedcd",
+      "bytes": 1658,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/grilling/agents/openai.yaml",
+      "sha256": "cefe0227f8e508031ecdae31bab979ab3e86850baa2ccf38cbc8e155c2ef55bd",
+      "bytes": 244,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/typescript-best-practices/LICENSE",
+      "sha256": "bc957ca6bee02792566a1a028d105e02e247c6e77cf057061674273da77b200e",
+      "bytes": 1067,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/typescript-best-practices/SKILL.md",
+      "sha256": "bf24871d30e7dacbaee922b37078288943ad7b47711c0b6d3b6b882a763627a5",
+      "bytes": 3028,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/typescript-best-practices/agents/openai.yaml",
+      "sha256": "442adeb0a808906d399ea97e79a44a8247c9a8ec5a4643f600a7f56d3aa595f9",
+      "bytes": 294,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/typescript-best-practices/references/patterns.md",
+      "sha256": "ecfbdc19bd77f988fb7e3be064b96f8034ab1f61c9999c11e3202ae1f435feb9",
+      "bytes": 9286,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".agents/skills/typescript-best-practices/references/principles.md",
+      "sha256": "adef01289f8056a3b53f9beb72e99caad41bd3c561e2e6c5f22ca3dde05b5b96",
+      "bytes": 1408,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "1a63c81fd090d26eb5fcb5a40b226c28e304d909aa0d1daf40104104522ecbec",
+      "bytes": 1701,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "d87a4dccc4866618f88f34e90026e12ecc1a3e826be0c95b537fa5880d9733ae",
+      "bytes": 3522,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "GLOSSARY.md",
+      "sha256": "fd43f9f422e7d94634aff837149140c5050704db088ce69b665ac28b15ccde39",
+      "bytes": 8253,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "bd1c1016673d990a24c9afdd8d370efe2541c6209cca4e8fb33f0eda549abd37",
+      "bytes": 1072,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "README.md",
+      "sha256": "fb16fff7fc6f5d4cb409801153c6192464c9248d448d85a3890debb9a790e499",
+      "bytes": 3053,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "20ee48168a80954f258ceab5a85f424569af38825e765622caf90154ac279518",
+      "bytes": 7357,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/agente-13.gif",
+      "sha256": "4704fe6091632a411dfc95cc10f8e0853764936a5da9451825e683c18d4e3a32",
+      "bytes": 19821,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/agente-44.gif",
+      "sha256": "30ec36cdf50cd2f512400d7e3260d67789acc8e0acbe807fc15df15a5f13b384",
+      "bytes": 29350,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/agente-99.gif",
+      "sha256": "6b4f98094efe2ea7b1f2cfd7ef785f8d1f1dd77db3ea91f4fb21a8126a6c5d1e",
+      "bytes": 27973,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/almirante-hargrade.gif",
+      "sha256": "8e04c43b0471e77f5965466ad46d73f21f0ca878eda6648e67233fbbe886cd0f",
+      "bytes": 25437,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/bobo.webp",
+      "sha256": "83fb16419d51bd062eb126d252ccf0db1e7926911b94456038720060baa3048b",
+      "bytes": 18392,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/carleton.gif",
+      "sha256": "4dca43ec981d4663b542bf5278db0586b4ee95b1f4f5ddf04104bff6c7c418f6",
+      "bytes": 12679,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/carlson.gif",
+      "sha256": "85f90e85c5de9fceaecd3217cf694b55af34ace6515e02d001984ff6a8dea424",
+      "bytes": 21503,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/charlie-watkins.webp",
+      "sha256": "c33e1a2eb66b2efdaf2e46e24c308b62622b352cc51603e344da89af256d008f",
+      "bytes": 20414,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/claw.webp",
+      "sha256": "db2cd98a9519c0baa3d3c51f7d92869a3e0bb7dc6ae77ee9457f0ff19965a096",
+      "bytes": 24700,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/coronel-von-klaus.webp",
+      "sha256": "61c309bb781bcf85f3c4742f088c09e2755a648f7b9da2524ab5ec79dc1ad7be",
+      "bytes": 21710,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/doctor-ratton.webp",
+      "sha256": "3ad1e58038bf6654f9082d58b4e7653eccdfd2d40cfe4510a2f3ffc9171342cb",
+      "bytes": 13492,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/doctora-simon.webp",
+      "sha256": "eed7e8c82c82d84737087d4fda570eda349ffc210668ae4084a9566b3f47bdad",
+      "bytes": 20798,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/doctora-steele.webp",
+      "sha256": "ca635bfe843b2ee59ce1a2ce7545ead3c218f7398839e8db0899e1fdf0486df3",
+      "bytes": 10758,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/familia-smart.webp",
+      "sha256": "55f7fa9d9e631abe03a212f8d9c3cfa8530ce7832d0928a46b59ac70f681a693",
+      "bytes": 177278,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/fang.gif",
+      "sha256": "728ac81acfb94d4a62afb6e88821c9ab1fe13d8a0cf90ca88c76f97d32a5df3d",
+      "bytes": 19830,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/harry-hoo.webp",
+      "sha256": "8a4124b0065c2ee5d5a842f35844dc9aac9ba89a686cf8c8136a5c15e4a2362a",
+      "bytes": 8652,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/hobson.webp",
+      "sha256": "b121681a584ec4996bee76fe53ddcd099b56511178d947aaaa7e3e543b7d6d7a",
+      "bytes": 17796,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/hodgkins.webp",
+      "sha256": "16038438734e90576353a9f029c2c2994cc8b16598dd18782d772c4a07648a2e",
+      "bytes": 10750,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/hymie.gif",
+      "sha256": "9da340c8f4d90b885ea2b543a535a18119ac5e513378dfec9d60eeacf8f0b154",
+      "bytes": 28157,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/index.html",
+      "sha256": "3229ed700061280ac8b36f2947389ebeca79f47b81ee7ac8e65323f353e65823",
+      "bytes": 7970,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/jefe.gif",
+      "sha256": "424f79a92ffb295f6de7e8c125261abead56d06c0ec1f318dd3af0df7484cceb",
+      "bytes": 26159,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/larrabee.gif",
+      "sha256": "20eecb3d5b101568d7b4befc7c1664126e9f31964737f9c559bf69c133ed522c",
+      "bytes": 19360,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/madre-de-99.webp",
+      "sha256": "5e878e900a9e2bbe3769d99b7f5971861826e30ee43f9d468f46c78ae1737c53",
+      "bytes": 69242,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/manifest.json",
+      "sha256": "ec5f43ad0cfbb4690e64ba52e8c9316b7c6e218b9e8b4cc6d873c98ca51655b3",
+      "bytes": 35861,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/maxwell-smart.gif",
+      "sha256": "c2be97b91fb19f6ae29a7cd767eb3c2ffd9be86f62baa2025aa53ece85d9fc8d",
+      "bytes": 31066,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/profesor-parker.gif",
+      "sha256": "05dbc7b7c1baf12ca86a2284816f92b64e421b730d2b0bb952368f1517bb7bf3",
+      "bytes": 25527,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/profesor-windish.gif",
+      "sha256": "cf76bc0ef97d5809c1f8bee4d3415a9c97b3ecd970628c2aa61820f4ae9012da",
+      "bytes": 18966,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/rey-charles-ix.webp",
+      "sha256": "0c02f0ff7083141968a2c187330ce0a9507d8eaff814c969b003bda6571e64e8",
+      "bytes": 16932,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/shtarker.gif",
+      "sha256": "3cc33f7943c753959761930dc0888cccfb1483cd31cf062f6a751104c1e0e171",
+      "bytes": 30106,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/assets/avatars/get-smart/siegfried.gif",
+      "sha256": "faa67a420d887b32140cd8aab61980b2d15ffc77cc4ff45c9914dd18a140ca5e",
+      "bytes": 24820,
+      "kind": "imagen de referencia",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/auditoria/conversacion-y-cobertura.md",
+      "sha256": "427a4117ae2bfbb4e66a29988b693e7bd491d60951280a0ef3e6df2b56b05e88",
+      "bytes": 20695,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/auditoria/dialogo-constitucional.md",
+      "sha256": "b244e9d89bca5c7e5a1a0a028145e75208b9441c62c8c85bd75ff4c0d102da2e",
+      "bytes": 23732,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/auditoria/registro-de-agentes.md",
+      "sha256": "2be8817e2ea6fbbe7a659d02e69aec073e837127d0a5ae977bab8c0d7cad0287",
+      "bytes": 5890,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/respuestas-del-concepto.md",
+      "sha256": "1c8045d8169788ae9258a8ecab3715880065218ca50d008d5a6d99c419392df6",
+      "bytes": 20036,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/auditoria/revision-integral.md",
+      "sha256": "490eff40cd2382a6b04ff368970c2b5f23869d3ce9c3b69cbf5bf6a6aaa2f46e",
+      "bytes": 19974,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/revision-luna-investigaciones.md",
+      "sha256": "9bdcc6b368f0e540eef19f0a9cf29c95b41a9193fbf7bd02ee5e0f37375cdb1f",
+      "bytes": 5280,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/revision-luna-personajes.md",
+      "sha256": "f2758314db623f01d2a1fac7763fa1472e85eff4d40a40125510619fb26202f6",
+      "bytes": 3725,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/revision-luna-tecnica.md",
+      "sha256": "fcc115c312f341e1fdd220c066869d421c5c076949ec2e5e81d846bf0c3eaced",
+      "bytes": 4280,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/skills-instaladas.md",
+      "sha256": "ad98ecb4b4d09edf6fda578ba278e32cf413e337c033ce4cb5000f4855c47a39",
+      "bytes": 6000,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/skills-local.patch",
+      "sha256": "ec5ca4571cd4390265be5d446c157432e64811b21857a94e389991aa9d22c73b",
+      "bytes": 18828,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/auditoria/skills-manifest.json",
+      "sha256": "7b1b0f2624176798a5b07fdec4dbc5f34885fd5e40d0eca85419b697de577f10",
+      "bytes": 5657,
+      "kind": "texto",
+      "responsible_reading": "raiz",
+      "audit": "lectura-prd-raiz.md"
+    },
+    {
+      "path": "docs/constitucion.md",
+      "sha256": "543e71256501108c3842bc4f0e0204ba7e49d0cbd3f5bba9b068d65122ff54a3",
+      "bytes": 31254,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/actores-personajes-y-fichas.md",
+      "sha256": "18a5453b7ff7a2769e998d8ff4dd103563a1267bc2dc4a886396fc68d6ed9e77",
+      "bytes": 33752,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/concepto-y-decisiones.md",
+      "sha256": "6ecc3c91a9866dadf6be4b2becb9d1bebef30890b28d8285733a0a1eb5aa04b1",
+      "bytes": 9886,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/decisiones-abiertas.md",
+      "sha256": "c8015baedc300831142aec3d32194283ec7ba21fef03716e872521a3cddd67f3",
+      "bytes": 34534,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/dramaturgia-y-direccion.md",
+      "sha256": "5f4674231081dd52e9cd7c39cba5730bd08f4bf059713dd1291eb7380ce4e7df",
+      "bytes": 6465,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/interfaz-funcional-y-visual.md",
+      "sha256": "16069ec657f986dd1b0e235eb17459b21d7b8e35add394d054ab0e0946321b0a",
+      "bytes": 7127,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/moderacion-y-limites-de-confianza.md",
+      "sha256": "9cbe47d398477320da5db86e267791b2b94c989bfa49ec2f3b1cb0b6b5807bcb",
+      "bytes": 9782,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/mundo-memoria-y-tiempo.md",
+      "sha256": "ab12eed858482173681da06f3ac07a52f82e96482c1d520ef27e08eaba4b764b",
+      "bytes": 7481,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/narrador-y-voz-en-off.md",
+      "sha256": "cb9cc80fbf2b87d5a02e5b255b5d30206e3a6e3eea15b283676b14a77bd748f2",
+      "bytes": 2172,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/objetos-mensajes-y-tools.md",
+      "sha256": "8a718279c38a42ebe0f4eb561704bb4dcc0c152ca806261eb78939ce8645fa8a",
+      "bytes": 8959,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/organizacion-de-pi-y-escenario.md",
+      "sha256": "b52c2c96e770d732f697b6ed12bb1c87e25a58ac48d937e9962944313f7afb18",
+      "bytes": 19907,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/diseno/procedimiento-grill-with-docs.md",
+      "sha256": "f29a27287b999f91ffd8d77913189fbcf31002fbe7961eebf9a3cd636620d49b",
+      "bytes": 3861,
+      "kind": "texto",
+      "responsible_reading": "concepto",
+      "audit": "lectura-prd-concepto.md"
+    },
+    {
+      "path": "docs/fuentes/README.md",
+      "sha256": "ce528897805f6f85cb1945b27997832cb3bb3a8c1c8db8c8a1f73622c807d2ad",
+      "bytes": 1505,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/fuentes/aristofanes-personajes-texto-aportado.txt",
+      "sha256": "4d7648013ef0e4b0f927839fb6a345bd407a99820eba456a9f91e2098423ea48",
+      "bytes": 17810,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/fuentes/icm/README.md",
+      "sha256": "8b5691f1cfc888620984736a7bf03d0185a67619a3781bf2eab7735d492b9357",
+      "bytes": 3790,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/fuentes/icm/icm-repository-MIT-LICENSE.txt",
+      "sha256": "e55a39df67e3c95f6c394079262a21b194900911cda31acb40735f556c2bb63c",
+      "bytes": 1094,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/fuentes/icm/icm.bib",
+      "sha256": "d99ecb417089d53e5c3aa2375c283931eb1700e17b7666a41cb5122d1b9f21f3",
+      "bytes": 476,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/fuentes/icm/van-clief-mcdermott-2026-icm-arxiv-2603.16021v2.pdf",
+      "sha256": "7f57262dd6b74782f906f98fb66c09be7c0fa73931d164047dca8ae6d51bf95f",
+      "bytes": 600063,
+      "kind": "PDF",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/fuentes/youtube-get-smart/inventario.csv",
+      "sha256": "93c94fe8eea374b4d411fc6a71f169393c5ade8f296e88ff2e77573661974d26",
+      "bytes": 768,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/actuacion-del-metodo.md",
+      "sha256": "101c637724258dd28827df9a3f1c3fc43bf10bc12aa96f999a9c8e2241e620c7",
+      "bytes": 16681,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/aristofanes-estructura-y-mundo.md",
+      "sha256": "8e35b0719ec218bc066349015dab6a905a7943bfa79f073d9cba88411cfac1cc",
+      "bytes": 19528,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/aristofanes-personajes-y-voces.md",
+      "sha256": "74de57094dadfc96e46fdabb0a0a5c382275e25febeb248300f24c2c27f87e4e",
+      "bytes": 21711,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/aristoteles-creacion-de-personajes.md",
+      "sha256": "81f6bed198f46d0fe25d4ac6ce23d9a361e22baf20071e632d9a6f0be18d09b7",
+      "bytes": 7988,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/balzac-diseno-de-mundos.md",
+      "sha256": "e34880ad0eb0357d101667e930b5e7f078372f606f838f19cc966a770ea26488",
+      "bytes": 9134,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/elevenlabs-diseno-de-voces.md",
+      "sha256": "47cb1f8f779e10e404e898ac8d99881e92621418d68fde77c5cd52ca8eb0b18d",
+      "bytes": 8778,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/entornos-graficos-open-source.md",
+      "sha256": "414a17c461f5c2676bd32876f116b6dca8aa1b539865502e250bf14a94a89de4",
+      "bytes": 17068,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/forster-y-henry-james.md",
+      "sha256": "8cd0522cd0aa259251c6d09db0ac62827896f2c774cda07f289ba5abdb2dee3a",
+      "bytes": 8207,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/get-smart-ritmo-youtube.md",
+      "sha256": "0cce0b6982b3a56b363b92675c8dbfabee532a3436ccf055426b7ce2dbcd4c4a",
+      "bytes": 18048,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/icm-contexto-interpretable.md",
+      "sha256": "29866e7befe9ba0181754b381724680fc021073580e54033c880c03eb6d4beec",
+      "bytes": 21035,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/icm-memory-sqlite.md",
+      "sha256": "a71badc1a0635b36bb713571669617f37a2236432009d5dedc02880f625126cf",
+      "bytes": 33167,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/lajos-egri.md",
+      "sha256": "ec5f12cc71aa1520b91bceb07c27b0956c7791eb177f0e8b682e1ca5be138058",
+      "bytes": 8516,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/pi-coding-agent-runtime.md",
+      "sha256": "601592ebb48cf12221a2f3d3af7de2eab670e64821239932989ed778a2a0bee2",
+      "bytes": 47630,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/propp-y-greimas.md",
+      "sha256": "2cb0ed81400fa7786e26684237c85226c086d2d6b2eb0209502ff2842ded8a8e",
+      "bytes": 6723,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/sofocles-estructura-dramatica.md",
+      "sha256": "5b54b134fbca57a61ae908a37e4c06edad8fa5e63ac466543c2b76565af360d7",
+      "bytes": 18898,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/investigaciones/sofocles-personajes.md",
+      "sha256": "53d653dba4982633a36c71bf795aee0928546771cc4042140451b571d7f93ec5",
+      "bytes": 14971,
+      "kind": "texto",
+      "responsible_reading": "investigaciones",
+      "audit": "lectura-prd-investigaciones.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/README.md",
+      "sha256": "3faa5fc8ac9417b31a1f009395d7d67d28bf54ce1caa10e91e0b785504673d60",
+      "bytes": 5731,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/agente-13.md",
+      "sha256": "5ada44ca11861c67c1ba87758c49e981b8606d2c87ac4803fad231338ca7fd55",
+      "bytes": 10180,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/agente-44.md",
+      "sha256": "ba588819002c9bad9dea50955e8eb2816095cf462a7175b5180451e69efc66b4",
+      "bytes": 10208,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/agente-99.md",
+      "sha256": "db42ef27bfaa7959bcc89d9a7688f44e8c709cf1489a7854d1e6693d121ead31",
+      "bytes": 20322,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/almirante-hargrade.md",
+      "sha256": "a387fa60c286553a5cc8c76969fe82ec0c8da3925d2b0fba8792ac8bbef11291",
+      "bytes": 4388,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/avatares.md",
+      "sha256": "3abc072f5da0dbdadddd98e3a1e9a771b5a58e6d31166179ef153525290a6ce5",
+      "bytes": 9315,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/bobo.md",
+      "sha256": "cb26917d18d5afb828760bd3707c2ecd27e49697c52e9338c159e16b7da2acf2",
+      "bytes": 9880,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/carleton.md",
+      "sha256": "eb23c59ed49c276a62663e7c57a43751eb4f450ac4b76bf3bd94876b09dadc34",
+      "bytes": 3916,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/carlson.md",
+      "sha256": "250f164b56afaaba8ceaa4fbb1069e18d5655cc0f471446a523ca818c89e0b12",
+      "bytes": 4572,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/charlie-watkins.md",
+      "sha256": "0b85121564692e89bd5f27c49e49ac124572790bc65946e5473a73933babe845",
+      "bytes": 4096,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/claw.md",
+      "sha256": "70821fca32e4c134a3195363fc154333e529c26d8a98e191afb6b18e3c37b67c",
+      "bytes": 11944,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/coronel-von-klaus.md",
+      "sha256": "e38a6f62373d766361ea0d970ca220ad95da697896b61321a6a8b6a3698c0b40",
+      "bytes": 4031,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/doctor-ratton.md",
+      "sha256": "63558e6fb1f81650234e2d410ec0385e75c70347c593c7d6f08136a188e3ef32",
+      "bytes": 14292,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/doctora-simon.md",
+      "sha256": "df33513c2d343d5b0071a5592376a71fcae61a72cd783063050f3f8ea3112016",
+      "bytes": 3764,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/doctora-steele.md",
+      "sha256": "487533ca39b8a9c1604a619639318da66e2953162416dc96457fba53976d2bd1",
+      "bytes": 4148,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/familia-smart.md",
+      "sha256": "8c2f33d92c9e52a623b7e2bb2a88106885cf2af340fb7d1ede52e2ca970def23",
+      "bytes": 4037,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/fang.md",
+      "sha256": "31a85e5984a6e930c2b9e2b47ec0137b6a3993e0e321ffbaff4502a2738c1c25",
+      "bytes": 4253,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/harry-hoo.md",
+      "sha256": "7a34f55cd7650de4a444afdb8017ff13bd0db26d82794804715c3e722ada1c17",
+      "bytes": 4000,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/hobson.md",
+      "sha256": "c9c639df0fa4160a39dac38113e501a7f6a47c539cf3ce9ed182db6d58d80628",
+      "bytes": 3743,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/hodgkins.md",
+      "sha256": "9b32ed759d02ab71a1e0a871657d034c337eb464b9b9a5bd8fb1b21c7666c04f",
+      "bytes": 4080,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/hymie.md",
+      "sha256": "f16ac3b2754d2c5b364e349ab19f78c135ef34f0fecdd8cf501e44ec225ab8a2",
+      "bytes": 10718,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/jefe.md",
+      "sha256": "e47f61cb024808a67976e77eefacf0946c25c4936238a0dc90d4ca3c10a8021a",
+      "bytes": 17008,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/larrabee.md",
+      "sha256": "845c1e96bec9b464d4b1eb536d17738e9e62c50717b88527d03b7f8c78c0c921",
+      "bytes": 17788,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/madre-de-99.md",
+      "sha256": "20c4a6ab35ab20895ac1af4fdf4edcacbfc7fc396b2b1422e1b4001b7a7d3165",
+      "bytes": 4408,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/maxwell-smart.md",
+      "sha256": "fa0556c3bf5e52a1fa771586fc87fff50d6c43d3ddd320fc043f49454f0d169d",
+      "bytes": 22972,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/personajes-de-arcos-multipartes.md",
+      "sha256": "ee891eb5d251999f29008935027be510dfd900168807460f53443fd5bbc72f1c",
+      "bytes": 12268,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/profesor-parker.md",
+      "sha256": "c4c1440d20374c0480d1fcca61436fa3eb4324166b9f39de0fb6103d6ab8c746",
+      "bytes": 4066,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/profesor-windish.md",
+      "sha256": "501b7ad2afb134dd0686829a06d1c2cfcc49cf6e34b183b8ecc89d639fbb7e01",
+      "bytes": 3901,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/relaciones-y-continuidad.md",
+      "sha256": "32876b345d0260b70808be696c9e185b0812eafe8af97617963ac996af840cc7",
+      "bytes": 6463,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/rey-charles-ix.md",
+      "sha256": "705d20686ea17e3d6d5e9d6581efb632ff8ff18a09f3115c330dbb03d516dc4e",
+      "bytes": 4565,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/shtarker.md",
+      "sha256": "d3b73732a7fd0b328814b2888435690d9f478dc57b590f52d5060b823d5e0ad7",
+      "bytes": 14419,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "docs/personajes/get-smart/siegfried.md",
+      "sha256": "575fd86ae839aeb1fbc31e5623f6610613d9ca4a4955b4e53ba0cb7c4b1dadb9",
+      "bytes": 17891,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/AGENTS.md",
+      "sha256": "4fb8150e342174e8682dfb2ca7069fd77e6788a4a0a9be0591d0d92b405e9095",
+      "bytes": 2287,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/CONTEXT.md",
+      "sha256": "5f370e7572590fe1fea9c339a65499a898d86e19726058c3abaa2d6eae6f0600",
+      "bytes": 2687,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/README.md",
+      "sha256": "f96697b748cec96cebb3ce6dda6b3731eb45f3bf4cc96261d43a856397db1134",
+      "bytes": 7329,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/_config/agentes.md",
+      "sha256": "b22a8194b644bdfa498f8b11e154c4d61d3cb9e276b22ebffbbc2615178126f0",
+      "bytes": 3044,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/_config/autoridades.md",
+      "sha256": "89c7ec441a9d424fb84ed8f4aef1075db0f9f3cc4c21e4480e6626caf927672c",
+      "bytes": 4245,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/_config/continuidad.md",
+      "sha256": "9e74ce756afaf8cadd090aef015437708d14b726388a159bb59b7cc201bf1da1",
+      "bytes": 2086,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/_config/instancias-pi.md",
+      "sha256": "1d56f38e8681fb5f6a829b4647fa17cf0468b7f8a45cd318ff37cf45fe580555",
+      "bytes": 2908,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/_config/narracion.md",
+      "sha256": "dec0d50f3f0834e0cbc426618aad227b21b59e13307ec889f7281b4c1230d2ed",
+      "bytes": 2247,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/_config/voz-y-ritmo.md",
+      "sha256": "42b425bfe0349cbe4e212f50295548aefb4340372a3e1d0e540bcf8df7f5f4b8",
+      "bytes": 3531,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/continuista/CONTEXT.md",
+      "sha256": "99073411d2e98ebb7b0bd60aa70be1d2ea45dfba13cf9853106dd09c27d2ea0a",
+      "bytes": 3574,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/continuista/references/criterios.md",
+      "sha256": "2223d0a739485b2d935d2aad128c0c0e80faa9f3c94ee47160a4c06fd19abdf9",
+      "bytes": 7281,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/coordinador/CONTEXT.md",
+      "sha256": "86716ed3347acc8572df9263cbc5cdb3abd4cb4399c4a5aee8242d9306f6a7f8",
+      "bytes": 2981,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/direccion/CONTEXT.md",
+      "sha256": "edc55332d4b914261c2f9ad8ffa66a824abf9f0cd3c3a4689d9343eb24af7467",
+      "bytes": 1190,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/direccion/output/etapas.md",
+      "sha256": "ffea92064a47cc94817f78b58f69a9a53c3ce0df05eacf4ea4d0f60464d44987",
+      "bytes": 452,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/direccion/output/intervenciones.md",
+      "sha256": "7ebebdc55029f3cca30200a9016a42689a5c07563977175e4e620b57f72c7860",
+      "bytes": 330,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/direccion/references/linea-dramatica.md",
+      "sha256": "3febb4959306843413faceb7d96bb08fc34314d161c1e54a4d2a9ccdfb6e5f7a",
+      "bytes": 1838,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/escenario/CONTEXT.md",
+      "sha256": "62299a24924c94d91e482177523b675ac8d485659ffec9c9d4ab2d5f71bf54d3",
+      "bytes": 1158,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/escenario/output/estado.md",
+      "sha256": "e65a66453c79503a295d19a1eddaad8167e091853ab0ae572e9ecc8def261d72",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/escenario/output/eventos.md",
+      "sha256": "0923cd21c20f04774eeb7fe043a8c9e26f63b2e637a682c7223b3697b653ad96",
+      "bytes": 257,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/escenario/references/reglas.md",
+      "sha256": "a1a033389d8e05823010fb94751f627db0b4419bc15e74e663070481aba9d3ea",
+      "bytes": 1577,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/interfaz/CONTEXT.md",
+      "sha256": "ae7d135c49b7a5324b9c071fcd58a84366dac4096c1e2d9dfada13a87677555e",
+      "bytes": 2336,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/interfaz/references/contrato.md",
+      "sha256": "c2cc56f02c6b8b22ed17c524d12fed29b352cd1ddcea735142e804531c0c2123",
+      "bytes": 6433,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/CONTEXT.md",
+      "sha256": "208088cacd12b98e3a3dfe2701f3fc14128e64e658022a66652708fb2fc4c7f2",
+      "bytes": 2823,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/output/bandeja.md",
+      "sha256": "e6547c5f4622355dc3584f660f9902af7220b67feca8f34b497953c1bd1568b1",
+      "bytes": 450,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/output/borradores.md",
+      "sha256": "1f4232acb1198a1a472284753cf9a86e6f8b02f8f3b91d3a7d2aa5cdf676a4a5",
+      "bytes": 264,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/output/narracion.md",
+      "sha256": "77c3e2b69eb3b39966920b2d07bf827388225869955541f69a467ee02fedd006",
+      "bytes": 247,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/output/revisiones.md",
+      "sha256": "21e3a24ec4fe1b0563f740f13f75c08075b962a0d7df53e9024cae31ba656860",
+      "bytes": 417,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/output/veredictos.md",
+      "sha256": "55b8d9d968aa3d6c8bdf471293d70d678f22acc0fcfcd92f81d609d23e385204",
+      "bytes": 283,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/narrador/references/protocolo.md",
+      "sha256": "befbd0e847915106ce8628c5616d1c9a5448b7a7b01cc86b2f7448f619a1bc70",
+      "bytes": 2707,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/observacion/CONTEXT.md",
+      "sha256": "d5e1c2add0032d86b977de57dfb8df3bee55eaa91bdba335a54a1999bde9e23c",
+      "bytes": 1825,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/observacion/output/conversaciones.md",
+      "sha256": "6b59b62cf6672e34740a1cefa1490af76447e484230875dc13ed950529d54f79",
+      "bytes": 238,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/observacion/output/evolucion.md",
+      "sha256": "7b707e98011854c0a144c8f33a0cba663088bafcacf0e51fe434e91f7aeb1018",
+      "bytes": 246,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/observacion/output/panel.md",
+      "sha256": "99d595ff961c49c87d2501d4fa3bc79283a80ba817456653449ae707b0adef51",
+      "bytes": 468,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/output/ejecucion.md",
+      "sha256": "904a3890b8d0a478061b9c803a385ce2713886648c0fabbc2421a2d7b22dd7de",
+      "bytes": 392,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/output/pulsos.md",
+      "sha256": "e9c8d3f2c675239a4dad928fdf3f55d146d904286551aab0c3926a2b24051716",
+      "bytes": 389,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/participacion/CONTEXT.md",
+      "sha256": "479635d2df6e9748466945ca7f119a44db355018b1809203f96d1b42b9fbd47c",
+      "bytes": 2788,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/participacion/output/entrada.md",
+      "sha256": "8bc0344f36f454de13acdc8411b97840b13479c7dcbb0a9d7709def6ef04754e",
+      "bytes": 392,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/participacion/output/salida.md",
+      "sha256": "154559ec8852ec14de5472df1050d8a4f51f7f54f1f3b098d72ee84cc684e2d2",
+      "bytes": 252,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/personajes/README.md",
+      "sha256": "e07c366148406d9e6976647c20771a0de2adc4c8e4d2dbb19098d7b694c991f6",
+      "bytes": 3806,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/CONTEXT.md",
+      "sha256": "91b95b93859498b85c4e6875305996ba0fefb710a69a6fb60a33fac620208d40",
+      "bytes": 2099,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/identidad.md",
+      "sha256": "e82b890f4ee85193b1f3895ce72782f5ad3fceb7079e7b353cf684af5f1aac94",
+      "bytes": 1962,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/output/entrada.md",
+      "sha256": "1d3a3be277872c56e98ce066abe9ac6dd902c4d68a183ff7bf703f9fa4ef5da0",
+      "bytes": 305,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/output/estado.md",
+      "sha256": "460189bc51c5ae1b5148895f5b34de7467d9cade995d034f14eacbd343e86d35",
+      "bytes": 857,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/output/memoria.md",
+      "sha256": "be2a10e7712c761385e6259022d6a35b656fdbd0e4b6d2cde06f5697088b7d05",
+      "bytes": 459,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/output/propuesta.md",
+      "sha256": "dab0516b1d3d10151035d7f67f54955b2c5118dd61f126466dec8306fd77387e",
+      "bytes": 263,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/output/revision.md",
+      "sha256": "f3ae3fc9a19db807b4000db84d7836a75b94cfd946dc920b9a62f2ca9db865c8",
+      "bytes": 462,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-13/references/procedencia.md",
+      "sha256": "04a4de5b58a9d0897d8a77dc83a19506c586ba1f81cdbe4d9bb6d1ee673e459f",
+      "bytes": 1420,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/CONTEXT.md",
+      "sha256": "bd5b172f35df398f4ffbe3c9c61fdca2709836e124d9d4c90c95fc7c56f350bb",
+      "bytes": 2099,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/identidad.md",
+      "sha256": "d0892c79807d4eca54f28a40d5fcda47ce2c52ce1884c2a6c7c8554748fe3a31",
+      "bytes": 1927,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/output/entrada.md",
+      "sha256": "81f34be73fca8b8301faa0ee88a5b1199cae6c658715846fcb0da167c46df433",
+      "bytes": 305,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/output/estado.md",
+      "sha256": "f516f69bdb0c7c11799aff6ea42cb81b6e9960432a9b7b77d44ae4688556e77d",
+      "bytes": 857,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/output/memoria.md",
+      "sha256": "09a3d11f0ff4e85eef5991278bfd7895f4d609958f9919afdb7071058ebb102f",
+      "bytes": 459,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/output/propuesta.md",
+      "sha256": "94f4f31c7f359a944c4c9ca64415426cc3b73502fe039941af16f825a13fd9f8",
+      "bytes": 263,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/output/revision.md",
+      "sha256": "fc8d41503859a8721d24acc034599708f024bfa4f81c387071f069f46d9027ca",
+      "bytes": 462,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-44/references/procedencia.md",
+      "sha256": "dc164d4001056536e4deefa0cefaa1c12447cd581ebc10bebd8f5a10e5bfa7da",
+      "bytes": 1420,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/CONTEXT.md",
+      "sha256": "9a628d0e0b7b3be07626588b9269c39153043a92b85932c2742cf101903fb715",
+      "bytes": 2099,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/identidad.md",
+      "sha256": "edc0be2cfd8dbff9e3840b3a454dac25e415624d6a2cf0cb2bbd54a88e6ce43f",
+      "bytes": 2019,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/output/entrada.md",
+      "sha256": "d176ca82c01de3041682f9d874881af0b74297c9c18f9d673e779d00adf5b916",
+      "bytes": 305,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/output/estado.md",
+      "sha256": "302f04aee36f7f8846a405ee8fd7ce2537768ee74244400a701150342e7c5f51",
+      "bytes": 857,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/output/memoria.md",
+      "sha256": "d816c571677ba5f35f0062b98d65b8bc58012c5a96ac2acf99ebaea84a223cf2",
+      "bytes": 459,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/output/propuesta.md",
+      "sha256": "1c020d1633e60e0d4d2ef341bf04468685342768cfc627ef38ade41caba81b3d",
+      "bytes": 263,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/output/revision.md",
+      "sha256": "17331d275887fb544a9eb9f97cf413867688150718e540af1a671494a560ff67",
+      "bytes": 462,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/agente-99/references/procedencia.md",
+      "sha256": "fb4b980854574df27a889150da256564f582a0603648c75e1d7f554b4631a90a",
+      "bytes": 1420,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/CONTEXT.md",
+      "sha256": "a0a2c8e0931ac330a376aa847416fa2f4878e22871f2d7d67d86e6aa459f2da8",
+      "bytes": 2140,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/identidad.md",
+      "sha256": "f79cfc8e95e634385e47e17a94e1ab052ba868f52833b18a2e3aa8838bcc10a9",
+      "bytes": 2009,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/output/entrada.md",
+      "sha256": "f8382608b25a66a2c097d0b86309bcef3ec4081a1df13e9f1907edac4f914019",
+      "bytes": 337,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/output/estado.md",
+      "sha256": "691d0bf92bdfa939ab473b48e5521b020babf13945a221de18b0ad7e36dd4d40",
+      "bytes": 889,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/output/memoria.md",
+      "sha256": "092b80c3856438f3219bfdc0ad8fb37d37900cfdb5ac08152adaf894622fedb2",
+      "bytes": 491,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/output/propuesta.md",
+      "sha256": "fb7128436c9bfb70184496c501599ae5732d8972b62d6349d4168a086c9a3b83",
+      "bytes": 295,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/output/revision.md",
+      "sha256": "ac83a4eaab7ee3095a2f7e8fa69af6831fa47d11cf5b7a21122301292297d7dc",
+      "bytes": 471,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/almirante-hargrade/references/procedencia.md",
+      "sha256": "4c59562472906cbdb1a7540a3238b4c22618d75062c0bddb0e35b44335b3a1cf",
+      "bytes": 1475,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/CONTEXT.md",
+      "sha256": "df1baff26e5d0d0a9c908ec83022cd2379a0a606ea861870fe0cad199530a174",
+      "bytes": 2084,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/identidad.md",
+      "sha256": "f1ae8e83708bef60a05037c8240105f3f3b831a0545b8096c41c9bccf8356622",
+      "bytes": 1937,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/output/entrada.md",
+      "sha256": "1743011b7b91b1b5599e5b020fed0601b5cfc8108aebedffbfaabcff98780652",
+      "bytes": 295,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/output/estado.md",
+      "sha256": "0bafbc3fcb3435686e6e2b6ad15403404612fb80aed4ed5c794f94c02f85580d",
+      "bytes": 847,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/output/memoria.md",
+      "sha256": "46c2de7987bc1f4ec21b5104f43536aca356d835fe1d4791960c2660d5cb3856",
+      "bytes": 449,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/output/propuesta.md",
+      "sha256": "2b28e9a5a472b82a135c7228a6f3786bac5933e19bc2afef842d66227bca4f14",
+      "bytes": 253,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/output/revision.md",
+      "sha256": "affd568600b96d0582b6b95992e0d7e77e85e49dbd0a2337bd837d6ff1405198",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/bobo/references/procedencia.md",
+      "sha256": "dc3826d06c6423fe9a02e656c8f54e30cc4f3daed7ee5a8d9eaf66303135d182",
+      "bytes": 1405,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/CONTEXT.md",
+      "sha256": "168d8cddb162aa5b9f099d2053117418f87a46ad974fce2b0f5264e32023f3a7",
+      "bytes": 2096,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/identidad.md",
+      "sha256": "8fd41c03337cba37c65355e68dabebeecbfd714ed15792c3e9c2bb1c0b6a6298",
+      "bytes": 1917,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/output/entrada.md",
+      "sha256": "b1a8bf5272c36c713bb044d318d7a80c8ad5524cd9e613f0aa980c4af1238e54",
+      "bytes": 303,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/output/estado.md",
+      "sha256": "c219ffdc7048ab2eb1425b6989094b3fb39421cebc845d9f06a2f4e649fc7b68",
+      "bytes": 855,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/output/memoria.md",
+      "sha256": "b6a92cac6143b73d05f09d8df58b7204ebb05cde3ab254da895c04017b6a9c93",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/output/propuesta.md",
+      "sha256": "734aec754a53e3e1d4ada1269774e1ecbcd3cbe4c5c7f1e0313f4c243a672743",
+      "bytes": 261,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/output/revision.md",
+      "sha256": "9352ef38fe1913e91eecb71f61f5483b72b11eb6b700d4bd653bfb69bcf94447",
+      "bytes": 461,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carleton/references/procedencia.md",
+      "sha256": "16d6f8bc80f12ff8e8ae283f88a0f347212f74cc679315eb086b7337611847f1",
+      "bytes": 1417,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/CONTEXT.md",
+      "sha256": "7959dc2095a40d13c815e61e844a8dcc0ac51c0ae87934176d7bfdc00537bace",
+      "bytes": 2093,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/identidad.md",
+      "sha256": "250821aece8c4facc8eed9314a73b8e306e8e4b53b7fe83c8b2b17ae9bcb27ed",
+      "bytes": 1913,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/output/entrada.md",
+      "sha256": "113b00155eb2585cbd067a7f57fbcbe23e0d768cc3fcab2118c13092f863f04d",
+      "bytes": 301,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/output/estado.md",
+      "sha256": "c5ac36cbe2260a85222532103650709d033d6de26eb89b0b511a0d2714e2911f",
+      "bytes": 853,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/output/memoria.md",
+      "sha256": "0da8d02fa465a49d62014cd9e1f1fa2e163a043c7a633eff035750bc037798c7",
+      "bytes": 455,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/output/propuesta.md",
+      "sha256": "8e5b20c1b9a24ee8a249d2ac82a291e4fe985505b1e6c243201cd33a5d7b45e5",
+      "bytes": 259,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/output/revision.md",
+      "sha256": "833e961ad793685974769d3cc371e1cca0511105295f3323fe3396e228af40ef",
+      "bytes": 460,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/carlson/references/procedencia.md",
+      "sha256": "2f3a9e5c6d7a8efbbb5679c5b45bbca7f0f6cd8f882446db4025079253a15118",
+      "bytes": 1414,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/CONTEXT.md",
+      "sha256": "cce8bf7a0a0d2d1c8afa8e93c7320b631300e96874fe0b4bb34bb15309e89232",
+      "bytes": 2117,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/identidad.md",
+      "sha256": "858a9c97e84dbf9a0933bed6a432eb2ea2ce5840f579a53c23e6276615143c96",
+      "bytes": 1932,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/output/entrada.md",
+      "sha256": "1d89193b0603f4802f4ca37841ab3ae67f310f10270ec97ac3bcb0c42b5f74f9",
+      "bytes": 317,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/output/estado.md",
+      "sha256": "afe59e8d34ce36ae399b0fbc39fcca1b05f4ecfdf1635cd83e3be5103b5541ad",
+      "bytes": 869,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/output/memoria.md",
+      "sha256": "d3ba087e14eb6ffc57be2e3b20cec90b6f859afb8fbf09174852b3f53ac7a4c5",
+      "bytes": 471,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/output/propuesta.md",
+      "sha256": "90985f029e5f7e65f46cb75c2f951cf97360b85720bf203f8905c108a702d755",
+      "bytes": 275,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/output/revision.md",
+      "sha256": "bc0b482dfbfac04e88be1f5a3c07fbf537620330e987e767e304ca9fdef2af0b",
+      "bytes": 468,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/charlie-watkins/references/procedencia.md",
+      "sha256": "7b11140fbca5fe603c1f6b7acf18f64ac5e45dfdd7e28324084de402d86e567e",
+      "bytes": 1438,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/CONTEXT.md",
+      "sha256": "5b198e83081db9138d923bccbe33623e0c39a77ab00b3aa8e617f4cbe2336f81",
+      "bytes": 2091,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/identidad.md",
+      "sha256": "da9212a0d1ccf72a703568f9dc28e4fd5d01f1b6335842f4550cc50fd5db4def",
+      "bytes": 2016,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/output/entrada.md",
+      "sha256": "2eb67a0f0f7e9b4d45e2a7027db32ca57d0fcf8879d64bc0835ab993c29a4a4b",
+      "bytes": 302,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/output/estado.md",
+      "sha256": "323af13ecac3cef19d89ae25ea42c7d5d853c950fe494af356e433e6fc9f9dfa",
+      "bytes": 854,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/output/memoria.md",
+      "sha256": "95a69e411f0c0b30491683cdc49c82b294696ffc26cf0af1b6c50e1e9424b39b",
+      "bytes": 456,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/output/propuesta.md",
+      "sha256": "03fc5a50951f8572f7917609947bd7393be90cf0c5ec490b4d2f14e41abc2133",
+      "bytes": 260,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/output/revision.md",
+      "sha256": "7c9d7d18bf0fb71aa4ba540c5ca7451d0a4792b0e15f26264e857ca3fb02b518",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/claw/references/procedencia.md",
+      "sha256": "555cdd59b98d8ef752959af9bc7d67e3b117a81d87d02be35f6868ef710a30a0",
+      "bytes": 1419,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/CONTEXT.md",
+      "sha256": "dc4171ae8097e265f68315f8237ba23dcb01504448886cb2baf64bf2072c925d",
+      "bytes": 2123,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/identidad.md",
+      "sha256": "59d40b8c63cfaf5d5f3e354ee93fc860145dd0a3f769897c54ce53b42f8f8c1a",
+      "bytes": 1905,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/output/entrada.md",
+      "sha256": "dcb514ed2f312c859875e20af39972569477e5bd10a0de9c8790daddabc90862",
+      "bytes": 321,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/output/estado.md",
+      "sha256": "7713943cd7676c4566585322feedae7c6cf037a92b98d07fe6ccad40250af7ed",
+      "bytes": 873,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/output/memoria.md",
+      "sha256": "8743f26f9c791253ba50ea0a8045df55dac4f2c12932d4ea3abfa9f3a17e56fb",
+      "bytes": 475,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/output/propuesta.md",
+      "sha256": "607428d763683816d436180a3d67922d5f622eae3a604c89e0da8a537606e970",
+      "bytes": 279,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/output/revision.md",
+      "sha256": "27ca1ab0234869e972ac41d215723be5106a66fba3a41266cc78aafab50f16a6",
+      "bytes": 470,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/coronel-von-klaus/references/procedencia.md",
+      "sha256": "c3090181ee7e3796ca825bb2642b19022babec306707a5285830c786c97cb07f",
+      "bytes": 1444,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/CONTEXT.md",
+      "sha256": "016b78027a19ec90b871ccb8ea0b8827bb6440e5a39af3ac1f5a2266c4e9c329",
+      "bytes": 2111,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/identidad.md",
+      "sha256": "27f8cf743d1cdb1e92e0af1c577feaf64392b9ba6c7e3b5e06dfc9a11e50eb34",
+      "bytes": 1962,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/output/entrada.md",
+      "sha256": "01c7e9f61e5600d8c4c79fb5c348413afe88f272c417fd4aaf86a19c8cac373f",
+      "bytes": 313,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/output/estado.md",
+      "sha256": "2130cdb4e8bb48c2b52ee4abdf0cc488b0c50ea52484dd8d4a3b9f8fb2ff16ff",
+      "bytes": 865,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/output/memoria.md",
+      "sha256": "d9eca911b28c94579f870eafee42c1df47d2c46b5f97ad465833e50fcea7f6c5",
+      "bytes": 467,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/output/propuesta.md",
+      "sha256": "0eb73dc4dedb552e0c3964b61b6d7f88819bf0cb1b2f963b21f83fe3aa549a32",
+      "bytes": 271,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/output/revision.md",
+      "sha256": "cb5e7d8cc13774716e7ccbfe44df5c0e6c14bb69d6ce5cf0a4e398ee1c357d9d",
+      "bytes": 466,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctor-ratton/references/procedencia.md",
+      "sha256": "323da75587d689e05a8f5731bff492aeae93f38bbf4a0c15795e6d25c8b3608e",
+      "bytes": 1432,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/CONTEXT.md",
+      "sha256": "9f28d91db3f6f3278bd26f1be5b71708a99359e234e65801a5ff3e6533ba8ffe",
+      "bytes": 2111,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/identidad.md",
+      "sha256": "62010d9c5bcf2c268b3571ec7a03fd97c8705af2dc72ce0f9307581b9f90fe9a",
+      "bytes": 1879,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/output/entrada.md",
+      "sha256": "5513c51e7a73d1c0cd711ba7c2c6986f88e7c8b4d0f2c361146b4687a9eb4f5f",
+      "bytes": 313,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/output/estado.md",
+      "sha256": "13c915f78ccdee2633a920b4cc3d3cf4a9dc0fbcfecf0d393e516f1360e12c3f",
+      "bytes": 865,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/output/memoria.md",
+      "sha256": "91cbeeebe2e5be942668f51cb95a13e722f00ec8a374f4c5d43e32d5af1d5949",
+      "bytes": 467,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/output/propuesta.md",
+      "sha256": "9bb27d7651158d476ea2a2f048c6e841df4e63af689a9d26b5f14bf74b05ad94",
+      "bytes": 271,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/output/revision.md",
+      "sha256": "e54aa855d97bff8e8d64741fe24c17782caa6dc1de34285c17fdae8456b26711",
+      "bytes": 466,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-simon/references/procedencia.md",
+      "sha256": "c05c18e742a1262714d3d865b95df670bf19381e0a1bdae16c8ec6a2e4fe1fe2",
+      "bytes": 1432,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/CONTEXT.md",
+      "sha256": "29f1a1b33b0b2f48a764574407463f23173300d06d2a43c3e67053ca99672f50",
+      "bytes": 2114,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/identidad.md",
+      "sha256": "38ee7f06fa2014310fc68f1327c0ee9227cf38de9660214c9c0fb6fe981eaff1",
+      "bytes": 1959,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/output/entrada.md",
+      "sha256": "1f83a9bd6b7d4bae9c40f9dca548b8a2bb6a110a3bd9cc8c896362017777e317",
+      "bytes": 315,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/output/estado.md",
+      "sha256": "a7d83fab0695a4712c649dc1b96b5c1f72a8080a099a36640b8e4fe90f52a7d8",
+      "bytes": 867,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/output/memoria.md",
+      "sha256": "3245a02a62ee65f5d23ccc1034f1ecfa696d0112ef5dda740137fd47dcf32a6b",
+      "bytes": 469,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/output/propuesta.md",
+      "sha256": "41c4304b1384d10137caaa05cef9b7193022b0f4804f965d9db04554ff5b36ef",
+      "bytes": 273,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/output/revision.md",
+      "sha256": "3eaa47ee0bacbe6ff077c48ddafaee880fca56c3bfc3b30f2221c197a986348c",
+      "bytes": 467,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/doctora-steele/references/procedencia.md",
+      "sha256": "c605e7002265d4c89be471b9d54edec39eaaa39014c68baa43653a35a3613946",
+      "bytes": 1435,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/CONTEXT.md",
+      "sha256": "00598b00bd042e5f018615c2409e2345be4fdd219cefc2d81fd20c34bc3730a8",
+      "bytes": 2093,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/identidad.md",
+      "sha256": "2477560017f0133fc223ce9cee59f804f00535090b97c1dbbb8df0a3cb9a4b79",
+      "bytes": 1982,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/output/entrada.md",
+      "sha256": "a9c29a054746def5e0b391a7ae1e2bed11dd7fcc7ef8de1ffce5abb42093ee30",
+      "bytes": 304,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/output/estado.md",
+      "sha256": "ca3ca85a59b7b814970ddc71ae00f48a65b40bc1154b5b37dc3aaf87f713da9a",
+      "bytes": 856,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/output/memoria.md",
+      "sha256": "769f9cac37f49f6c837b9a4a36b03fe8bb96f350cfaadcdbb76d575cdf0f669c",
+      "bytes": 458,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/output/propuesta.md",
+      "sha256": "e3f2a61dcdf375ae7ce9bb2cf0c0e6011a3f2c11f92458eded76068c2f25c454",
+      "bytes": 262,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/output/revision.md",
+      "sha256": "3fc19a40d72950cb7e8a9920b9e3b169dd0d84f5784f282b34f82418c147daf4",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/fang/references/procedencia.md",
+      "sha256": "e6bcd5f271368390ab6e10abfbe92131e44fecccf515c58055970900f464d625",
+      "bytes": 1423,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/CONTEXT.md",
+      "sha256": "454bdf6fbef9a4ccaeb81e67445b0c13707e77c4c0298ce13973da42d5d3ad8e",
+      "bytes": 2099,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/identidad.md",
+      "sha256": "05d7de49eb9cfcdbfd12e3a5673e5574f6a11576430c8bf4baa125e0562256d4",
+      "bytes": 1931,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/output/entrada.md",
+      "sha256": "bb9028a9b40c29bd4cc12f9b3ef4031a12c4ec1bd28364be133c7daded91a6d1",
+      "bytes": 305,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/output/estado.md",
+      "sha256": "c02952a67b88a3aac51acfa18bab495948a5fb981ed2884277fe5a5b9baa5a0d",
+      "bytes": 857,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/output/memoria.md",
+      "sha256": "d9b120100d3f47da01bc4205065ef007ab71cf3b9f76a974d9e9dcbb46306169",
+      "bytes": 459,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/output/propuesta.md",
+      "sha256": "a14c3ba9328f0551d8342e57ab24be316778d2e9628c9c0b91b917c2b8cb7644",
+      "bytes": 263,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/output/revision.md",
+      "sha256": "97987095c9057cee04d9408d9b22607a6e8d69454563a30a8c425f6fac8afa57",
+      "bytes": 462,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/harry-hoo/references/procedencia.md",
+      "sha256": "7118e718a17edaf0eda8725a54a9b37fed964d959aaf90f49f8b6389b657af4e",
+      "bytes": 1420,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/CONTEXT.md",
+      "sha256": "b588eadede5cbf99aa68178cc37b00b8947995c1c729d0ea80fb803548a0fa01",
+      "bytes": 2090,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/identidad.md",
+      "sha256": "a2a95bb6b442b1346b072c9eb231097541d6350c5588b7224e4db13e60317264",
+      "bytes": 1892,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/output/entrada.md",
+      "sha256": "b7e66927230783870d1abe1ee9d5858ccca918bcd6141d4d5a762f88140b5a86",
+      "bytes": 299,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/output/estado.md",
+      "sha256": "c4363528db8a2f110c037bfee821eb749a7801d0e891c0284e87f96cece1fffb",
+      "bytes": 851,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/output/memoria.md",
+      "sha256": "9eb56acd3365afc2b4d14e1de2a04e50ec993b06834137812661984417ab4cf5",
+      "bytes": 453,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/output/propuesta.md",
+      "sha256": "ae5606575913bd62354c0defa356630c5275fafbc28619a2a0d5d50778ef6950",
+      "bytes": 257,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/output/revision.md",
+      "sha256": "c745ce68d8dfd6affe75c797b485795be68e597baa6da35b35e139326b187f18",
+      "bytes": 459,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hobson/references/procedencia.md",
+      "sha256": "a1009f735b698e51473a3fd97b4cf967104c08cf606ae799920c856764fb4642",
+      "bytes": 1411,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/CONTEXT.md",
+      "sha256": "e55ae08ab746ff83917b8082a814a2d5d8ad2c6011a97b1f7ea4a5df65c30308",
+      "bytes": 2096,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/identidad.md",
+      "sha256": "2bc6980041f878d74490e68aab600a561fa8c8e1b76f774539519671e1d2a561",
+      "bytes": 1841,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/output/entrada.md",
+      "sha256": "b24ddba2b64d35f46586dcd5272094ac3fb07c524333576bdc5a83f89c03021c",
+      "bytes": 303,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/output/estado.md",
+      "sha256": "222eec1233d81a6db43272259886c831f255200230541827698e4ae74ba5d12b",
+      "bytes": 855,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/output/memoria.md",
+      "sha256": "48ebec8809cdcf34f7fc44e8c7de031dfe9f3bcd65833f060232b8104eac61b4",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/output/propuesta.md",
+      "sha256": "f8182ed0540ef883925c248f0f8155662ac4b755430eb251b3521fb0c5f4e435",
+      "bytes": 261,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/output/revision.md",
+      "sha256": "5edb6761ecb5d1e90f00a9997a1ce90bf5a06cf1dbd3e3863d6f8d1ad33d84df",
+      "bytes": 461,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hodgkins/references/procedencia.md",
+      "sha256": "62976c2f91ffc2c00216b47d7ebeffc680edde8b317e22a142bd4825a41a3c1c",
+      "bytes": 1417,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/CONTEXT.md",
+      "sha256": "0aa575531b7e126d70aa931caf2b934dd6f532bc6f697dc25ac07844a6233279",
+      "bytes": 2087,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/identidad.md",
+      "sha256": "2797ff7e39b3b3197f64d652ca4ce5395ad5e7b4d028009ad24a1fabe5c125d6",
+      "bytes": 2031,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/output/entrada.md",
+      "sha256": "77fcae0e2c94bb6e7ca604d79f0027418002221a5b8b773c8433fc07545fbc38",
+      "bytes": 297,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/output/estado.md",
+      "sha256": "8d1761a69c4e3a45cec9d0f700cf62b136cbff309f7cf6761cb87fa3612daf83",
+      "bytes": 849,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/output/memoria.md",
+      "sha256": "4e3783dfe0edc2b501fca4314c6cd9bc16664de8006142c95d14451c699c57a2",
+      "bytes": 451,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/output/propuesta.md",
+      "sha256": "e4c8fbbb447b02863da829e1d8b756e93d9e5bfd4bb7c927764282778b13f952",
+      "bytes": 255,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/output/revision.md",
+      "sha256": "4a3929d31b854c36974081130fd7218e9429845b1195338968950d31a2ef7e65",
+      "bytes": 458,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/hymie/references/procedencia.md",
+      "sha256": "157bff1dca8b5c713fe6cd79f2fea52ff14ce44f13653cfe8cf74d7d6df55389",
+      "bytes": 1408,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/CONTEXT.md",
+      "sha256": "c96c3ccbbe4645f8d987c2325b59adb642e15bcad3c28361eafa7f5e4baf108b",
+      "bytes": 2100,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/identidad.md",
+      "sha256": "52a428c6b6ad3d4df57575e6c4ff9d5880c86f1306fa65e15b137efd61035110",
+      "bytes": 2016,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/output/entrada.md",
+      "sha256": "b57e16bdb013c8a845faba58dda2fd15b82062789bfb43e2e588df4fdd530bb2",
+      "bytes": 311,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/output/estado.md",
+      "sha256": "81b1b40834804f557f408b2ab36ac3bcfdbe22102c2f8fcae4f15a06ccc9dd8f",
+      "bytes": 863,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/output/memoria.md",
+      "sha256": "fa4b40eb5911c0e71eed66f3caafe5c49bb81be18d3c5637aae912659d8faec5",
+      "bytes": 465,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/output/propuesta.md",
+      "sha256": "3748d1efadec013e830fe14c10a140f8e14bf5e7f9f0f33e539d18cc609df73c",
+      "bytes": 269,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/output/revision.md",
+      "sha256": "6b628ea266fab519163361ffbf76cfbacd02f3d51a589a24500f4a8649cc3146",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/jefe/references/procedencia.md",
+      "sha256": "a93c265b7a758103b9f7cf710d82de621e6649b813c59c12ade7f01113815ec9",
+      "bytes": 1437,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/CONTEXT.md",
+      "sha256": "de8c1a2d6733c661b7a9f30ac4041de086216e05bddf10ffc81c8854a8220005",
+      "bytes": 2096,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/identidad.md",
+      "sha256": "fbf9a9b0799537f2847bb7f368bc246d261e63a13bbb742df510538b51843a7c",
+      "bytes": 1974,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/output/entrada.md",
+      "sha256": "3b9711edfb045493979a3b1d161ea0ab4ba92dbf0c460f75f9b8372b4353ba25",
+      "bytes": 303,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/output/estado.md",
+      "sha256": "ccbe17186478ec4f009d81e8441f05fe36dc7a98ea29b85cec0fccbf79a53c3f",
+      "bytes": 855,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/output/memoria.md",
+      "sha256": "ac03af5e0163b92eb6965965c0ded590c7a9271fd8ba43e9eda09ff28aca0c33",
+      "bytes": 457,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/output/propuesta.md",
+      "sha256": "789a5c6c690903f3adeb0fbd483b49a7ad2798e2e67978120c53b069fe5f4fa6",
+      "bytes": 261,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/output/revision.md",
+      "sha256": "c16e7d998c5fdfd78bb2b1b94c7763f79918fce064b7c0377b629dbba520b8c4",
+      "bytes": 461,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/larrabee/references/procedencia.md",
+      "sha256": "33407bbe4cc737cedba37eafdb64e5c17cfd0e8d899dda699ff2619d39f8459c",
+      "bytes": 1417,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/CONTEXT.md",
+      "sha256": "8a503bcfbf322a38b1899eb32073e7d287fa3838d922a83564a75a48f6af137c",
+      "bytes": 2105,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/identidad.md",
+      "sha256": "f0b59646b279c94cd5df42aa76b1692cfcc4f4c23491df91750f1bce96a45877",
+      "bytes": 1998,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/output/entrada.md",
+      "sha256": "1542cb784c7a58316d0cc9040328b594dd9d97dc9c9fa63781fbe4c14b7c091d",
+      "bytes": 309,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/output/estado.md",
+      "sha256": "e5ece73d23c6233c1f86c108ea4ae8f07b42253ee3fc85dd9564e3bfa47478ab",
+      "bytes": 861,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/output/memoria.md",
+      "sha256": "cf028b3868d749cf42cc25dc5ac079714ea909b89eb9b6554b1da002e60de237",
+      "bytes": 463,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/output/propuesta.md",
+      "sha256": "41add832964890219dc7af73a886a10a3b3e038e0afb2d8d8cf534fe1b86778e",
+      "bytes": 267,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/output/revision.md",
+      "sha256": "ad729a6785cf73e6e6064499a7d8d3532f88294a9a4038943a9ac571f66e20d8",
+      "bytes": 464,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/madre-de-99/references/procedencia.md",
+      "sha256": "deb3082dcbfb0fdbae14cfdb4e47e72135b1acd42efdd36d32655004e4f0feca",
+      "bytes": 1426,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/CONTEXT.md",
+      "sha256": "ce1d5e606f68b5d5758d7298695a986adf26210da179c314216eb2cef6a920ce",
+      "bytes": 2125,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/identidad.md",
+      "sha256": "81881f176ee0658e73a888b0e7786380ab2052a7f71c6ff019ad0fdb3f804739",
+      "bytes": 2049,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/output/entrada.md",
+      "sha256": "3ce2b62c3043c7344c0037e2bad4b353745c248326ef39f2dadb86d5cb4cc976",
+      "bytes": 327,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/output/estado.md",
+      "sha256": "b705d7e302c3cd6bfbe7c72e4eef1c5125b9550f53986e271e3107a08779157f",
+      "bytes": 879,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/output/memoria.md",
+      "sha256": "dbcbfe9ae838cc08a969c425d3968573589e5003da7760f68022461916694654",
+      "bytes": 481,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/output/propuesta.md",
+      "sha256": "cd3f45f6738873f5f256ed683094119523665475caf2b7e79f14fc00c73bbf9f",
+      "bytes": 285,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/output/revision.md",
+      "sha256": "93e852474f9547c448f49ff19b5140fbb5d06e9fd43d20777c2822749d1bc7cf",
+      "bytes": 466,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/maxwell-smart/references/procedencia.md",
+      "sha256": "54933e5750b50e9bf2281b8bfff5b927ae17bf9ca526b265fb6041bf06c96489",
+      "bytes": 1460,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/CONTEXT.md",
+      "sha256": "833a51ed86db8cea5c86b4cc4b1ace70847c7f7e1bc48b5c0fe95430e532bf2e",
+      "bytes": 2117,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/identidad.md",
+      "sha256": "373a9abb128a7759465a26cbedc7a640cff6c5c01315ef5f27375bf4bf8d01bd",
+      "bytes": 1903,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/output/entrada.md",
+      "sha256": "2f7d73f8b41000f5c4b02a111dc72995efabe5d0adbc556f407f1aa34220643e",
+      "bytes": 317,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/output/estado.md",
+      "sha256": "d9d5d21c11a6501d0cbe30d25e68d59e7f6bddd9c302d408e38428f9d56c2629",
+      "bytes": 869,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/output/memoria.md",
+      "sha256": "18f2cef7e99e39983359894ac90a21c1e2317ef63b40502bb51500d5d9c980c0",
+      "bytes": 471,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/output/propuesta.md",
+      "sha256": "edf7f781c0c545ddfa5debcf65fc35628cc7912caf2e9d574f2855318baacfa9",
+      "bytes": 275,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/output/revision.md",
+      "sha256": "cbe48f9705984877d7dec66af2408c9d6f04b3f5ca515fcaaea843098e2219eb",
+      "bytes": 468,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-parker/references/procedencia.md",
+      "sha256": "4b05a3112b5c3e03144b560761ad696705463fecc9a7611c5e506369026f01f2",
+      "bytes": 1438,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/CONTEXT.md",
+      "sha256": "ff1acd498a2ca36194972c962e55185ee095ecb245605589187d4a7b10ffcfe1",
+      "bytes": 2120,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/identidad.md",
+      "sha256": "9a35d88d4a90070d109b009471a8f998556f51b742914a17deca81fa040c8d0c",
+      "bytes": 1906,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/output/entrada.md",
+      "sha256": "df3d787cf9cdf4f43442a818bbfed1c2df27deea7300a098424abcb4a8534244",
+      "bytes": 319,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/output/estado.md",
+      "sha256": "238613e7f328e562c3d81c3090fddd0e20de077d022c064a9201f9c41a9d71bc",
+      "bytes": 871,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/output/memoria.md",
+      "sha256": "630fdaf55197411051194962145ededaf449cc5b25061b9e68ac919cfc1236a8",
+      "bytes": 473,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/output/propuesta.md",
+      "sha256": "520c07513e85e35ad5d9cd6d5aaac69eb3b1025a720e4b0c6f1097852ae09a12",
+      "bytes": 277,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/output/revision.md",
+      "sha256": "db4a3d493ccf52e69084aa78f9c042f1200dcb7724392ed9ac1d0035cacd6d89",
+      "bytes": 469,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/profesor-windish/references/procedencia.md",
+      "sha256": "49ed18c41c087acf3b9b01ddba13e6c8bcb6e6e2955a4607009895396aad4174",
+      "bytes": 1441,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/CONTEXT.md",
+      "sha256": "19e1b7ecb46b651c385ea54bdcc048381aff57232230663cf573228347d09b11",
+      "bytes": 2114,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/identidad.md",
+      "sha256": "99ebf599b42d9ebe73ef075688c51afb7bf74c00faaf975fd766f5a2968bb274",
+      "bytes": 1994,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/output/entrada.md",
+      "sha256": "2c1d45d327e536c4fceb5964fd75a86c44db90d58125e98e0d5da7f974bf3dfb",
+      "bytes": 315,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/output/estado.md",
+      "sha256": "55f21c364e648e3ea3ccf6870752fd79ef2bca4ac80d4916d381eac49952ea1d",
+      "bytes": 867,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/output/memoria.md",
+      "sha256": "66db9bef7fa013c901e9c0d60a376632ae55a4471019dc46b6466c84e215974a",
+      "bytes": 469,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/output/propuesta.md",
+      "sha256": "78904d251c5d0f770731883945a0e4d14f07d70afb2630c3a86849a2cdcda002",
+      "bytes": 273,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/output/revision.md",
+      "sha256": "1e6dd28698213614d66c5d6a244cffd30146ef37de73d3d1416eb8e3505986de",
+      "bytes": 467,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/rey-charles-ix/references/procedencia.md",
+      "sha256": "0f77d4161b9a48e8785ac223c1ffaf609c857114504291e35d5f836d3124df0f",
+      "bytes": 1435,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/CONTEXT.md",
+      "sha256": "e56b1da3b995fdaf5f23b61dfe94da8aeb130e17409d6a915cfe1c5d9aa43cdd",
+      "bytes": 2106,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/identidad.md",
+      "sha256": "b694ab432634c84f01101c10f6c6ef14273f3eebfcf6aea9d69f7dc6c76641df",
+      "bytes": 1938,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/output/entrada.md",
+      "sha256": "93001f859c40d83857638b692d3dd8041e9a219e9739bf1c832adeae55578cd5",
+      "bytes": 313,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/output/estado.md",
+      "sha256": "29c5ccd029e633c1ed0889e5668e0398db2aa42cb79a1a54d5ec0ff42f2a0d92",
+      "bytes": 865,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/output/memoria.md",
+      "sha256": "3fcecddd4cbf89d407f40effd99903a82bb67d2fe1ae73063937a755d6ed6215",
+      "bytes": 467,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/output/propuesta.md",
+      "sha256": "6946e2f635ca614748f5a612f55e21fc4278ffcf0fe04a5c87ab95a85e20fa36",
+      "bytes": 271,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/output/revision.md",
+      "sha256": "6dcfeb620ce10e5a041c9cdb34c02ac25bb74a1c78a99755ed568b1d0b975a0d",
+      "bytes": 461,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/shtarker/references/procedencia.md",
+      "sha256": "59d87e93d8ee2f7fb84b1f59b7eac00adf7c82a42447f3174cb48ca0c89ac856",
+      "bytes": 1437,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/CONTEXT.md",
+      "sha256": "fbff2b4246ef33e6ebd6d9bbfa1320e497241206a5d5e9b8592201f6650c96c6",
+      "bytes": 2099,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/identidad.md",
+      "sha256": "c34595d40fb6d3b606260b4c7833121ad3f8a9bb5f0ba29886e84b3ad8806d85",
+      "bytes": 2015,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/output/entrada.md",
+      "sha256": "ad1979f676341012a81c75c0279db0d185c391135487bc728c76920c44eb773c",
+      "bytes": 305,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/output/estado.md",
+      "sha256": "e08a15284ccd14556299c83b00988d380da5cecedbda5ec1683e2088d86e4c2e",
+      "bytes": 857,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/output/memoria.md",
+      "sha256": "ff70b62c470918f87271729e07285f3b1a777fcbe712d98aa45d5164dc9600ac",
+      "bytes": 459,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/output/propuesta.md",
+      "sha256": "75a210cc2f869c0f0243bcc4db52f9be1c09aa6e59a3b35936b9601824ccd286",
+      "bytes": 263,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/output/revision.md",
+      "sha256": "660a86fe41cb160da56ab325c7361b4443823a976efd204aed6bd677dd9ae679",
+      "bytes": 462,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/personajes/siegfried/references/procedencia.md",
+      "sha256": "df71ebdd1b97bc465d26e43c3cdd0bfd033ace5eb86e3bb4f60dc20bd5ee0e91",
+      "bytes": 1420,
+      "kind": "texto",
+      "responsible_reading": "personajes",
+      "audit": "lectura-prd-personajes.md"
+    },
+    {
+      "path": "obra/references/ciclo.md",
+      "sha256": "bc0cf9e11552ef6e6fc4773cbfddc3fafa45b57f7ec13bd83ce03fd6b2111f20",
+      "bytes": 4858,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/escenario-y-escenografia.md",
+      "sha256": "935cc0424d206c331bc99920abc251932223f0e277ce674648eeb5e843d29db3",
+      "bytes": 1576,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/escenas.md",
+      "sha256": "1b40778eea7e1d4b72e555a37346670b933fcc1a6067649f82c60fb9c1d4c136",
+      "bytes": 1856,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/herramientas.md",
+      "sha256": "b204a3e10b0214913d7262ce8ebe54e4e7ce0a8a4ee31067f7f8be1f6d19cc62",
+      "bytes": 1782,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/icm.md",
+      "sha256": "ddcfab1879d98b9bf9a13e9e5c9d22c4f31c144e38d025ccb6a2fd7fe443f57a",
+      "bytes": 2093,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/pulso.md",
+      "sha256": "f6e99bce7ce54cb8f283751af43f9669f17c1b2aa4d5cfc6f517cccf908af1bf",
+      "bytes": 3254,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/revision-y-publicacion.md",
+      "sha256": "92a5aa3859132ed2dade11037a64aae6a863a7901c93775533bc9150d84e7d17",
+      "bytes": 3127,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/references/verificacion.md",
+      "sha256": "3404ba04e9d7b5e9bf53d2514c6bda33c770677ad9b19ec1e65b8cf5e70bd30e",
+      "bytes": 10993,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/setup/CONTEXT.md",
+      "sha256": "af20290630ebd8ec98074e6113b8cc887945e8b73532ad09028ba8d7c2bdd32b",
+      "bytes": 3631,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/01-percepcion/CONTEXT.md",
+      "sha256": "7527e9f610217ce07eb95bf931ee6469a115016928b4d61da162badba93ecc36",
+      "bytes": 1768,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/01-percepcion/output/registro.md",
+      "sha256": "eb363f184d15455ca5af77b498afd4d6f5e6ceb9b89c291fae8cdd1ca6f06918",
+      "bytes": 298,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/02-actuacion/CONTEXT.md",
+      "sha256": "09d4402e89e6cf3dd7a7bbf159933f1f64490f98580cf68e183f70359db2ce1f",
+      "bytes": 2782,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/02-actuacion/output/registro.md",
+      "sha256": "2d285171376c22e1e872d8f747ed13d8454fe9f00b44fc8a07d5b991d8292f2e",
+      "bytes": 297,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/03-moderacion/CONTEXT.md",
+      "sha256": "f5f3c41261555baf8227a9efcafd200bb7de8c20bfec162ed5bd3ba34191b9f1",
+      "bytes": 3382,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/03-moderacion/output/bandeja-respuestas.md",
+      "sha256": "76ce074896082e503df2cae16e47da5dea5fb5d82d378bdc48230a5baecc6c2e",
+      "bytes": 655,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/03-moderacion/output/registro.md",
+      "sha256": "45e16d6b198cad63d34be343c15029ffa263eedd70eea40cce0882edfc9870fa",
+      "bytes": 298,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/03-moderacion/output/revisiones-respuestas.md",
+      "sha256": "447170e50457592645a20ca935a8ce6645ee578c645ba609ce8f8748f745ec35",
+      "bytes": 374,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/03-moderacion/output/veredictos.md",
+      "sha256": "ad4a97bf25ef00ed3069d78581579d99b097cd5b0e30b12ce3ff1c0caf212b3c",
+      "bytes": 319,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/04-resolucion/CONTEXT.md",
+      "sha256": "55f05c58b9ab84e6bafd707233e5cefff20f3311cd6b67eabc707e83eacce4b9",
+      "bytes": 3080,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/04-resolucion/output/registro.md",
+      "sha256": "e7be7d20345820f0df118ee086e3e452859a894727506d6a77960912ada1a4bd",
+      "bytes": 298,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/05-distribucion/CONTEXT.md",
+      "sha256": "d085488b711db78c1ebe7e2e4dc23c683fbc2ce5dbac090b1564217bca34866c",
+      "bytes": 1878,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/05-distribucion/output/registro.md",
+      "sha256": "4d7db71302d890c2bb77bd773c49d2d79c5a517a951b5bcc224c0e6d7f9f5749",
+      "bytes": 300,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/06-memoria/CONTEXT.md",
+      "sha256": "a7c885e0826a8684475b56f0344355c367c037816a13a80964e8fc3fe170fb04",
+      "bytes": 2011,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/06-memoria/output/registro.md",
+      "sha256": "09589cc3ac936cfa65c95e9edc9179faa7db6e8fceb93685f7fc2d0eccf8b1db",
+      "bytes": 307,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/07-direccion/CONTEXT.md",
+      "sha256": "cc93f0ea8f0105bad90d962d401abe3853deebe60cfd97cb0461a56309de795b",
+      "bytes": 1620,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/07-direccion/output/registro.md",
+      "sha256": "f83efd63a06827e34bf0aa1b147fc813eab1ba5e6450c8db4881f4762f399251",
+      "bytes": 310,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/08-observacion/CONTEXT.md",
+      "sha256": "8f37e30ecf5f74d86dfd5d926d6c824f36e8eaa228d506ced13da962980a2968",
+      "bytes": 2483,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/stages/08-observacion/output/registro.md",
+      "sha256": "62144f936dd4edf18209518f703a73c0d1eaad5779bd472751e8ba0188da73d3",
+      "bytes": 315,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/evento.md",
+      "sha256": "f32db353d03828f10d26370120b607dfb62f05f53e9e9f4f06122a39492379f5",
+      "bytes": 1039,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/intervencion-humana.md",
+      "sha256": "d9e15963f5ddb5225b06c14eadcad0d5766ec78e9f9061e98a80ede970b159df",
+      "bytes": 800,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/memoria.md",
+      "sha256": "395c9949f97d518e789d52ad0092550ab154c5c1deb11434276b4579f3d3b1a3",
+      "bytes": 636,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/narracion.md",
+      "sha256": "1a848939cb2131218c788641a68f4fc8de7ad99257cfdd99663e905bb41db9d5",
+      "bytes": 1056,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/percepcion.md",
+      "sha256": "74d654d674cd999026a599523bb8932cebc41e3ce77e5f5c82c4c1bbf6d44bd7",
+      "bytes": 569,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/propuesta.md",
+      "sha256": "aedcb5a340bfab27488812800a7971eb7c8345c90f101f0fa03ed373ef0c4133",
+      "bytes": 1347,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    },
+    {
+      "path": "obra/templates/revision-respuesta.md",
+      "sha256": "1d4dd56d3cc057baccbc4e15af1fa22127f8052cff9acc6c74b75ec3e9d4831a",
+      "bytes": 1573,
+      "kind": "texto",
+      "responsible_reading": "obra",
+      "audit": "lectura-prd-obra.md"
+    }
+  ]
+}
