@@ -25,17 +25,19 @@ export function createWorldDeliverySupervisor(input: {
 }) {
   const controller = new AbortController();
   const active = new Map<string, Promise<void>>();
+  const activeRunIds = new Map<string, Target['runId']>();
   let closed = false;
+  let admissionSuspended=false;
 
   function schedule(rawInput: unknown): void {
-    if (closed) return;
+    if (closed||admissionSuspended) return;
     const request = ScheduleSchema.parse(rawInput);
     for (const actorId of request.actorIds) start({ runId: request.runId, actorId });
   }
 
   function start(target: Target): void {
     const key = JSON.stringify([target.runId, target.actorId]);
-    if (active.has(key) || closed) return;
+    if (active.has(key) || closed||admissionSuspended) return;
     const worker = createDeliverWorldWorker({ journal: input.journal, ...target });
     const task = (async () => {
       while (!controller.signal.aborted) {
@@ -50,23 +52,39 @@ export function createWorldDeliverySupervisor(input: {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
     })().finally(() => {
-      if (active.get(key) === task) active.delete(key);
+      if (active.get(key) === task) { active.delete(key); activeRunIds.delete(key); }
     });
     active.set(key, task);
+    activeRunIds.set(key,target.runId);
   }
 
   return Object.freeze({
     schedule,
 
     recover(): number {
-      if (closed) return 0;
+      if (closed||admissionSuspended) return 0;
       const targets = input.journal.listPendingWorldDeliveryTargets({ limit: 1_000 });
       for (const target of targets) start({ runId: target.runId, actorId: target.actorId });
       return targets.length;
     },
 
+    async waitForRunIdle(rawInput: unknown): Promise<void> {
+      const {runId} = z.strictObject({runId:RunIdSchema}).parse(rawInput);
+      while (true) {
+        const tasks = [...active.entries()].filter(([key]) => activeRunIds.get(key) === runId).map(([,task]) => task);
+        if (tasks.length === 0) return;
+        await Promise.all(tasks);
+      }
+    },
+
     async waitForIdle(): Promise<void> {
       while (active.size > 0) await Promise.all([...active.values()]);
+    },
+    async suspendAdmissions():Promise<()=>void>{
+      if(closed||admissionSuspended)throw new Error('BACKUP_DELIVERY_BUSY');
+      admissionSuspended=true;
+      while(active.size>0)await Promise.all([...active.values()]);
+      let released=false;return ()=>{if(released)return;released=true;admissionSuspended=false;};
     },
 
     async close(): Promise<void> {

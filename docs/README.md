@@ -60,6 +60,7 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 
 - [Fuentes conservadas](fuentes/README.md): paper ICM, bibliografía, texto aportado e inventario YouTube.
 - [Avatares](personajes/get-smart/avatares.md), [galería](assets/avatars/get-smart/index.html) y [manifest de procedencia](assets/avatars/get-smart/manifest.json).
+- [Continuación y evidencia en Codex Cloud](auditoria/continuacion-cloud.md).
 - [Cobertura de la conversación](auditoria/conversacion-y-cobertura.md) y [registro de agentes](auditoria/registro-de-agentes.md).
 - [Diálogo constitucional](auditoria/dialogo-constitucional.md) y [respuestas del custodio](auditoria/respuestas-del-concepto.md).
 - [Revisión integral](auditoria/revision-integral.md).
@@ -76,6 +77,9 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - [Brecha de lifecycle y controles de representación](auditoria/controles-de-representacion.md).
 - [ADR de preparación y presencia operativa](adr/0002-preparacion-y-presencia-operativa.md).
 - [Perfiles Sol bajo y Opus medio](adr/0003-perfiles-de-inferencia-seleccionables.md).
+- [Revisiones independientes de voz](adr/0005-revisiones-independientes-de-voz.md).
+- [Voces en Cloud: integración y límites](auditoria/voces-cloud.md).
+- [Backup e intercambio en Cloud](auditoria/backup-e-intercambio-cloud.md).
 - [Implementación y verificación de perfiles](auditoria/perfiles-sol-y-opus.md).
 - [Sondeos de acceso durables v20](auditoria/sondeos-durables.md).
 - Revisiones Luna 6 xhigh de [investigaciones](auditoria/revision-luna-investigaciones.md), [personajes](auditoria/revision-luna-personajes.md) y [técnica](auditoria/revision-luna-tecnica.md).

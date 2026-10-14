@@ -15,6 +15,7 @@ import { validateContinuistaReviewContext } from '../src/application/continuista
 import { RevisionSchema, RunIdSchema, WorldSeqSchema } from '../src/domain/values.ts';
 import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import type { RunId } from '../src/domain/values.ts';
+import { controlledDirectorSessionFactory } from './fixtures/director-session.ts';
 import { canonical, responseFor, setup, actorId, type Fixture } from './fixtures/continuista.ts';
 
 const realIcmBinary = process.env.PERSONAJES_ICM_TEST_BINARY;
@@ -79,10 +80,11 @@ function hostFromFixture(fixture: Fixture) {
   return openLocalHost({ privateDataRoot: fixture.directory });
 }
 
-function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>) {
+function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true) {
   const freshRunId = RunIdSchema.parse(randomUUID());
   const configuration = ReadyRunConfigurationSchema.parse({
     ...fixture.configuration,
+    budget:{...fixture.configuration.budget,maxPiCallsPerPulse:8},
     runId: freshRunId,
     worldSnapshot: {
       ...fixture.configuration.worldSnapshot,
@@ -112,6 +114,7 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
     continuityFence: { kind: 'prepared-contexts', atWorldSeq: configuration.worldSnapshot.seq, contexts },
     lifecycle: 'running',
   });
+  if (!withIntervention) return freshRunId;
   const message = host.journal.commitHumanIntervention({
     runId: freshRunId,
     participantId: 'visitante-prueba',
@@ -123,7 +126,7 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
       content: { kind: 'speech', text: actorRecallSource },
     },
   });
-  assert.equal(message.kind === 'idempotencyConflict' ? message.kind : message.resolution.kind, 'applied');
+  assert.equal(message.kind === 'idempotencyConflict' || message.kind === 'invalidLifecycle' ? message.kind : message.resolution.kind, 'applied');
   return freshRunId;
 }
 
@@ -253,6 +256,7 @@ function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof 
     name: 'Pi SDK con stream local determinista y revisión Continuista sintética',
     actorSessionFactory,
     continuistaSessionFactory,
+    directorSessionFactory:controlledDirectorSessionFactory({root:input.fixture.directory}),
   };
 }
 
@@ -271,6 +275,29 @@ test('composición usa el host recibido, exige ICM y no configura corridas ni au
   } finally {
     try { host.close(); } catch { /* Runtime close already released the supplied host. */ }
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('una corrida running sin estímulos acepta la agenda sin inventar acontecimientos ni sesiones', async () => {
+  const fixture = await setup();
+  const host = hostFromFixture(fixture);
+  const runId = registerAdditionalRun(fixture, host, false);
+  const stats = { requests: 0, recallResults: 0, disposed: 0 };
+  const runtime = await createRepresentationRuntime({ host, icmBinaryPath: '/host/not-needed/icm',
+    testTransport: controlledTransport({ fixture, host, runId, stats }) });
+  try {
+    const before = host.journal.loadWorld({ runId });
+    assert.equal(await runtime.scheduleRun({ runId }), true);
+    await runtime.waitForIdle();
+    assert.equal(host.journal.readWorldLifecycle({ runId })?.lifecycle, 'running');
+    assert.deepEqual(host.journal.loadWorld({ runId }), before);
+    assert.equal(host.journal.loadActorPiSession({ runId, actorId }), undefined);
+    assert.equal(stats.requests, 0);
+    assert.equal(stats.disposed, 0);
+    assert.equal(await runtime.scheduleRun({ runId: randomUUID() }), false);
+  } finally {
+    await runtime.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
 
@@ -409,4 +436,88 @@ test('si falla el store, conserva la experiencia journal y suspende antes de inv
     else host?.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   }
+});
+
+async function authorizeSyntheticStep(host: ReturnType<typeof openLocalHost>, runId: RunId) {
+  const {fingerprintInferenceProfile} = await import('../src/application/pi-access-check.ts');
+  const principalId = 'synthetic-step-operator';
+  const state = host.journal.readWorldLifecycle({runId}); assert.ok(state);
+  const started = host.journal.createRunPreflightJob({principalId,idempotencyKey:randomUUID(),runId,
+    expectedConfigurationRevision:state.configRevision,expectedWorldRevision:state.worldRevision});
+  if (started.kind !== 'created') assert.fail(`Preflight ${started.kind}`);
+  const lease = {ownerToken:randomUUID(),claimToken:randomUUID()};
+  const claimed = host.journal.claimRunPreflightJob({runId,jobId:started.job.jobId,expectedRevision:0,...lease});
+  if (claimed.kind !== 'claimed') assert.fail('No claim');
+  const frozen = host.journal.readRunPreflightJobInput({runId,jobId:started.job.jobId,lease});
+  if (frozen.kind !== 'found') assert.fail('No frozen input');
+  const access = host.journal.createPiAccessJob({principalId,idempotencyKey:randomUUID(),profile:DEFAULT_INFERENCE_PROFILE});
+  if (access.kind !== 'created') assert.fail('No synthetic access job');
+  const accessLease = {ownerToken:randomUUID(),claimToken:randomUUID()};
+  host.journal.claimPiAccessJob({jobId:access.job.jobId,expectedRevision:0,...accessLease});
+  const profileFingerprint = fingerprintInferenceProfile(DEFAULT_INFERENCE_PROFILE);
+  const checkedAt = new Date(Date.now()-1000).toISOString(); const expiresAt = new Date(Date.now()+120_000).toISOString();
+  const accountFingerprint = 'a'.repeat(64);
+  const accessResult = host.journal.completePiAccessJob({jobId:access.job.jobId,expectedRevision:1,lease:accessLease,checkedAt,expiresAt,
+    result:{kind:'passed',provider:DEFAULT_INFERENCE_PROFILE.provider,requestedProfile:DEFAULT_INFERENCE_PROFILE,profileFingerprint,accountFingerprint,
+      effectiveProfile:{provider:DEFAULT_INFERENCE_PROFILE.provider,api:DEFAULT_INFERENCE_PROFILE.api,model:DEFAULT_INFERENCE_PROFILE.model,
+        providerThinkingLevel:DEFAULT_INFERENCE_PROFILE.reasoningEffort,reasoningEvidence:'sdk-payload-and-response'},
+      measuredUsage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0}}});
+  assert.equal(accessResult.kind,'updated');
+  const receipt = {jobId:access.job.jobId,resultKind:'passed',provider:DEFAULT_INFERENCE_PROFILE.provider,
+    profileFingerprint,accountFingerprint,checkedAt,expiresAt};
+  const completed = host.journal.completeRunPreflightJob({runId,jobId:started.job.jobId,expectedRevision:claimed.job.revision,lease,
+    evaluation:{fence:frozen.fence,result:{kind:'passed',checkedAt,checks:[
+      'configuration','configuration-version','world-snapshot','prepared-contexts','catalog-eligibility','inference-profile',
+      'pi-sdk','pi-profile','provider-authentication','pi-runtime','icm-memory','budget','provider-access-check','participant-availability','voice',
+    ].map((checkId)=>({kind:'passed',checkId,code:`${checkId}-passed`}))},
+      evidence:{provider:receipt.provider,profileFingerprint,accountFingerprint,accessReceipt:receipt}}});
+  assert.equal(completed.kind,'updated');
+  return {principalId,preflightJobId:started.job.jobId,state};
+}
+
+test('step durable compone preflight fresco, ICM y actuación SDK local; segunda causa permanece sin inferencia',realIcmOptions,async()=>{
+  assert.ok(realIcmBinary);
+  const fixture = await setup();
+  const host = hostFromFixture(fixture);
+  const runId = registerAdditionalRun(fixture,host);
+  const stats = {requests:0,recallResults:0,disposed:0};
+  const runtime = await createRepresentationRuntime({host,icmBinaryPath:realIcmBinary,
+    testTransport:controlledTransport({fixture,host,runId,stats})});
+  try {
+    const beforeSecond = host.journal.loadWorld({runId}); assert.ok(beforeSecond);
+    host.journal.commitHumanIntervention({runId,participantId:'visitante-prueba',expectedRevision:beforeSecond.revision,idempotencyKey:randomUUID(),
+      request:{kind:'speech',recipientCharacterIds:[actorId],channelId:'00000000-0000-4000-8000-000000000104',
+        content:{kind:'speech',text:'Segunda causa diferida.'}}});
+    runtime.scheduleDelivery({runId,actorIds:[actorId]});
+    await runtime.waitForIdle();
+    const current = host.journal.readWorldLifecycle({runId}); assert.ok(current);
+    host.journal.setWorldLifecycle({runId,expectedWorldRevision:current.worldRevision,expectedConfigRevision:current.configRevision,target:'paused'});
+    const authorization = await authorizeSyntheticStep(host,runId);
+    const {createRunLifecycleApplication} = await import('../src/application/run-lifecycle.ts');
+    const application = createRunLifecycleApplication({journal:host.journal,runtime,
+      preflights:{readJob:({runId,jobId})=>{
+        const result = host.journal.readRunPreflightJob({runId,jobId});
+        return result.kind === 'found' ? result.document : undefined;
+      }}});
+    const request = {principalId:authorization.principalId,idempotencyKey:randomUUID(),runId,
+      expectedConfigurationRevision:authorization.state.configRevision,expectedWorldRevision:authorization.state.worldRevision,
+      expectedLifecycleRevision:authorization.state.lifecycleRevision,command:{kind:'step',preflightJobId:authorization.preflightJobId}};
+    const accepted = await application.controlRun(request);
+    if (accepted.kind !== 'accepted') assert.fail(`No accepted step: ${accepted.kind}`);
+    await runtime.waitForIdle();
+    const job = application.readStepJob({runId,jobId:accepted.job.jobId});
+    assert.equal(job?.state,'succeeded');
+    assert.ok(job?.pulseId);
+    assert.equal(host.journal.readWorldLifecycle({runId})?.lifecycle,'paused');
+    assert.equal(stats.requests,3);
+    assert.equal(stats.recallResults,1);
+    const firstJob = host.journal.listActorTurnJobsForPulse({runId,pulseId:job.pulseId})[0];
+    assert.equal(firstJob?.state,'accepted');
+    assert.equal(firstJob?.perceptionIds.length,1);
+    const replay = await application.controlRun(request);
+    assert.equal(replay.kind,'accepted');
+    if (replay.kind === 'accepted') assert.equal(replay.job.jobId,job.jobId);
+    await runtime.waitForIdle();
+    assert.equal(stats.requests,3,'replay/entregas no despachan otra causa');
+  } finally {await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
 });

@@ -32,7 +32,7 @@ Las siguientes son especificaciones propuestas para cumplir el requisito, abiert
 | Seguir tiempo y rutinas | Hora ficticia, día/noche y disponibilidad son legibles. Pulso técnico, latencia y tiempo diegético se distinguen. |
 | Seguir la línea dramática | Etapas reconocidas por el director tienen evidencia, momento y carácter revisable; no se fuerzan decisiones para completar una barra. |
 | Usar dirección autorizada | Las metaindicaciones se distinguen claramente de hablar dentro de la escena y dejan registro de sus efectos. |
-| Pausar, continuar y avanzar | Cada control indica qué detiene o activa. Las acciones en curso y la recuperación no se duplican; la semántica concreta de pausa debe elegirse antes de implementarla. |
+| Pausar, continuar y avanzar | Cada control indica qué detiene o activa. Las acciones en curso y la recuperación no se duplican; la semántica vigente está definida en PRD §4.6 y S05 §7: pausa congela nuevas convocatorias y el reloj, y descarta efectos tardíos mediante la época durable. |
 | Consultar historia | Selección de escena o momento con estado correspondiente a esa fecha; replay de lo registrado sin ejecutar otra vez decisiones o tools. |
 | Escuchar y leer | Voz y subtítulos identifican al hablante; narrador opcional separado. Falta de audio no inventa una voz creada ni impide consultar la conversación textual. |
 | Entender problemas | Espera, error de proveedor, propuesta rechazada o turno cancelado se distinguen de silencio elegido por el personaje. La vista técnica se mantiene diferenciada de la ficción. |

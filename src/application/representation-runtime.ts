@@ -8,6 +8,7 @@ import type { CreatePiSessionInput, PiSessionHandle } from '../adapters/pi.ts';
 import { CharacterIdSchema, RunIdSchema } from '../domain/values.ts';
 import type { WorldIdSource } from '../domain/world.ts';
 import { createActorTurnWorker } from './actor-turn-worker.ts';
+import { createDirectorPiWorker } from './director-pi-worker.ts';
 import { createContinuistaPiWorker } from './continuista-pi-worker.ts';
 import { createCoordinatorPulseSupervisor } from './coordinator-pulse-supervisor.ts';
 import { openLocalHost } from './local-host.ts';
@@ -45,6 +46,7 @@ const TestTransportSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   actorSessionFactory: PiSessionFactorySchema,
   continuistaSessionFactory: PiSessionFactorySchema,
+  directorSessionFactory: PiSessionFactorySchema,
 });
 
 /**
@@ -56,6 +58,7 @@ export interface ControlledPiTestTransport {
   name: string;
   actorSessionFactory: PiSessionFactory;
   continuistaSessionFactory: PiSessionFactory;
+  directorSessionFactory: PiSessionFactory;
 }
 
 export type RepresentationRuntimeDiagnostic =
@@ -74,6 +77,7 @@ export async function createRepresentationRuntime(input: {
   piRuntime?: PiRuntime;
   testTransport?: ControlledPiTestTransport;
   onDiagnostic?: (diagnostic: RepresentationRuntimeDiagnostic) => void;
+  onWorldCommitted?: (event: {runId: string; eventIds: string[]}) => void;
 }) {
   const parsed = InputSchema.parse({ icmBinaryPath: input.icmBinaryPath });
   const testTransport = input.testTransport === undefined ? undefined : TestTransportSchema.parse(input.testTransport);
@@ -92,6 +96,7 @@ export async function createRepresentationRuntime(input: {
   }
 
   let closed = false;
+  let admissionSuspended=false;
   let closing: Promise<void> | undefined;
   const projectionController = new AbortController();
   const oauthPort = createPiOAuthPort({ modelRuntime: runtime.modelRuntime, signal: projectionController.signal, loginOptions: { agentName: 'Personajes' } });
@@ -192,7 +197,9 @@ export async function createRepresentationRuntime(input: {
     continuista,
     ...(testTransport === undefined ? {} : { sessionFactory: testTransport.actorSessionFactory }),
     onCommitted({ scope, commit }) {
-      if (closed || commit.resolution.kind !== 'applied') return;
+      if (closed || admissionSuspended || commit.resolution.kind !== 'applied') return;
+      try { input.onWorldCommitted?.({runId:scope.runId,eventIds:commit.resolution.events.map(event=>event.id)}); }
+      catch { /* Presentation failure cannot undo a confirmed world commit. */ }
       const recipients = [...new Set(commit.resolution.perceptions.map((perception) => perception.recipientCharacterId))];
       if (recipients.length > 0) {
         workEpoch += 1;
@@ -201,10 +208,32 @@ export async function createRepresentationRuntime(input: {
     },
   });
 
+  const director=createDirectorPiWorker({journal:input.host.journal,runtime,ownerToken,
+    ...(testTransport===undefined?{}:{sessionFactory:testTransport.directorSessionFactory})});
+
   const coordinator = createCoordinatorPulseSupervisor({
     journal: input.host.journal,
     ownerToken,
     actorWorker,
+    async beforeClosePulse({runId,pulseId},signal) {
+      await delivery.waitForRunIdle({runId});
+      if(closed||signal.aborted)return false;
+      const result=await director.run({runId,pulseId},{signal});
+      return result.kind==='accepted'||result.kind==='existing'||result.kind==='blocked';
+    },
+    async onPulseClosed({runId,pulseId}) {
+      const step = input.host.journal.readActiveRunStepJob({runId});
+      if (step?.pulseId !== pulseId) return;
+      await delivery.waitForRunIdle({runId});
+      const configuration = ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({runId}));
+      let failed = false;
+      for (const actorId of configuration.roster.activeCharacterIds) {
+        let result = await drainMemory({runId,actorId});
+        while (result.kind === 'busy' && !closed) { await yieldToHost(); result = await drainMemory({runId,actorId}); }
+        if (result.kind !== 'completed') failed = true;
+      }
+      input.host.journal.completeRunStepJob({runId,jobId:step.jobId,failed});
+    },
     onFailure(failure) {
       report({ kind: 'coordinator', runId: failure.runId, failureKind: failure.kind });
     },
@@ -223,7 +252,7 @@ export async function createRepresentationRuntime(input: {
   }
 
   function trackBackground(input: { runId: RunId; operation: () => Promise<void> }): void {
-    if (closed) return;
+    if (closed||admissionSuspended) return;
     void trackOperation(async () => {
       try { await input.operation(); }
       catch { report({ kind: 'coordinator', runId: input.runId, failureKind: 'journal' }); }
@@ -231,20 +260,29 @@ export async function createRepresentationRuntime(input: {
   }
 
   async function prepareRun(rawInput: unknown): Promise<boolean> {
-    if (closed) return false;
+    if (closed||admissionSuspended) return false;
     const { runId } = ScheduleRunSchema.parse(rawInput);
     if (!enabledRuns.has(runId)) return false;
     const begin = input.host.journal.beginCoordinatorPulse({ runId });
-    if (begin.kind === 'inactive' || begin.kind === 'idle' || begin.pulse.state !== 'running') return false;
+    if (begin.kind === 'inactive') return false;
+    // An authorized run can wait for its first stimulus. Accepting its schedule
+    // must not depend on a fictional event or an already delivered perception.
+    if (begin.kind === 'idle') return true;
+    if (begin.pulse.state !== 'running') {
+      if (input.host.journal.readActiveRunStepJob({runId}) === undefined) return false;
+      workEpoch += 1;
+      coordinator.schedule({runId});
+      return true;
+    }
     for (const job of begin.jobs) {
-      if (closed) return false;
+      if (closed||admissionSuspended) return false;
       // Accepted jobs only need their durable commit receipt; blocked/running jobs
       // are handled or suspended by the coordinator without a new actor call.
       if (job.state !== 'queued') continue;
       const projected = await drainMemory({ runId: job.runId, actorId: job.actorId });
-      if (projected.kind !== 'completed') return false;
+      if (projected.kind !== 'completed'||admissionSuspended) return false;
     }
-    if (closed) return false;
+    if (closed||admissionSuspended) return false;
     workEpoch += 1;
     coordinator.schedule({ runId });
     return true;
@@ -268,13 +306,13 @@ export async function createRepresentationRuntime(input: {
   });
 
   function scheduleDelivery(rawInput: unknown): void {
-    if (closed) return;
+    if (closed||admissionSuspended) return;
     workEpoch += 1;
     delivery.schedule(ScheduleDeliverySchema.parse(rawInput));
   }
 
   function scheduleRun(rawInput: unknown): Promise<boolean> {
-    if (closed) return Promise.resolve(false);
+    if (closed||admissionSuspended) return Promise.resolve(false);
     const { runId } = ScheduleRunSchema.parse(rawInput);
     enabledRuns.add(runId);
     return trackOperation(() => prepareRun({ runId }));
@@ -288,7 +326,7 @@ export async function createRepresentationRuntime(input: {
   }
 
   function retryMemoryProjection(rawInput: unknown): Promise<z.infer<typeof ProjectionResultSchema>> {
-    if (closed) return Promise.resolve({ kind: 'cancelled', projected: 0 });
+    if (closed||admissionSuspended) return Promise.resolve({ kind: 'cancelled', projected: 0 });
     return trackOperation(async () => {
       const target = TargetSchema.parse(rawInput);
       const configuration = input.host.journal.readWorldConfiguration({ runId: target.runId });
@@ -304,11 +342,19 @@ export async function createRepresentationRuntime(input: {
   }
 
   function recover(): Promise<{ deliveryTargets: number; coordinatorTargets: number; scheduledRuns: number }> {
-    if (closed) return Promise.resolve({ deliveryTargets: 0, coordinatorTargets: 0, scheduledRuns: 0 });
+    if (closed||admissionSuspended) return Promise.resolve({ deliveryTargets: 0, coordinatorTargets: 0, scheduledRuns: 0 });
     return trackOperation(async () => {
       const deliveryTargets = delivery.recover();
       const targets = input.host.journal.listCoordinatorPulseTargets({ limit: 1_000 });
-      return { deliveryTargets, coordinatorTargets: targets.length, scheduledRuns: 0 };
+      const scheduledRuns = 0;
+      for (const target of targets) {
+        if (enabledRuns.has(target.runId) || input.host.journal.readActiveRunStepJob(target) === undefined) continue;
+        // A restart cannot reuse expiring preflight authorization for new calls.
+        // Preserve the step/pulse and reservations; an explicit freshly gated
+        // step resumes that job instead of inventing another pulse.
+        input.host.journal.interruptRunStepJob(target);
+      }
+      return { deliveryTargets, coordinatorTargets: targets.length, scheduledRuns };
     });
   }
 
@@ -322,6 +368,18 @@ export async function createRepresentationRuntime(input: {
       if (closed) return;
       if (observedEpoch === workEpoch && inFlightOperations.size === 0) return;
     }
+  }
+  async function suspendAdmissions(rawRunIds:unknown):Promise<()=>void>{
+    if(closed||admissionSuspended)throw new Error('BACKUP_REPRESENTATION_BUSY');
+    const runIds=z.array(RunIdSchema).max(100000).parse(rawRunIds);
+    admissionSuspended=true;
+    enabledRuns.clear();
+    try{
+      await Promise.all(runIds.map(runId=>coordinator.cancelRun({runId})));
+      await waitForIdle();
+    }catch(error){admissionSuspended=false;throw error;}
+    let released=false;
+    return ()=>{if(released)return;released=true;admissionSuspended=false;};
   }
 
   function close(): Promise<void> {
@@ -349,8 +407,10 @@ export async function createRepresentationRuntime(input: {
     retryMemoryProjection,
     recover,
     waitForIdle,
+    suspendAdmissions,
     close,
     get isClosed() { return closed; },
+    get roleReadiness() { return {actor:!closed,continuista:!closed,director:!closed,narrator:false}; },
   });
 }
 

@@ -9,7 +9,7 @@ import { ICM_VERSION } from '../adapters/icm.ts';
 import { listCharacters, type LoadedCatalog } from '../adapters/catalog.ts';
 import type { openJournal } from '../adapters/journal.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
-import { DEFAULT_INFERENCE_PROFILE, CLAUDE_INFERENCE_PROFILE, SelectableInferenceProfileSchema, type InferenceProvider } from '../domain/inference-profile.ts';
+import { DEFAULT_INFERENCE_PROFILE, resolveReadyInferenceProfile, CLAUDE_INFERENCE_PROFILE, SelectableInferenceProfileSchema, type InferenceProvider } from '../domain/inference-profile.ts';
 import { fingerprintInferenceProfile } from './pi-access-check.ts';
 import { freezeExperience } from './experience-envelope.ts';
 import { PiAccessReceiptReadSchema } from '../domain/pi-access-jobs.ts';
@@ -37,7 +37,7 @@ function icmRead(binary: string, args: readonly string[], env: NodeJS.ProcessEnv
   return new Promise((resolve, reject) => execFile(binary, [...args], { timeout: 2_000, maxBuffer: 1_000_000, encoding: 'utf8', env }, (error, stdout) => error ? reject(new Error('ICM readonly check is unavailable.')) : resolve(stdout.trim())));
 }
 /** Reads actual host resources. It never creates sessions/ICM databases, refreshes auth or probes paid providers. */
-export function createProductionPreflightHost(input: { journal: Journal; catalog: LoadedCatalog; piRuntime: PiRuntime; authentication: ReturnType<typeof createPiAuthFingerprint>; icmBinaryPath?: string }): ProductionPreflightHostPort & { readPrivateEvidence(input: { configuration: ReadyRunConfiguration }): RunPreflightPrivateEvidence } {
+export function createProductionPreflightHost(input: { journal: Journal; catalog: LoadedCatalog; piRuntime: PiRuntime; authentication: ReturnType<typeof createPiAuthFingerprint>; icmBinaryPath?: string; roleReadiness?: () => {actor:boolean;continuista:boolean;director:boolean;narrator:boolean} }): ProductionPreflightHostPort & { readPrivateEvidence(input: { configuration: ReadyRunConfiguration }): RunPreflightPrivateEvidence } {
   const journal = input.journal;
   const captured = new Map<InferenceProvider, RunPreflightPrivateEvidence>();
   function evidence(provider: InferenceProvider) {
@@ -104,9 +104,16 @@ export function createProductionPreflightHost(input: { journal: Journal; catalog
         const configuration = ready(runId);
         if (activeCharacterIds.some((id) => !configuration.roster.preparedCharacters.some((actor) => actor.characterId === id))) return { kind: 'unavailable', code: 'actor-runtime-context-missing' };
       } catch { return { kind: 'unavailable', code: 'actor-runtime-context-unavailable' }; }
-      // Actor + Continuista factories exist; Director/narrator execution and their tool policies do not.
-      // Returning an all-ready role bundle would incorrectly enable starting the entire production.
-      return { kind: 'unavailable', code: narrationMode.kind === 'enabled' ? 'director-and-narrator-runtime-unavailable' : 'director-runtime-unavailable' };
+      const roles=input.roleReadiness?.();
+      if(roles===undefined||!roles.actor||!roles.continuista||!roles.director)return {kind:'unavailable',code:'director-runtime-unavailable'};
+      if(narrationMode.kind==='enabled'&&!roles.narrator)return {kind:'unavailable',code:'narrator-runtime-unavailable'};
+      const configuration=ready(runId);const profile=resolveReadyInferenceProfile(configuration);
+      const effectiveProfile={...profile,fingerprint:fingerprintInferenceProfile(profile)};
+      const actors=activeCharacterIds.map(characterId=>({kind:'actor',characterId,state:'ready-to-create',effectiveProfile,tools:['recall_memory','propose_action']}));
+      const admins=[{kind:'admin',roles:['continuista'],state:'ready-to-create',effectiveProfile,tools:['submit_continuista_review']},
+        {kind:'admin',roles:['director'],state:'ready-to-create',effectiveProfile,tools:['submit_director_observation']}];
+      if(narrationMode.kind==='enabled')admins.push({kind:'admin',roles:['narrador'],state:'ready-to-create',effectiveProfile,tools:['submit_narration']});
+      return {kind:'ready',requiredAdminRoles:narrationMode.kind==='enabled'?['continuista','director','narrador']:['continuista','director'],identities:[...actors,...admins]};
     },
     async readIcmMemoryReadiness({ runId, actorIds }) {
       if (input.icmBinaryPath === undefined || !isAbsolute(input.icmBinaryPath)) return { kind: 'unavailable', code: 'icm-binary-not-configured' };

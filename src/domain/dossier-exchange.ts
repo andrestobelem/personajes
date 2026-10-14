@@ -1,0 +1,11 @@
+import { z } from 'zod';
+import { DossierSchema, DossierAdaptationImportSchema } from './catalog.ts';
+import { CharacterIdSchema, HashSchema } from './values.ts';
+export const DossierImportViewSchema=z.strictObject({importId:z.uuid(),revision:z.number().int().nonnegative(),kind:z.literal('dossier'),state:z.enum(['quarantined','applied']),characterId:CharacterIdSchema,sourceHash:HashSchema,fileName:z.string()});
+export const ImportViewSchema=DossierImportViewSchema;
+export const DossierImportPreviewMetadataSchema=z.strictObject({importId:z.uuid(),previewToken:z.uuid(),diffHash:HashSchema,expiresAt:z.number().int().nonnegative(),sourceRevision:z.number().int().nonnegative(),targetRevision:z.number().int().nonnegative(),sourceHash:HashSchema,targetHash:HashSchema,fullBeforeHash:HashSchema,fullAfterHash:HashSchema,characterId:CharacterIdSchema});
+export const DossierImportPreviewSchema=DossierImportPreviewMetadataSchema.extend({before:DossierSchema,after:DossierSchema});
+export const DossierImportApplyRequestSchema=z.strictObject({previewToken:z.uuid(),confirmDiffHash:HashSchema,importId:z.uuid().optional()});
+export const DossierImportAdaptationSchema=DossierAdaptationImportSchema;
+export const DossierExportReceiptSchema=z.strictObject({exportId:z.uuid(),sha256:HashSchema});
+export const DossierExportViewSchema=DossierExportReceiptSchema.extend({state:z.literal('succeeded'),bytes:z.number().int().nonnegative(),filename:z.literal('personajes-dossier.json')});

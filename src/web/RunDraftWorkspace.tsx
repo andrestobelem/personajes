@@ -3,6 +3,10 @@ import { RunConfigurationDraftSummarySchema, type CatalogPage, type RunConfigura
 import { createEmptyRunConfigurationDraft, type RunConfigurationDraft } from '../domain/production.ts';
 import { DRAFT_SECTIONS, changedDraftSections, describeDraftSection, reconcileDraft, type DraftSection } from './draft-form.ts';
 import { RunDraftEditor } from './RunDraftEditor.tsx';
+import type { RunDocument } from './run-controls-client.ts';
+const VoiceWorkspace = React.lazy(async () => ({ default: (await import('./VoiceWorkspace.tsx')).VoiceWorkspace }));
+import { RunStageWorkspace } from './RunStageWorkspace.tsx';
+import { RunControlsPanel } from './RunControlsPanel.tsx';
 import { RunPreflightPanel } from './RunPreflightPanel.tsx';
 import { createDraftSaveIntent, listRunDrafts, readRunDraft, saveRunDraft, validateRunDraft, readDraftHttpFailure, type DraftDocument, type DraftSaveIntent } from './run-drafts-client.ts';
 
@@ -15,6 +19,10 @@ type Saving = { kind: 'idle' } | { kind: 'saving'; intent: DraftSaveIntent }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'No pudimos completar esta operación.'; }
 
 export function RunDraftWorkspace(props: { catalog: CatalogPage['items'] }) {
+  const [voiceOpened, setVoiceOpened] = React.useState(false);
+  const [runView, setRunView] = React.useState<'preparation' | 'stage' | 'voice'>('preparation');
+  const [currentRun, setCurrentRun] = React.useState<RunDocument | undefined>();
+  const acceptRun = React.useCallback((value: RunDocument) => setCurrentRun(value), []);
   const [page, setPage] = React.useState<RunConfigurationDraftPage>({ items: [] });
   const [loading, setLoading] = React.useState(true);
   const [screen, setScreen] = React.useState<Screen>({ kind: 'none' });
@@ -47,7 +55,7 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items'] }) {
     await openConfirmed(id);
   }
   async function openConfirmed(id: string | 'new') {
-    setReplacePrompt(undefined); setError(''); setMessage(''); setDirty(false);
+    setVoiceOpened(false); setRunView('preparation'); setCurrentRun(undefined); setReplacePrompt(undefined); setError(''); setMessage(''); setDirty(false);
     if (id === 'new') {
       setScreen({ kind: 'new', configuration: createEmptyRunConfigurationDraft({ runId: crypto.randomUUID(), revision: 0 }), epoch: ++epoch.current });
       return;
@@ -135,9 +143,14 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items'] }) {
       {saving.kind === 'conflict' && <div className="draft-conflict" role="alert"><h2>El borrador cambió en otra edición</h2><p>{saving.message} Tu edición local está conservada.</p><p>Elegí qué secciones de tu edición mantener sobre la revisión guardada {saving.remote.view.configuration.revision}. Las otras usan lo guardado.</p>{!['draft', 'ready'].includes(saving.remote.view.state.lifecycle) && <p>La representación actual está activa o finalizada y está conservada. Podés abrirla; no se reconciliarán cambios sobre ella.</p>}<ul>{DRAFT_SECTIONS.filter(([field]) => changedDraftSections(saving.local, saving.remote.view.configuration).includes(field)).map(([field, label]) => <li key={field}><label><input type="checkbox" checked={saving.keepLocal.includes(field)} onChange={(event) => setSaving({ ...saving, keepLocal: event.target.checked ? [...saving.keepLocal, field] : saving.keepLocal.filter((item) => item !== field) })} />Mantener mi {label.toLocaleLowerCase('es')}</label><small>Mi edición: {describeDraftSection(saving.local, field)}</small><small>Guardado: {describeDraftSection(saving.remote.view.configuration, field)}</small></li>)}</ul><button className="primary-button" disabled={!['draft', 'ready'].includes(saving.remote.view.state.lifecycle)} onClick={reconcile}>Reconciliar en la edición local</button><button onClick={() => { const remote = saving.remote; setSaving({ kind: 'idle' }); setScreen({ kind: 'editing', document: remote, epoch: ++epoch.current }); setDirty(false); setMessage('Revisión guardada abierta; se descartaron los cambios locales.'); }}>Descartar mi edición y abrir lo guardado</button></div>}
       {screen.kind === 'none' && <div className="run-empty"><span className="ornament" aria-hidden="true">◈</span><h2>Una obra empieza por sus circunstancias</h2><p>Creá una preparación o abrí un borrador guardado. La fecha, el lugar y el conflicto quedan a tu elección.</p></div>}
       {screen.kind === 'loading' && <p role="status">Abriendo preparación…</p>}
-      {draft && <RunDraftEditor key={`${draft.runId}:${screen.kind === 'editing' || screen.kind === 'new' || screen.kind === 'reconciled' ? screen.epoch : 0}`} draft={draft} catalog={props.catalog} saving={saving.kind !== 'idle'} {...(screen.kind === 'editing' ? { lifecycle: screen.document.view.state.lifecycle, readOnly: !['draft', 'ready'].includes(screen.document.view.state.lifecycle) } : {})} {...(message ? { message } : {})} initialDirty={screen.kind === 'new' || screen.kind === 'reconciled'} onDirty={setDirtyState} onSave={save} onValidate={() => void validate()} />}
+      {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <><nav className="run-view-nav" aria-label="Vista de la representación"><button aria-current={runView === 'preparation' ? 'page' : undefined} onClick={() => setRunView('preparation')}>Preparación y requisitos</button><button aria-current={runView === 'stage' ? 'page' : undefined} onClick={() => setRunView('stage')}>Escenario, conversación e historia</button><button aria-current={runView === 'voice' ? 'page' : undefined} onClick={() => { setVoiceOpened(true); setRunView('voice'); }}>Voces y sonido</button></nav><RunControlsPanel runId={screen.document.view.configuration.runId} onRead={acceptRun} disabled={dirty || saving.kind !== 'idle'} /></>}
+      <div hidden={runView !== 'preparation'}>
+      {draft && <RunDraftEditor key={`${draft.runId}:${screen.kind === 'editing' || screen.kind === 'new' || screen.kind === 'reconciled' ? screen.epoch : 0}`} draft={draft} catalog={props.catalog} saving={saving.kind !== 'idle'} {...(screen.kind === 'editing' ? { lifecycle: screen.document.view.state.lifecycle, readOnly: !['draft', 'ready'].includes(currentRun?.view.runId === draft.runId ? currentRun.view.lifecycle.kind : screen.document.view.state.lifecycle) } : {})} {...(message ? { message } : {})} initialDirty={screen.kind === 'new' || screen.kind === 'reconciled'} onDirty={setDirtyState} onSave={save} onValidate={() => void validate()} />}
       {validation && <section className="draft-validation" aria-label="Resultado de validación"><h3>{validation.kind === 'valid' ? 'Configuración válida' : validation.kind === 'invalid' ? 'Configuración incompatible' : 'Preparación pendiente'}</h3><p>{validation.promotion === 'promoted' ? 'Promoción durable confirmada. La obra no se inicia automáticamente.' : 'Preparación sin promover. Completá los puntos pendientes y validá la puesta guardada.'}</p>{validation.kind !== 'valid' && <ul>{validation.issues.map((issue, index) => <li key={`${issue.field}:${index}`}><a href={`#draft-${issue.field.split(/[.\[]/)[0]}`}>{DRAFT_SECTIONS.find(([field]) => field === issue.field.split(/[.\[]/)[0])?.[1] ?? issue.field}: {issue.detail}</a></li>)}</ul>}</section>}
-      {(screen.kind === 'editing' || screen.kind === 'reconciled') && <RunPreflightPanel key={screen.document.view.configuration.runId} document={screen.document} disabled={dirty || saving.kind !== 'idle'} />}
+      {(screen.kind === 'editing' || screen.kind === 'reconciled') && <RunPreflightPanel key={screen.document.view.configuration.runId} document={screen.document} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { currentRun } : {})} disabled={dirty || saving.kind !== 'idle'} />}
+      </div>
+      {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <div hidden={runView !== 'stage'}><RunStageWorkspace key={screen.document.view.configuration.runId} runId={screen.document.view.configuration.runId} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { knownLifecycle: currentRun.view.lifecycle.kind } : {})} active={runView === 'stage'} /></div>}
+      {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && voiceOpened && <div hidden={runView !== 'voice'}><React.Suspense fallback={<p role="status">Cargando herramientas de voz y sonido. No se solicita generación de audio.</p>}><VoiceWorkspace key={screen.document.view.configuration.runId} runId={screen.document.view.configuration.runId} active={runView === 'voice'} /></React.Suspense></div>}
     </section>
   </div>;
 }

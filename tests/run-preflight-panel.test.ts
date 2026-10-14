@@ -61,3 +61,14 @@ test('la preparación Ready ofrece inspección visual del presupuesto sin inicia
   assert.match(html, /Actualizar límites/);
   assert.match(html, /Consultando los límites y el uso durable/);
 });
+
+test('preflight capture permits paused and stopped cuts but rejects running and closed', () => {
+  for (const lifecycle of ['paused', 'stopped'] satisfies Array<typeof saved.view.state.lifecycle>) {
+    const document = { ...saved, view: { ...saved.view, state: { ...saved.view.state, lifecycle } } };
+    assert.equal(capturePreflightIntent({ document, key }).kind, 'evaluate');
+  }
+  for (const lifecycle of ['running', 'closed'] satisfies Array<typeof saved.view.state.lifecycle>) {
+    const document = { ...saved, view: { ...saved.view, state: { ...saved.view.state, lifecycle } } };
+    assert.throws(() => capturePreflightIntent({ document, key }));
+  }
+});

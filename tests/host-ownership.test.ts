@@ -6,13 +6,43 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test, type TestContext } from 'node:test';
-import { acquireHostOwnership, inspectHostOwnership, isHostOwnershipFailure, recoverHostOwnership } from '../src/adapters/host-ownership.ts';
+import { acquireHostOwnership, inspectHostOwnership, isHostOwnershipFailure, recoverHostOwnership,parseLinuxZombieEvidence } from '../src/adapters/host-ownership.ts';
 
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), 'personajes-ownership-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return { root, lockPath: join(root, 'host-ownership.json') };
 }
+
+test('Linux zombie evidence requires matching PID, state and stable proc start ticks',()=>{
+ const stat=(state:string)=>`123 (fixture with spaces) ${state} ${Array.from({length:18},()=> '0').join(' ')} 98765 0`;
+ assert.deepEqual(parseLinuxZombieEvidence({pid:123,status:'Pid:\t123\nState:\tZ (zombie)\n',stat:stat('Z')}),{kind:'zombie',startTicks:'98765'});
+ assert.deepEqual(parseLinuxZombieEvidence({pid:123,status:'Pid:\t123\nState:\tS (sleeping)\n',stat:stat('S')}),{kind:'alive'});
+ assert.equal(parseLinuxZombieEvidence({pid:123,status:'Pid:\t124\nState:\tZ (zombie)\n',stat:stat('Z')}).kind,'ambiguous');
+ assert.equal(parseLinuxZombieEvidence({pid:123,status:'Pid:\t123\nState:\tZ (zombie)\n',stat:stat('R')}).kind,'ambiguous');
+ assert.equal(parseLinuxZombieEvidence({pid:123,status:'Pid:\t123\nState:\tZ (zombie)\n',stat:'incomplete'}).kind,'ambiguous');
+});
+
+test('explicit recovery accepts a real Linux zombie without killing an active process',{skip:process.platform!=='linux'},async t=>{
+ const {root,lockPath}=fixture(t);
+ const parent=spawn('/usr/bin/python3',['-u','-c',`import os,sys,time
+pid=os.fork()
+if pid==0: os._exit(0)
+time.sleep(0.05)
+print(pid,flush=True)
+sys.stdin.readline()
+os.waitpid(pid,0)
+`],{stdio:['pipe','pipe','pipe']});
+ const done=new Promise<void>((resolve,reject)=>{parent.once('exit',code=>code===0?resolve():reject(new Error('fixture parent failed')));parent.once('error',reject);});
+ try{
+  const pid=await new Promise<number>((resolve,reject)=>{parent.stdout.once('data',chunk=>resolve(Number(String(chunk).trim())));parent.once('error',reject);});
+  assert.ok(Number.isSafeInteger(pid)&&pid>0);process.kill(pid,0);
+  const ownership=acquireHostOwnership({privateDataRoot:root});const record=inspectHostOwnership({privateDataRoot:root});
+  writeFileSync(lockPath,JSON.stringify({...record,pid}),{mode:0o600});
+  recoverHostOwnership({privateDataRoot:root,expectedNonce:ownership.ownerToken,operatorConfirmed:true});
+  assert.equal(existsSync(lockPath),false);const next=acquireHostOwnership({privateDataRoot:root});next.release();
+ }finally{parent.stdin.end('\n');await done;}
+});
 
 function childAcquire(input: { root: string }) {
   const moduleUrl = pathToFileURL(join(process.cwd(), 'src/adapters/host-ownership.ts')).href;

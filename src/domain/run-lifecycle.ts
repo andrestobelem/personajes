@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { JobIdSchema } from './values.ts';
+import { JobIdSchema, RunIdSchema, PulseIdSchema, RevisionSchema } from './values.ts';
 
 /** Shared contract for host persistence and browser views of the representation. */
 export const WorldLifecycleSchema = z.enum(['draft', 'ready', 'running', 'paused', 'stopped', 'closed']);
@@ -22,7 +22,7 @@ export const RunLifecycleControlRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('start'), preflightJobId: JobIdSchema }),
   z.strictObject({ kind: z.literal('pause') }),
   z.strictObject({ kind: z.literal('resume'), preflightJobId: JobIdSchema }),
-  z.strictObject({ kind: z.literal('step') }),
+  z.strictObject({ kind: z.literal('step'), preflightJobId: JobIdSchema }),
   z.strictObject({ kind: z.literal('stop') }),
   z.strictObject({ kind: z.literal('close') }),
 ]);
@@ -63,3 +63,9 @@ export function resolveRunControlTransition(lifecycle: WorldLifecycle, command: 
     ? { kind: 'invalid', code: 'INVALID_LIFECYCLE', lifecycle, command: command.kind }
     : { kind: 'transition', from: lifecycle, to: target };
 }
+
+export const RunStepJobViewSchema = z.strictObject({
+  jobId: JobIdSchema, runId: RunIdSchema, pulseId: PulseIdSchema.nullable(),
+  state: z.enum(['queued', 'running', 'succeeded', 'failed', 'canceled', 'interrupted']),
+  revision: RevisionSchema, lifecycleRevision: RevisionSchema, createdAt: RevisionSchema, updatedAt: RevisionSchema,
+});

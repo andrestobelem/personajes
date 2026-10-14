@@ -2,6 +2,8 @@
 
 Fecha de corte: **14 de octubre de 2026**. Este informe registra la decisión de participar con identidad ficticia propia y contrasta los contratos documentados con la implementación vigente. No representa una interacción ya ocurrida dentro de la obra.
 
+Este informe conserva la brecha histórica anterior a los cortes 29–30. Preflight y controles durables se integraron después; la continuación Cloud añade Escenario, transcript y compositor humano con pruebas sintéticas. Las afirmaciones siguientes sobre su ausencia describen ese corte original. La conversación actoral con proveedor real y la aceptación integral siguen pendientes; ver [continuación Cloud](continuacion-cloud.md).
+
 ## Decisión de la persona usuaria
 
 La persona usuaria eligió entrar en la ficción con una identidad ficticia propia. El tipo de identidad está resuelto; su nombre, identidad redactada, historia de vida, ubicación, escena y canal aún no. Esos detalles pertenecen a cada representación y no se deducen de la identidad ni la ubicación reales. El participante lo controla la persona y no constituye una instancia Pi de personaje.

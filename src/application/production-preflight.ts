@@ -538,6 +538,14 @@ function validateHumanParticipants(input: {
   }
 }
 
+/** Rebind only operational world fields to a confirmed journal cut for preflight.
+ * Identity, profile and operator configuration remain those of the immutable setup. */
+export function readyConfigurationAtSnapshot(configuration: ReadyRunConfiguration, world: WorldSnapshot): ReadyRunConfiguration {
+  return ReadyRunConfigurationSchema.parse({...configuration,worldSnapshot:world,fictionalAt:world.clock.instant,
+    snapshotFence:{runId:world.runId,revision:world.revision,seq:world.seq,fictionalAt:world.clock.instant},
+    participantAvailability:buildParticipantAvailability(world)});
+}
+
 function validateReadyConfiguration(configuration: ReadyRunConfiguration): RunConfigurationValidationIssue[] {
   const issues: RunConfigurationValidationIssue[] = [];
   validateReadyCandidate({

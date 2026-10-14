@@ -4,7 +4,7 @@ import { dirname, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { StoredPiProfileSchema, PersistedInferenceProfileSchema, LEGACY_INFERENCE_PROFILE, resolveStoredPiProfile, resolveReadyInferenceProfile } from '../domain/inference-profile.ts';
 import { validateContinuistaReviewContext, validateContinuistaContextReview } from '../domain/continuista-review.ts';
-import { ReadyRunConfigurationSchema, validateRunConfiguration } from '../application/production-preflight.ts';
+import { ReadyRunConfigurationSchema, readyConfigurationAtSnapshot, validateRunConfiguration } from '../application/production-preflight.ts';
 import { fingerprintInferenceProfile } from '../application/pi-access-check.ts';
 import { ExperienceSchema, FrozenExperienceSchema } from '../domain/experience.ts';
 import { IcmMemoryIdSchema, MemoryProjectionReceiptSchema } from '../domain/memory-projection.ts';
@@ -35,6 +35,7 @@ import {
   WorldLifecycleSchema,
   WorldLifecycleWriteSchema,
   RunLifecycleStateSchema,
+  RunStepJobViewSchema,
   RunLifecycleCommandWriteSchema,
   RunLifecycleCommandResultSchema,
   RunLifecycleCommandLookupSchema,
@@ -157,8 +158,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ContinuityReferenceSchema } from '../domain/preparation.ts';
 import {
   CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
-  FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
+  EventIdSchema, FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
 } from '../domain/values.ts';
+
+import { AdministrativeJobExecutionSchema, AdministrativeJobFailureSchema, AdministrativeJobViewSchema, AdministrativeJobLookupSchema,
+  DirectorJobBeginSchema, DirectorJobBeginResultSchema, NarratorJobBeginSchema, NarratorJobBeginResultSchema, NarratorJournalCandidateSchema, NarratorJobReceiptSchema, AdministrativeSessionSchema, AdministrativeCheckpointSchema, DirectorCandidateSchema, DirectorJobReceiptSchema } from '../domain/admin-role-jobs.ts';
+import { NarratorContextSchema, NarrationReviewSchema } from '../domain/narration.ts';
+import { validateNarratorContext, projectNarratorPhysicalSnapshot, projectNarratorRecordedWorldFacts, narratorContextHash, validateNarrationProposal, validateNarrationReview, narrationValueHash } from '../application/narrator-context.ts';
+import { DirectorContextSchema, DirectorAnnotationSchema } from '../domain/admin-roles.ts';
+import { directorContextHash, validateDirectorContext, validateDirectorObservation } from '../application/director-context.ts';
 
 const counter = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const BudgetRequestFieldsSchema = z.strictObject({
@@ -445,7 +453,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1419,6 +1427,66 @@ export function openJournal(input: { path: string }) {
     } catch (error) { try { database.exec('ROLLBACK'); } catch { /* Atomic migration. */ } database.close(); throw error; }
   }
 
+  if (initialVersion === undefined || initialVersion < 26) {
+    try {
+      const preflightColumns = database.prepare('PRAGMA table_info(run_preflight_jobs)').all().map((value) => z.object({name:z.string()}).parse(value).name);
+      const addPayloadHash = preflightColumns.includes('configuration_payload_hash') ? '' : 'ALTER TABLE run_preflight_jobs ADD COLUMN configuration_payload_hash TEXT;';
+      const addOriginalConfiguration = preflightColumns.includes('original_configuration_json') ? '' : 'ALTER TABLE run_preflight_jobs ADD COLUMN original_configuration_json TEXT;';
+      database.exec(`BEGIN IMMEDIATE;
+        ${addPayloadHash}
+        ${addOriginalConfiguration}
+        UPDATE run_preflight_jobs SET original_configuration_json=configuration_json WHERE original_configuration_json IS NULL;
+        UPDATE run_preflight_jobs SET configuration_payload_hash=configuration_hash WHERE configuration_payload_hash IS NULL;
+        ALTER TABLE run_control_operations RENAME TO run_control_operations_v25;
+        CREATE TABLE run_control_operations(
+          principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          command_kind TEXT NOT NULL CHECK(command_kind IN('start','pause','resume','step','stop','close')),
+          request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,recorded_at INTEGER NOT NULL CHECK(recorded_at>=0),
+          PRIMARY KEY(principal_id,idempotency_key));
+        INSERT INTO run_control_operations SELECT * FROM run_control_operations_v25;
+        DROP TABLE run_control_operations_v25;
+        CREATE TABLE IF NOT EXISTS run_step_jobs(
+          job_id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          pulse_id TEXT REFERENCES coordinator_pulses(pulse_id) ON DELETE RESTRICT,
+          state TEXT NOT NULL CHECK(state IN('queued','running','succeeded','failed','canceled','interrupted')),
+          revision INTEGER NOT NULL CHECK(revision>=0),lifecycle_revision INTEGER NOT NULL CHECK(lifecycle_revision>=0),
+          created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0));
+        CREATE UNIQUE INDEX IF NOT EXISTS run_step_jobs_one_active ON run_step_jobs(run_id) WHERE state IN('queued','running');
+        INSERT INTO schema_version VALUES(26); COMMIT;`);
+    } catch (error) { try { database.exec('ROLLBACK'); } catch { /* Atomic migration. */ } database.close(); throw error; }
+  }
+
+  if (initialVersion === undefined || initialVersion < 27) {
+    try { database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS administrative_jobs(
+        job_id TEXT NOT NULL,generation INTEGER NOT NULL CHECK(generation>=0),run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        pulse_id TEXT NOT NULL REFERENCES coordinator_pulses(pulse_id) ON DELETE RESTRICT,role TEXT NOT NULL CHECK(role IN('director','narrator','configurator')),
+        lifecycle_revision INTEGER NOT NULL,world_revision INTEGER NOT NULL,through_world_seq INTEGER NOT NULL,
+        context_json TEXT NOT NULL,context_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('running','accepted','blocked')),
+        owner_token TEXT NOT NULL,claim_token TEXT NOT NULL,failure_code TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,
+        PRIMARY KEY(job_id,generation),UNIQUE(run_id,pulse_id,role,generation),CHECK((state='blocked')=(failure_code IS NOT NULL)));
+      CREATE TABLE IF NOT EXISTS administrative_sessions(job_id TEXT NOT NULL,generation INTEGER NOT NULL,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        PRIMARY KEY(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE TABLE IF NOT EXISTS administrative_checkpoints(checkpoint_hash TEXT PRIMARY KEY,job_id TEXT NOT NULL,generation INTEGER NOT NULL,purpose_kind TEXT NOT NULL,
+        request_seq INTEGER,payload_json TEXT NOT NULL,recorded_at INTEGER NOT NULL,
+        FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE UNIQUE INDEX IF NOT EXISTS administrative_request_input ON administrative_checkpoints(job_id,generation,request_seq) WHERE purpose_kind='request-input';
+      CREATE TABLE IF NOT EXISTS administrative_request_leases(job_id TEXT NOT NULL,generation INTEGER NOT NULL,request_seq INTEGER NOT NULL,execution_json TEXT NOT NULL,
+        PRIMARY KEY(job_id,generation,request_seq),FOREIGN KEY(job_id,generation,request_seq) REFERENCES request_reservations(job_id,generation,request_seq) ON DELETE RESTRICT);
+      CREATE TABLE IF NOT EXISTS director_candidates(candidate_hash TEXT PRIMARY KEY,job_id TEXT NOT NULL,generation INTEGER NOT NULL,payload_json TEXT NOT NULL,
+        UNIQUE(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE TABLE IF NOT EXISTS director_annotations(annotation_id TEXT PRIMARY KEY,job_id TEXT NOT NULL,generation INTEGER NOT NULL,run_id TEXT NOT NULL,
+        pulse_id TEXT NOT NULL,through_world_seq INTEGER NOT NULL,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,accepted_at INTEGER NOT NULL,
+        UNIQUE(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE TABLE IF NOT EXISTS narration_candidates(candidate_hash TEXT PRIMARY KEY,job_id TEXT NOT NULL,generation INTEGER NOT NULL,payload_json TEXT NOT NULL,
+        UNIQUE(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE TABLE IF NOT EXISTS narration_receipts(job_id TEXT NOT NULL,generation INTEGER NOT NULL,run_id TEXT NOT NULL,pulse_id TEXT NOT NULL,
+        through_world_seq INTEGER NOT NULL,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,accepted_at INTEGER NOT NULL,
+        PRIMARY KEY(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      INSERT INTO schema_version VALUES(27);COMMIT;`); }
+    catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -1568,15 +1636,19 @@ export function openJournal(input: { path: string }) {
     const value=database.prepare('SELECT * FROM run_preflight_jobs WHERE run_id=? AND job_id=?').get(input.runId,input.jobId);if(value===undefined)return undefined;
     const row=z.strictObject({job_id:JobIdSchema,run_id:RunIdSchema,principal_id:z.string().trim().min(1).max(200),
       state:RunPreflightJobStateSchema,revision:RevisionSchema,created_at:z.string(),updated_at:z.string(),
-      configuration_revision:RevisionSchema,configuration_hash:HashSchema,configuration_json:z.string(),world_revision:RevisionSchema,world_seq:WorldSeqSchema,
+      configuration_revision:RevisionSchema,configuration_hash:HashSchema,configuration_payload_hash:HashSchema,original_configuration_json:z.string(),configuration_json:z.string(),world_revision:RevisionSchema,world_seq:WorldSeqSchema,
       fictitious_at:FictionalInstantSchema,provider:z.enum(['openai-codex','anthropic']).nullable(),profile_fingerprint:HashSchema.nullable(),
       result_kind:RunPreflightJobViewSchema.shape.resultKind,safe_code:RunPreflightJobSafeCodeSchema.nullable(),
       owner_token:z.string().uuid().nullable(),claim_token:z.string().uuid().nullable(),payload_json:z.string(),payload_hash:HashSchema}).parse(value);
     const job=RunPreflightJobViewSchema.parse(parseStoredJson(row.payload_json));
     const configuration=ReadyRunConfigurationSchema.parse(parseStoredJson(row.configuration_json));
+    const originalConfiguration=ReadyRunConfigurationSchema.parse(parseStoredJson(row.original_configuration_json));
+    const expectedProjection=readyConfigurationAtSnapshot(originalConfiguration,configuration.worldSnapshot);
     const profile=resolveReadyInferenceProfile(configuration);
-    if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(job)!==row.payload_json
-      ||sha256(row.configuration_json)!==row.configuration_hash||canonicalJson(configuration)!==row.configuration_json
+    if(sha256(row.original_configuration_json)!==row.configuration_hash||canonicalJson(originalConfiguration)!==row.original_configuration_json
+      ||canonicalJson(expectedProjection)!==row.configuration_json
+      ||sha256(row.payload_json)!==row.payload_hash||canonicalJson(job)!==row.payload_json
+      ||sha256(row.configuration_json)!==row.configuration_payload_hash||canonicalJson(configuration)!==row.configuration_json
       ||configuration.runId!==row.run_id||configuration.configRevision!==row.configuration_revision
       ||configuration.worldSnapshot.revision!==row.world_revision||configuration.worldSnapshot.seq!==row.world_seq
       ||configuration.fictionalAt!==row.fictitious_at||profile.provider!==row.provider
@@ -1663,8 +1735,7 @@ export function openJournal(input: { path: string }) {
         ||run.row.configuration_hash!==current.row.configuration_hash||run.row.world_revision!==current.job.worldRevision
         ||run.row.last_seq!==current.job.worldSeq||run.snapshot.clock.instant!==current.job.fictitiousAt
         ||canonicalJson(run.snapshot)!==canonicalJson(current.configuration.worldSnapshot)
-        ||!currentConfiguration.success
-        ||(currentConfiguration.success&&canonicalJson(run.snapshot)!==canonicalJson(currentConfiguration.data.worldSnapshot));
+        ||!currentConfiguration.success;
     }
     if(stored?.evidence.accessReceipt!==null&&stored?.evidence.accessReceipt!==undefined){
       const receipt=stored.evidence.accessReceipt;
@@ -1745,6 +1816,34 @@ export function openJournal(input: { path: string }) {
       pulseId: row.pulse_id, lifecycleRevision: row.lifecycle_revision, state: row.state,
       failureCode: row.failure_code, perceptionIds: inputs, frozenPerceptionIds, frozenWorldCut,
     });
+  }
+
+  function stepJobView(input: { runId: string; jobId: string }) {
+    const value = database.prepare('SELECT * FROM run_step_jobs WHERE run_id=? AND job_id=?').get(input.runId,input.jobId);
+    if (value === undefined) return undefined;
+    const row = z.strictObject({job_id:JobIdSchema,run_id:RunIdSchema,pulse_id:PulseIdSchema.nullable(),
+      state:z.enum(['queued','running','succeeded','failed','canceled','interrupted']),revision:counter,lifecycle_revision:counter,created_at:counter,updated_at:counter}).parse(value);
+    return RunStepJobViewSchema.parse({jobId:row.job_id,runId:row.run_id,pulseId:row.pulse_id,state:row.state,
+      revision:row.revision,lifecycleRevision:row.lifecycle_revision,createdAt:row.created_at,updatedAt:row.updated_at});
+  }
+
+  function activeStepJob(runId: string) {
+    const value = database.prepare("SELECT job_id FROM run_step_jobs WHERE run_id=? AND state IN('queued','running')").get(runId);
+    return value === undefined ? undefined : stepJobView({runId,jobId:z.strictObject({job_id:JobIdSchema}).parse(value).job_id});
+  }
+
+  function finishStepJob(runId: z.infer<typeof RunIdSchema>, state: 'succeeded' | 'failed' | 'canceled') {
+    const job = activeStepJob(runId);
+    if (job === undefined) return undefined;
+    const now = Date.now();
+    database.prepare("UPDATE run_step_jobs SET state=?,revision=revision+1,updated_at=? WHERE job_id=? AND state IN('queued','running')")
+      .run(state,now,job.jobId);
+    if (state !== 'canceled') {
+      const changed = database.prepare("UPDATE world_runs SET lifecycle='paused',lifecycle_revision=lifecycle_revision+1,updated_at=? WHERE run_id=? AND lifecycle='running' AND lifecycle_revision=?")
+        .run(now,runId,job.lifecycleRevision);
+      if (changed.changes === 1) blockRunningActorJobs(runId,now);
+    }
+    return stepJobView({runId,jobId:job.jobId});
   }
 
   function coordinatorPulseView(input: z.infer<typeof CoordinatorPulseLookupSchema>) {
@@ -2139,6 +2238,8 @@ export function openJournal(input: { path: string }) {
   function actorJobEpochCurrent(job: z.infer<typeof ActorTurnJobDbRowSchema>, run: ReturnType<typeof parseWorldRun>): boolean {
     if (run.row.lifecycle !== 'running' || job.lifecycle_revision === null
       || job.lifecycle_revision !== run.row.lifecycle_revision) return false;
+    const step = activeStepJob(job.run_id);
+    if (step !== undefined && (step.lifecycleRevision !== run.row.lifecycle_revision || step.pulseId !== job.pulse_id)) return false;
     const pulseValue = database.prepare(`SELECT lifecycle_revision FROM coordinator_pulses WHERE run_id=? AND pulse_id=?`)
       .get(job.run_id, job.pulse_id);
     if (pulseValue === undefined) return true;
@@ -2223,6 +2324,7 @@ export function openJournal(input: { path: string }) {
   }
 
   function blockRunningActorJobs(runId: z.infer<typeof RunIdSchema>, timestamp: number): void {
+    database.prepare("UPDATE administrative_jobs SET state='blocked',failure_code='job-inactive',updated_at=? WHERE run_id=? AND state='running'").run(timestamp,runId);
     const running = database.prepare(`SELECT run_id,actor_id,job_id,generation FROM actor_turn_jobs
       WHERE run_id=? AND state='running'`).all(runId).map((value) => z.strictObject({
         run_id: RunIdSchema, actor_id: CharacterIdSchema, job_id: JobIdSchema, generation: counter,
@@ -2241,6 +2343,7 @@ export function openJournal(input: { path: string }) {
 
   function reconcileRunLifecycleEpoch(runId: z.infer<typeof RunIdSchema>, lifecycle: z.infer<typeof WorldLifecycleSchema>, revision: number, timestamp: number): void {
     if (lifecycle !== 'running') {
+      finishStepJob(runId, 'canceled');
       blockRunningActorJobs(runId, timestamp);
       return;
     }
@@ -2256,6 +2359,7 @@ export function openJournal(input: { path: string }) {
       WHERE run_id=? AND lifecycle='running'`).run(timestamp, runId);
     if (changed.changes === 1) {
       const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(runId));
+      finishStepJob(runId,'failed');
       reconcileRunLifecycleEpoch(runId, run.row.lifecycle, run.row.lifecycle_revision, timestamp);
     }
   }
@@ -2584,6 +2688,162 @@ export function openJournal(input: { path: string }) {
           review.complete ? 1 : 0, review.stateRevision, review.exactContentHash, payload.json, Date.now(), payload.hash);
         return { kind: 'stored', reviewSeq };
 
+  }
+
+  const AdministrativeJobDbSchema=z.strictObject({job_id:JobIdSchema,generation:counter,run_id:RunIdSchema,pulse_id:PulseIdSchema,
+    role:z.enum(['director','narrator','configurator']),lifecycle_revision:counter,world_revision:counter,through_world_seq:counter,
+    context_json:z.string(),context_hash:HashSchema,state:z.enum(['running','accepted','blocked']),owner_token:z.string().uuid(),claim_token:z.string().uuid(),
+    failure_code:AdministrativeJobFailureSchema.nullable(),created_at:counter,updated_at:counter});
+  function administrativeJobRow(input:z.infer<typeof AdministrativeJobLookupSchema>) {
+    const row=AdministrativeJobDbSchema.parse(database.prepare('SELECT * FROM administrative_jobs WHERE job_id=? AND generation=?').get(input.jobId,input.generation));
+    const parsedContext=z.discriminatedUnion('role',[DirectorContextSchema,NarratorContextSchema]).parse(parseStoredJson(row.context_json));
+    const context=parsedContext.role==='director'?validateDirectorContext(parsedContext):validateNarratorContext(parsedContext);
+    const contextHash=context.role==='director'?directorContextHash(context):narratorContextHash(context);
+    if(row.role!==context.role||canonicalJson(context)!==row.context_json||contextHash!==row.context_hash
+      ||context.scope.jobId!==row.job_id||context.scope.generation!==row.generation||context.scope.runId!==row.run_id||context.scope.pulseId!==row.pulse_id
+      ||context.scope.lifecycleRevision!==row.lifecycle_revision||context.scope.worldRevision!==row.world_revision||context.scope.throughWorldSeq!==row.through_world_seq)
+      throw new Error('Contexto/scope administrativo alterado');
+    return {row,context};
+  }
+  function administrativeJobView(row:z.infer<typeof AdministrativeJobDbSchema>) {
+    return AdministrativeJobViewSchema.parse({jobId:row.job_id,generation:row.generation,runId:row.run_id,pulseId:row.pulse_id,role:row.role,
+      lifecycleRevision:row.lifecycle_revision,worldRevision:row.world_revision,throughWorldSeq:row.through_world_seq,contextHash:row.context_hash,
+      state:row.state,failureCode:row.failure_code,createdAt:row.created_at,updatedAt:row.updated_at});
+  }
+  function administrativeExecution(row:z.infer<typeof AdministrativeJobDbSchema>,context:z.infer<typeof DirectorContextSchema>|z.infer<typeof NarratorContextSchema>) {
+    return AdministrativeJobExecutionSchema.parse({role:row.role,scope:context.scope,contextHash:row.context_hash,
+      lease:{ownerToken:row.owner_token,claimToken:row.claim_token}});
+  }
+  function claimedAdministrativeJob(execution:z.infer<typeof AdministrativeJobExecutionSchema>) {
+    const job=administrativeJobRow(execution.scope);
+    if(job.row.state!=='running'||canonicalJson(administrativeExecution(job.row,job.context))!==canonicalJson(execution)) throw new Error('Claim administrativo inactivo');
+    return job;
+  }
+  function administrativeSession(lookup:z.infer<typeof AdministrativeJobLookupSchema>) {
+    const value=database.prepare('SELECT payload_json,payload_hash FROM administrative_sessions WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation);
+    if(value===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(value);
+    const session=AdministrativeSessionSchema.parse(parseStoredJson(row.payload_json));
+    if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(session)!==row.payload_json||session.jobId!==lookup.jobId||session.generation!==lookup.generation)throw new Error('Sesión administrativa alterada');
+    return session;
+  }
+  function administrativeEligibility(execution:z.infer<typeof AdministrativeJobExecutionSchema>):{kind:'active'}|{kind:'inactive';reason:string} {
+    let job:ReturnType<typeof administrativeJobRow>;
+    try{job=claimedAdministrativeJob(execution);}catch{return {kind:'inactive',reason:'claim-inactive'};}
+    const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(job.row.run_id);
+    if(value===undefined)return {kind:'inactive',reason:'run-missing'};
+    const run=parseWorldRun(value);const pulse=coordinatorPulseView({runId:job.row.run_id,pulseId:job.row.pulse_id});
+    const step=activeStepJob(job.row.run_id);
+    if(run.row.lifecycle!=='running'||run.row.lifecycle_revision!==job.row.lifecycle_revision||pulse?.state!=='running'
+      ||pulse.lifecycleRevision!==job.row.lifecycle_revision||(step!==undefined&&step.pulseId!==job.row.pulse_id))return {kind:'inactive',reason:'lifecycle-epoch-stale'};
+    if(run.row.config_revision!==job.context.scope.configurationRevision||run.row.world_revision!==job.row.world_revision||run.row.last_seq!==job.row.through_world_seq
+      ||run.snapshot.clock.instant!==job.context.scope.fictitiousAt)return {kind:'inactive',reason:'world-cut-stale'};
+    if(canonicalJson(runInferenceProfile(run))!==canonicalJson(job.context.scope.profile))return {kind:'inactive',reason:'profile-changed'};
+    const session=administrativeSession(execution.scope);
+    if(session!==undefined&&(session.contextHash!==job.row.context_hash||session.role!==job.row.role||canonicalJson(session.profile)!==canonicalJson(job.context.scope.profile)))return {kind:'inactive',reason:'session-context-mismatch'};
+    return {kind:'active'};
+  }
+  function administrativeReservation(execution:z.infer<typeof AdministrativeJobExecutionSchema>,requestSeq:number) {
+    const row=z.strictObject({run_id:RunIdSchema,pulse_id:PulseIdSchema,state:z.enum(['reserved','dispatched','completed','undispatched','ambiguous']),execution_json:z.string()})
+      .parse(database.prepare(`SELECT r.run_id,r.pulse_id,r.state,l.execution_json FROM request_reservations r
+        JOIN administrative_request_leases l ON l.job_id=r.job_id AND l.generation=r.generation AND l.request_seq=r.request_seq
+        WHERE r.job_id=? AND r.generation=? AND r.request_seq=?`).get(execution.scope.jobId,execution.scope.generation,requestSeq));
+    if(row.run_id!==execution.scope.runId||row.pulse_id!==execution.scope.pulseId||canonicalJson(AdministrativeJobExecutionSchema.parse(parseStoredJson(row.execution_json)))!==canonicalJson(execution))throw new Error('Reserva administrativa de otro scope/lease');
+    return row;
+  }
+  function assertAdministrativeTerminal(execution:z.infer<typeof AdministrativeJobExecutionSchema>) {
+    const job=claimedAdministrativeJob(execution);
+    if(administrativeEligibility(execution).kind!=='active')throw new Error('Terminal administrativo fuera de época/corte');
+    const session=administrativeSession(execution.scope);if(session===undefined)throw new Error('Terminal administrativo sin sesión');
+    const terminals=database.prepare("SELECT checkpoint_hash,payload_json FROM administrative_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='terminal-candidate'")
+      .all(job.row.job_id,job.row.generation).map(value=>{
+        const row=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(value);const checkpoint=AdministrativeCheckpointSchema.parse(parseStoredJson(row.payload_json));
+        if(sha256(row.payload_json)!==row.checkpoint_hash||canonicalJson(checkpoint)!==row.payload_json)throw new Error('Terminal administrativo alterado');return checkpoint;
+      }).filter(checkpoint=>checkpoint.purpose.kind==='terminal-candidate'&&checkpoint.purpose.outcome==='completed');
+    const terminal=terminals[0];
+    if(terminals.length!==1||terminal===undefined||terminal.purpose.kind!=='terminal-candidate'||terminal.purpose.lastRequestSeq===null||terminal.snapshot.candidateLeafId===null
+      ||canonicalJson(terminal.execution)!==canonicalJson(execution)||terminal.snapshot.sessionId!==session.sessionId||terminal.snapshot.sessionPath!==session.sessionPath)
+      throw new Error('Terminal administrativo incompleto o de otro claim/sesión');
+    const requestSeq=terminal.purpose.lastRequestSeq;
+    const latest=z.strictObject({last:counter.nullable()}).parse(database.prepare('SELECT MAX(request_seq) last FROM request_reservations WHERE job_id=? AND generation=?').get(job.row.job_id,job.row.generation));
+    if(latest.last!==requestSeq||administrativeReservation(execution,requestSeq).state!=='completed')throw new Error('Terminal administrativo no liga última request completada');
+    const value=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(database.prepare("SELECT checkpoint_hash,payload_json FROM administrative_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='request-input' AND request_seq=?").get(job.row.job_id,job.row.generation,requestSeq));
+    const checkpoint=AdministrativeCheckpointSchema.parse(parseStoredJson(value.payload_json));
+    if(sha256(value.payload_json)!==value.checkpoint_hash||canonicalJson(checkpoint)!==value.payload_json||canonicalJson(checkpoint.execution)!==canonicalJson(execution)
+      ||checkpoint.snapshot.sessionId!==session.sessionId||checkpoint.snapshot.sessionPath!==session.sessionPath)throw new Error('Input administrativo alterado o de otra sesión');
+    return job;
+  }
+  function narrationCandidate(execution:z.infer<typeof AdministrativeJobExecutionSchema>,candidateHash:string) {
+    const row=z.strictObject({candidate_hash:HashSchema,payload_json:z.string()}).parse(database.prepare('SELECT candidate_hash,payload_json FROM narration_candidates WHERE job_id=? AND generation=?').get(execution.scope.jobId,execution.scope.generation));
+    const candidate=NarratorJournalCandidateSchema.parse(parseStoredJson(row.payload_json));
+    if(row.candidate_hash!==candidateHash||candidate.candidateHash!==candidateHash||hashJson({execution:candidate.execution,proposal:candidate.proposal}).hash!==candidateHash
+      ||canonicalJson(candidate)!==row.payload_json||canonicalJson(candidate.execution)!==canonicalJson(execution))throw new Error('Candidato Narrador alterado o de otro claim');
+    return candidate;
+  }
+  function narrationReceipt(lookup:z.infer<typeof AdministrativeJobLookupSchema>) {
+    const value=database.prepare('SELECT payload_json,payload_hash,accepted_at FROM narration_receipts WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation);if(value===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,accepted_at:counter}).parse(value);const receipt=NarratorJobReceiptSchema.parse(parseStoredJson(row.payload_json));
+    const job=administrativeJobRow(lookup);if(job.context.role!=='narrator'||job.row.state!=='accepted')throw new Error('Receipt Narrador de otro contexto/estado');
+    const candidateRow=z.strictObject({candidate_hash:HashSchema}).parse(database.prepare('SELECT candidate_hash FROM narration_candidates WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation));
+    const candidate=narrationCandidate(administrativeExecution(job.row,job.context),candidateRow.candidate_hash);
+    if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(receipt)!==row.payload_json)throw new Error('Receipt Narrador alterado');
+    validateNarrationProposal({context:job.context,proposal:candidate.proposal});
+    if(receipt.kind==='published'){
+      const publication=receipt.publication;
+      if(candidate.proposal.kind!=='narrate'||canonicalJson(publication.scope)!==canonicalJson(job.context.scope)||publication.contextHash!==job.row.context_hash
+        ||publication.proposalHash!==narrationValueHash(candidate.proposal)||publication.text!==candidate.proposal.text||publication.textHash!==sha256(publication.text)
+        ||canonicalJson(publication.sourceEventIds)!==canonicalJson(candidate.proposal.sourceEventIds)
+        ||canonicalJson(publication.sourceRecordedFactIds)!==canonicalJson(candidate.proposal.sourceRecordedFactIds)
+        ||publication.sourceWorldRevision!==candidate.proposal.sourceWorldRevision
+        ||canonicalJson(publication.uncertainty)!==canonicalJson(candidate.proposal.uncertainty)
+        ||publication.publishedAt!==row.accepted_at)throw new Error('Publicación Narrador no coincide con candidato exacto');
+      validateNarrationReview({context:job.context,proposal:candidate.proposal,review:publication.review});
+    }else if(candidate.proposal.kind!=='abstain'||canonicalJson(receipt.scope)!==canonicalJson(job.context.scope)||receipt.contextHash!==job.row.context_hash
+      ||receipt.proposalHash!==narrationValueHash(candidate.proposal)||canonicalJson(receipt.proposal)!==canonicalJson(candidate.proposal)||receipt.acceptedAt!==row.accepted_at)throw new Error('Abstención Narrador no coincide con candidato');
+    return receipt;
+  }
+  function narrationPublicationsAt(runId:z.infer<typeof RunIdSchema>,throughWorldSeq:number) {
+    const rows=database.prepare("SELECT job_id,generation FROM narration_receipts WHERE run_id=? AND through_world_seq<=? AND json_extract(payload_json,'$.kind')='published' ORDER BY accepted_at,job_id LIMIT 1001")
+      .all(runId,throughWorldSeq).map(value=>AdministrativeJobLookupSchema.parse({jobId:Reflect.get(value,'job_id'),generation:Reflect.get(value,'generation')}));
+    if(rows.length>1000)throw new Error('Historia Narrador requiere continuación explícita');
+    return rows.flatMap(lookup=>{const receipt=narrationReceipt(lookup);return receipt?.kind==='published'?[receipt.publication]:[];});
+  }
+
+  function directorReceipt(lookup:z.infer<typeof AdministrativeJobLookupSchema>) {
+    const value=database.prepare('SELECT payload_json,payload_hash,accepted_at FROM director_annotations WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation);
+    if(value===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,accepted_at:counter}).parse(value);
+    const annotation=DirectorAnnotationSchema.parse(parseStoredJson(row.payload_json));
+    if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(annotation)!==row.payload_json||annotation.scope.jobId!==lookup.jobId||annotation.scope.generation!==lookup.generation)throw new Error('Anotación Director alterada');
+    const job=administrativeJobRow(lookup);
+    if(canonicalJson(annotation.scope)!==canonicalJson(job.context.scope)||annotation.contextHash!==job.row.context_hash||job.row.state!=='accepted')throw new Error('Receipt Director fuera del contexto aceptado');
+    if(job.context.role!=='director')throw new Error('Receipt Director de otro rol');
+    validateDirectorObservation({context:job.context,observation:annotation.observation});
+    const candidateValue=z.strictObject({candidate_hash:HashSchema,payload_json:z.string()}).parse(database.prepare('SELECT candidate_hash,payload_json FROM director_candidates WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation));
+    const candidate=DirectorCandidateSchema.parse(parseStoredJson(candidateValue.payload_json));
+    if(hashJson({execution:candidate.execution,observation:candidate.observation}).hash!==candidateValue.candidate_hash||candidate.candidateHash!==candidateValue.candidate_hash
+      ||canonicalJson(candidate.observation)!==canonicalJson(annotation.observation))throw new Error('Anotación Director no coincide con candidato aceptado');
+    return DirectorJobReceiptSchema.parse({annotation,acceptedAt:row.accepted_at});
+  }
+  function directorAnnotationsAt(runId:z.infer<typeof RunIdSchema>,throughWorldSeq:number) {
+    const rows=database.prepare('SELECT job_id,generation FROM director_annotations WHERE run_id=? AND through_world_seq<=? ORDER BY accepted_at,annotation_id LIMIT 10001')
+      .all(runId,throughWorldSeq).map(value=>AdministrativeJobLookupSchema.parse({jobId:Reflect.get(value,'job_id'),generation:Reflect.get(value,'generation')}));
+    if(rows.length>10000)throw new Error('El contexto Director excede su límite; requiere continuación administrativa explícita');
+    return rows.map(lookup=>{const receipt=directorReceipt(lookup);if(receipt===undefined)throw new Error('Anotación Director perdida');return receipt.annotation;});
+  }
+  function directorContextForPulse(run:ReturnType<typeof parseWorldRun>,pulseId:z.infer<typeof PulseIdSchema>,jobId:z.infer<typeof JobIdSchema>,generation:number) {
+    const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+    const events=database.prepare('SELECT payload_json,payload_hash FROM world_events WHERE run_id=? AND world_seq<=? ORDER BY world_seq LIMIT 10001')
+      .all(run.row.run_id,run.row.last_seq).map(value=>{
+        const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(value);const event=WorldEventSchema.parse(parseStoredJson(row.payload_json));
+        if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(event)!==row.payload_json||event.runId!==run.row.run_id)throw new Error('Evento Director alterado/ajeno');return event;
+      });
+    if(events.length>10000)throw new Error('El contexto Director excede su límite; requiere continuación administrativa explícita');
+    const scene=run.snapshot.scenes.find(item=>item.id===run.snapshot.activeSceneId);
+    return validateDirectorContext({kind:'director-context',schemaVersion:1,role:'director',scope:{runId:run.row.run_id,pulseId,jobId,generation,
+      lifecycleRevision:run.row.lifecycle_revision,configurationRevision:run.row.config_revision,worldRevision:run.row.world_revision,
+      throughWorldSeq:run.row.last_seq,fictitiousAt:run.snapshot.clock.instant,profile:runInferenceProfile(run)},dramaticLine:configuration.dramaticLine,
+      participantCharacterIds:scene?.participantIds??[],confirmedEvents:events,previousAnnotations:directorAnnotationsAt(run.row.run_id,run.row.last_seq)});
   }
 
   function continuistaJobRow(input: z.infer<typeof ContinuistaJobLookupSchema>) {
@@ -3135,7 +3395,7 @@ export function openJournal(input: { path: string }) {
         .get(request.principalId, request.idempotencyKey);
       if (previousValue === undefined) return RunLifecycleCommandLookupResultSchema.parse({ kind: 'missing' });
       const previous = z.strictObject({ principal_id: z.string(), idempotency_key: z.string().uuid(), run_id: RunIdSchema,
-        command_kind: z.enum(['start', 'pause', 'resume', 'stop', 'close']), request_hash: HashSchema,
+        command_kind: z.enum(['start', 'pause', 'resume', 'step', 'stop', 'close']), request_hash: HashSchema,
         result_json: z.string(), result_hash: HashSchema, recorded_at: counter }).parse(previousValue);
       if (previous.run_id !== request.runId || previous.command_kind !== request.command.kind || previous.request_hash !== requestHash) {
         return RunLifecycleCommandLookupResultSchema.parse({ kind: 'idempotencyConflict' });
@@ -3163,7 +3423,7 @@ export function openJournal(input: { path: string }) {
           .get(request.principalId, request.idempotencyKey);
         if (previousValue !== undefined) {
           const previous = z.strictObject({ principal_id: z.string(), idempotency_key: z.string().uuid(), run_id: RunIdSchema,
-            command_kind: z.enum(['start', 'pause', 'resume', 'stop', 'close']), request_hash: HashSchema,
+            command_kind: z.enum(['start', 'pause', 'resume', 'step', 'stop', 'close']), request_hash: HashSchema,
             result_json: z.string(), result_hash: HashSchema, recorded_at: counter }).parse(previousValue);
           if (previous.run_id !== request.runId || previous.command_kind !== request.command.kind || previous.request_hash !== requestHash) {
             return RunLifecycleCommandResultSchema.parse({ kind: 'idempotencyConflict' });
@@ -3193,11 +3453,11 @@ export function openJournal(input: { path: string }) {
         }
 
         const transition = resolveRunControlTransition(run.row.lifecycle, request.command);
-        if (transition.kind === 'invalid' || transition.kind === 'singlePulse') {
+        if (transition.kind === 'invalid') {
           return record(RunLifecycleCommandResultSchema.parse({ kind: 'invalidLifecycle', lifecycle: run.row.lifecycle }));
         }
 
-        if (request.command.kind === 'start' || request.command.kind === 'resume') {
+        if (request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') {
           const preflightJobId = request.preflightJobId;
           if (preflightJobId === undefined) return record(RunLifecycleCommandResultSchema.parse({ kind: 'preflightRequired' }));
           const preflight = runPreflightJobRow({ runId: request.runId, jobId: preflightJobId });
@@ -3221,16 +3481,55 @@ export function openJournal(input: { path: string }) {
           }
         }
 
+        if (request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') {
+          const budget = readRunModelTimeBudget({runId:request.runId});
+          if (budget === undefined || budget.status !== 'known' || budget.runCallsUsed >= budget.maxPiCallsPerRun || budget.wallTimeRemainingMs === 0) {
+            return record(RunLifecycleCommandResultSchema.parse({kind:'budgetExhausted'}));
+          }
+        }
         const now = Date.now();
+        if (request.command.kind !== 'step') database.prepare("UPDATE run_step_jobs SET state='canceled',revision=revision+1,updated_at=? WHERE run_id=? AND state='interrupted'").run(now,request.runId);
         const changed = database.prepare(`UPDATE world_runs SET lifecycle=?,lifecycle_revision=lifecycle_revision+1,closed_at=?,updated_at=?
           WHERE run_id=? AND lifecycle_revision=? AND config_revision=? AND world_revision=?`)
-          .run(transition.to, transition.to === 'closed' ? now : null, now, request.runId,
+          .run(transition.kind === 'singlePulse' ? 'running' : transition.to, transition.kind === 'transition' && transition.to === 'closed' ? now : null, now, request.runId,
             request.expectedLifecycleRevision, request.expectedConfigRevision, request.expectedWorldRevision);
         if (changed.changes !== 1) throw new Error('CAS de lifecycle cambió dentro de la transacción');
         run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
         reconcileRunLifecycleEpoch(request.runId, run.row.lifecycle, run.row.lifecycle_revision, now);
+        if (request.command.kind === 'step') {
+          const interrupted = database.prepare("SELECT job_id FROM run_step_jobs WHERE run_id=? AND state='interrupted' ORDER BY updated_at DESC LIMIT 1").get(request.runId);
+          const jobId = interrupted === undefined ? JobIdSchema.parse(randomUUID()) : z.strictObject({job_id:JobIdSchema}).parse(interrupted).job_id;
+          if (interrupted === undefined) database.prepare(`INSERT INTO run_step_jobs VALUES(?,?,NULL,'queued',0,?,?,?)`)
+            .run(jobId,request.runId,run.row.lifecycle_revision,now,now);
+          else database.prepare("UPDATE run_step_jobs SET state=CASE WHEN pulse_id IS NULL THEN 'queued' ELSE 'running' END,revision=revision+1,lifecycle_revision=?,updated_at=? WHERE job_id=? AND state='interrupted'")
+            .run(run.row.lifecycle_revision,now,jobId);
+          return record(RunLifecycleCommandResultSchema.parse({kind:'accepted',state:state(),job:stepJobView({runId:request.runId,jobId})}));
+        }
         return record(RunLifecycleCommandResultSchema.parse({ kind: 'updated', state: state() }));
       });
+    },
+
+    readWorldConfigurationMetadata(input: unknown) {
+      const {runId}=z.strictObject({runId:RunIdSchema}).parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(runId);
+      if(value===undefined)return undefined;
+      const run=parseWorldRun(value);
+      return {configurationRevision:run.row.config_revision,configurationHash:run.row.configuration_hash,createdAt:run.row.created_at};
+    },
+
+    /** Host-only inspector cut. A sequence alone may identify multiple zero-event
+     * subjective revisions; return that ambiguity instead of inventing a past mind. */
+    readInspectorWorldCut(input: unknown) {
+      const request=z.strictObject({runId:RunIdSchema,atWorldSeq:WorldSeqSchema.optional(),worldRevision:RevisionSchema.optional()}).parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(value===undefined)return undefined;
+      const run=parseWorldRun(value);const seq=request.atWorldSeq??run.row.last_seq;
+      if(seq>run.row.last_seq)return undefined;
+      const matches=z.strictObject({count:counter}).parse(database.prepare('SELECT COUNT(*) count FROM world_commits WHERE run_id=? AND last_seq=?').get(request.runId,seq)).count+(seq===run.initialSnapshot.seq?1:0);
+      if(request.atWorldSeq===undefined&&request.worldRevision===undefined)return {snapshot:run.snapshot,commitIndex:run.row.commit_index,ambiguousSeq:matches>1};
+      if(request.worldRevision!==undefined){const cut=snapshotAndCommitAtCut(run,request.worldRevision,seq);return cut===undefined?undefined:{...cut,ambiguousSeq:matches>1};}
+      const snapshot=snapshotAtCut(run,seq);if(snapshot===undefined)return undefined;
+      const first=database.prepare('SELECT commit_index FROM world_commits WHERE run_id=? AND last_seq=? ORDER BY commit_index ASC LIMIT 1').get(request.runId,seq);
+      return {snapshot,commitIndex:seq===run.initialSnapshot.seq?0:z.strictObject({commit_index:counter}).parse(first).commit_index,ambiguousSeq:matches>1};
     },
 
     loadWorld(input: unknown) {
@@ -3575,7 +3874,7 @@ export function openJournal(input: { path: string }) {
         }
 
         const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
-        if (run.row.lifecycle !== 'running') throw new Error('El mundo no acepta intervenciones fuera de running');
+        if (run.row.lifecycle !== 'running') return HumanInterventionCommitResultSchema.parse({kind:'invalidLifecycle',lifecycle:run.row.lifecycle});
         const configuration = z.record(z.string(), z.unknown()).parse(run.configuration);
         const profiles = HumanParticipantProfilesSchema.parse(configuration.humanParticipants);
         const configuredProfile = profiles.find((item) => item.identity.participantId === request.participantId);
@@ -3878,6 +4177,108 @@ export function openJournal(input: { path: string }) {
           .run(request.runId, request.proposalId, request.version);
         return { kind: 'committed' as const, commitIndex, resolution };
       });
+    },
+
+    /** Bounded confirmed rows with the exact pre-commit cut for labels/visibility.
+     * This host-only read never returns a proposal, perception payload or Pi output. */
+    readObservationEvents(input: unknown) {
+      const request = z.strictObject({runId:RunIdSchema,fromWorldSeq:WorldSeqSchema,toWorldSeq:WorldSeqSchema,
+        afterWorldSeq:WorldSeqSchema.nullable(),limit:counter.min(1).max(100),communicationsOnly:z.boolean()}).parse(input);
+      const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      if (runValue === undefined) return undefined;
+      const run = parseWorldRun(runValue);
+      const values = database.prepare(`SELECT e.payload_json,e.payload_hash,c.commit_index
+        FROM world_events e JOIN world_commits c ON c.run_id=e.run_id AND c.commit_index=(SELECT MIN(commit_index) FROM world_commits x WHERE x.run_id=e.run_id AND x.last_seq>=e.world_seq)
+        WHERE e.run_id=? AND e.world_seq>=? AND e.world_seq<=? AND (? IS NULL OR e.world_seq>?)
+          AND (?=0 OR json_extract(e.payload_json,'$.kind') IN('communicated','humanIntervention'))
+        ORDER BY e.world_seq LIMIT ?`).all(request.runId,request.fromWorldSeq,request.toWorldSeq,
+          request.afterWorldSeq,request.afterWorldSeq,Number(request.communicationsOnly),request.limit);
+      return values.map((value) => {
+        const row = z.strictObject({payload_json:z.string(),payload_hash:HashSchema,commit_index:counter.min(1)}).parse(value);
+        if (sha256(row.payload_json) !== row.payload_hash) throw new Error('Hash de evento confirmado alterado');
+        const event = WorldEventSchema.parse(parseStoredJson(row.payload_json));
+        if (event.runId !== request.runId || canonicalJson(event) !== row.payload_json) throw new Error('Evento confirmado fuera de su ámbito');
+        const previous = database.prepare('SELECT * FROM world_commits WHERE run_id=? AND commit_index<? ORDER BY commit_index DESC LIMIT 1')
+          .get(request.runId,row.commit_index);
+        let snapshot = run.initialSnapshot;
+        if (previous !== undefined) {
+          const commit = WorldCommitDbRowSchema.parse(previous);
+          if (sha256(commit.snapshot_json) !== commit.snapshot_hash) throw new Error('Snapshot anterior alterado');
+          snapshot = WorldSnapshotSchema.parse(parseStoredJson(commit.snapshot_json));
+          if (snapshot.runId !== request.runId || snapshot.revision !== commit.world_revision || snapshot.seq !== commit.last_seq) throw new Error('Corte anterior ajeno al evento');
+        }
+        return {event,snapshot};
+      });
+    },
+
+    readObservationDeliveries(input: unknown) {
+      const request = z.strictObject({runId:RunIdSchema,eventId:EventIdSchema}).parse(input);
+      return database.prepare(`SELECT p.recipient_actor_id AS actor_id,d.state,
+        CASE WHEN d.state<>'delivered' THEN 'notDelivered' WHEN r.experience_id IS NULL THEN 'pending' ELSE 'projected' END AS projection
+        FROM world_perceptions p JOIN world_deliveries d ON d.perception_id=p.perception_id
+        LEFT JOIN world_perception_experiences x ON x.perception_id=p.perception_id
+        LEFT JOIN memory_receipts r ON r.experience_id=x.experience_id
+        WHERE p.run_id=? AND p.event_id=? ORDER BY p.recipient_actor_id,p.perception_id LIMIT 101`)
+        .all(request.runId,request.eventId).map((value) => {
+          const row = z.strictObject({actor_id:CharacterIdSchema,state:z.enum(['planned','delivering','delivered','failed']),projection:z.enum(['notDelivered','pending','projected'])}).parse(value);
+          return {actorId:row.actor_id,state:row.state,memoryProjection:row.projection};
+        });
+    },
+
+    readObservationJobs(input: unknown) {
+      const request = z.strictObject({runId:RunIdSchema,afterKey:z.string().min(1).max(200).nullable(),limit:counter.min(1).max(100)}).parse(input);
+      return database.prepare(`WITH j AS (
+        SELECT 'actor' AS kind,job_id,generation,pulse_id,state,actor_id,created_at,updated_at,failure_code AS safe_code FROM actor_turn_jobs WHERE run_id=?
+        UNION ALL SELECT 'continuista',job_id,generation,pulse_id,state,actor_id,created_at,updated_at,failure_code FROM continuista_jobs WHERE run_id=?
+        UNION ALL SELECT 'pulse',pulse_id,0,pulse_id,state,NULL,created_at,updated_at,NULL FROM coordinator_pulses WHERE run_id=?
+        UNION ALL SELECT 'step',job_id,0,pulse_id,state,NULL,created_at,updated_at,NULL FROM run_step_jobs WHERE run_id=?
+        UNION ALL SELECT role,job_id,generation,pulse_id,state,NULL,created_at,updated_at,failure_code FROM administrative_jobs WHERE run_id=?
+        UNION ALL SELECT 'preflight',job_id,0,NULL,state,NULL,CAST(strftime('%s',created_at) AS INTEGER)*1000,CAST(strftime('%s',updated_at) AS INTEGER)*1000,NULL FROM run_preflight_jobs WHERE run_id=?
+      ), k AS (SELECT *,kind||':'||job_id||':'||generation AS page_key FROM j)
+      SELECT * FROM k WHERE (? IS NULL OR page_key>?) ORDER BY page_key LIMIT ?`)
+        .all(request.runId,request.runId,request.runId,request.runId,request.runId,request.runId,request.afterKey,request.afterKey,request.limit)
+        .map((value) => {
+          const row = z.strictObject({kind:z.enum(['actor','continuista','pulse','step','preflight','director','narrator','configurator']),job_id:JobIdSchema,generation:counter,
+            pulse_id:PulseIdSchema.nullable(),state:z.enum(['queued','running','accepted','blocked','completed','succeeded','failed','canceled','interrupted','cancel-requested']),
+            actor_id:CharacterIdSchema.nullable(),created_at:counter,updated_at:counter,safe_code:z.string().nullable(),page_key:z.string()}).parse(value);
+          const usage = z.strictObject({calls:counter,measured:counter,reserved:counter}).parse(database.prepare(`SELECT
+            (SELECT COUNT(*) FROM request_reservations WHERE run_id=? AND job_id=? AND generation=?) AS calls,
+            COALESCE(SUM(CASE WHEN state='settled' THEN measured_ms ELSE 0 END),0) AS measured,
+            COALESCE(SUM(CASE WHEN state IN('reserved','running','expired','uncertain') THEN reserved_ms ELSE 0 END),0) AS reserved
+            FROM model_time_spans WHERE run_id=? AND job_id=? AND generation=?`).get(request.runId,row.job_id,row.generation,request.runId,row.job_id,row.generation));
+          return {row,usage};
+        });
+    },
+
+    /** Host-only bridge to presentation. Human/animal/gesture content is not speech synthesis input. */
+    readConfirmedSpeechPublication(input: unknown) {
+      const request = z.strictObject({ runId: RunIdSchema, eventId: EventIdSchema }).parse(input);
+      const value = database.prepare(`SELECT e.payload_json,e.payload_hash,e.world_seq,c.origin_id,c.created_at,c.last_seq
+        FROM world_events e JOIN world_commits c ON c.run_id=e.run_id AND c.origin_id=e.origin_id
+        WHERE e.run_id=? AND e.event_id=? AND c.origin_kind='actorAttempt'`).get(request.runId,request.eventId);
+      if (value === undefined) return undefined;
+      const row = z.strictObject({payload_json:z.string(),payload_hash:HashSchema,world_seq:WorldSeqSchema,origin_id:WorldAttemptIdSchema,created_at:counter,last_seq:WorldSeqSchema}).parse(value);
+      if (sha256(row.payload_json) !== row.payload_hash) throw new Error('Hash de publicación confirmado alterado');
+      const event = WorldEventSchema.parse(parseStoredJson(row.payload_json));
+      if (event.id !== request.eventId || event.runId !== request.runId || event.seq !== row.world_seq || event.seq > row.last_seq || canonicalJson(event) !== row.payload_json) {
+        throw new Error('Publicación confirmada fuera de su ámbito');
+      }
+      if (event.kind !== 'communicated' || event.content.kind !== 'speech' || event.origin.kind !== 'actor') return undefined;
+      if (event.origin.attemptId !== row.origin_id) throw new Error('Origen de publicación confirmado inconsistente');
+      return { event, committedAt: row.created_at };
+    },
+
+    listConfirmedSpeechPublications(input: unknown) {
+      const request = z.strictObject({runId:RunIdSchema,afterWorldSeq:WorldSeqSchema,limit:counter.min(1).max(100)}).parse(input);
+      const rows = database.prepare(`SELECT e.event_id,e.world_seq FROM world_events e
+        JOIN world_commits c ON c.run_id=e.run_id AND c.origin_id=e.origin_id
+        WHERE e.run_id=? AND e.world_seq>? AND c.origin_kind='actorAttempt'
+          AND json_extract(e.payload_json,'$.kind')='communicated'
+          AND json_extract(e.payload_json,'$.content.kind')='speech'
+          AND json_extract(e.payload_json,'$.origin.kind')='actor'
+        ORDER BY e.world_seq LIMIT ?`).all(request.runId,request.afterWorldSeq,request.limit);
+      return rows.map(value => z.strictObject({event_id:EventIdSchema,world_seq:WorldSeqSchema}).parse(value))
+        .map(row => ({eventId:row.event_id,worldSeq:row.world_seq}));
     },
 
     readWorldEvents(input: { runId: unknown; fromWorldSeq?: unknown; toWorldSeq?: unknown }) {
@@ -4291,12 +4692,10 @@ export function openJournal(input: { path: string }) {
           else{
             const parsed=ReadyRunConfigurationSchema.safeParse(run.configuration);
             if(!parsed.success||parsed.data.runId!==request.runId||parsed.data.configRevision!==run.row.config_revision
-              ||hashJson(parsed.data).hash!==run.row.configuration_hash||canonicalJson(parsed.data.worldSnapshot)!==canonicalJson(run.snapshot)
-              ||parsed.data.worldSnapshot.revision!==run.row.world_revision||parsed.data.worldSnapshot.seq!==run.row.last_seq
-              ||parsed.data.fictionalAt!==run.snapshot.clock.instant){
+              ||hashJson(parsed.data).hash!==run.row.configuration_hash){
               result=RunPreflightJobStartResultSchema.parse({kind:'invalidConfiguration'});
             }else{
-              const configuration=parsed.data;const profile=runInferenceProfile({...run,configuration});
+              const configuration=readyConfigurationAtSnapshot(parsed.data,run.snapshot);const profile=runInferenceProfile({...run,configuration});
               const profileFingerprint=fingerprintInferenceProfile(profile);const timestamp=new Date().toISOString();const job=RunPreflightJobViewSchema.parse({
                 kind:'run-preflight-job',jobId:JobIdSchema.parse(randomUUID()),runId:request.runId,state:'queued',revision:0,createdAt:timestamp,updatedAt:timestamp,
                 configurationRevision:run.row.config_revision,worldRevision:run.row.world_revision,worldSeq:run.row.last_seq,
@@ -4304,10 +4703,10 @@ export function openJournal(input: { path: string }) {
               });
               const payload=hashJson(job);const configurationJson=canonicalJson(configuration);
               database.prepare(`INSERT INTO run_preflight_jobs(job_id,run_id,principal_id,state,revision,created_at,updated_at,configuration_revision,configuration_hash,
-                configuration_json,world_revision,world_seq,fictitious_at,provider,profile_fingerprint,result_kind,safe_code,owner_token,claim_token,payload_json,payload_hash)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,?,?)`)
+                configuration_json,world_revision,world_seq,fictitious_at,provider,profile_fingerprint,result_kind,safe_code,owner_token,claim_token,payload_json,payload_hash,configuration_payload_hash,original_configuration_json)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL,?,?,?,?)`)
                 .run(job.jobId,request.runId,request.principalId,job.state,job.revision,job.createdAt,job.updatedAt,job.configurationRevision,
-                  run.row.configuration_hash,configurationJson,job.worldRevision,job.worldSeq,job.fictitiousAt,profile.provider,profileFingerprint,payload.json,payload.hash);
+                  run.row.configuration_hash,configurationJson,job.worldRevision,job.worldSeq,job.fictitiousAt,profile.provider,profileFingerprint,payload.json,payload.hash,sha256(configurationJson),run.row.configuration_json);
               database.prepare('INSERT INTO run_preflight_job_history VALUES(?,?,?,?)').run(job.jobId,0,payload.json,payload.hash);
               result=RunPreflightJobStartResultSchema.parse({kind:'created',job});
             }
@@ -4705,6 +5104,267 @@ export function openJournal(input: { path: string }) {
     },
     recoverAbandonedContinuistaClaims(input:unknown){const request=ActorTurnJobRecoverySchema.parse(input);return Number(transact(()=>database.prepare(`UPDATE continuista_jobs SET state='queued',owner_token=NULL,claim_token=NULL,updated_at=? WHERE state='running' AND owner_token<>?`).run(Date.now(),request.ownerToken).changes));},
 
+    beginDirectorJob(input: unknown) {
+      const request=DirectorJobBeginSchema.parse(input);return transact(()=>{
+        const prior=database.prepare("SELECT job_id,generation FROM administrative_jobs WHERE run_id=? AND pulse_id=? AND role='director' ORDER BY generation DESC LIMIT 1").get(request.runId,request.pulseId);
+        if(prior!==undefined){
+          const lookup=AdministrativeJobLookupSchema.parse({jobId:Reflect.get(prior,'job_id'),generation:Reflect.get(prior,'generation')});
+          const {row,context}=administrativeJobRow(lookup);const job=administrativeJobView(row);
+          if(context.role!=='director')throw new Error('Job Director de otro rol');
+          if(row.state==='blocked')return DirectorJobBeginResultSchema.parse({kind:'blocked',job});
+          if(row.state==='running'&&(row.owner_token!==request.ownerToken||row.claim_token!==request.claimToken))return DirectorJobBeginResultSchema.parse({kind:'busy',job});
+          return DirectorJobBeginResultSchema.parse({kind:'existing',job,execution:administrativeExecution(row,context),context});
+        }
+        const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(value===undefined)return DirectorJobBeginResultSchema.parse({kind:'inactive'});
+        const run=parseWorldRun(value);const pulse=coordinatorPulseView(request);
+        if(run.row.lifecycle!=='running'||pulse?.state!=='running'||pulse.lifecycleRevision!==run.row.lifecycle_revision)return DirectorJobBeginResultSchema.parse({kind:'inactive'});
+        const actorsTerminal=pulse.jobs.every(job=>{
+          if(job.state==='blocked')return true;if(job.state!=='accepted')return false;
+          const proposal=acceptedActorJobProposal({runId:job.runId,actorId:job.actorId,jobId:job.jobId,generation:job.generation});
+          return proposal!==undefined&&database.prepare("SELECT 1 FROM world_commits WHERE run_id=? AND origin_kind='actorAttempt' AND origin_id=?").get(job.runId,proposal.attemptId)!==undefined;
+        });
+        if(!actorsTerminal)return DirectorJobBeginResultSchema.parse({kind:'inactive'});
+        const awaiting=database.prepare(`SELECT 1 FROM actor_turn_intents i JOIN world_perceptions p ON p.perception_id=i.perception_id
+          WHERE i.run_id=? AND p.origin_kind=? AND p.origin_id=?
+          AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
+          AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a JOIN actor_turn_jobs j ON j.job_id=a.job_id AND j.generation=a.generation
+            WHERE a.perception_id=i.perception_id AND j.pulse_id=? AND j.state='blocked'
+            AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.job_id=j.job_id AND newer.generation>j.generation)) LIMIT 1`)
+          .get(request.runId,pulse.cause.kind,pulse.cause.id,request.pulseId);
+        if(awaiting!==undefined)return DirectorJobBeginResultSchema.parse({kind:'inactive'});
+        const jobId=JobIdSchema.parse(randomUUID());const generation=RevisionSchema.parse(0);const context=directorContextForPulse(run,request.pulseId,jobId,generation);
+        const payload=hashJson(context);const now=Date.now();
+        database.prepare(`INSERT INTO administrative_jobs VALUES(?,?,?,?, 'director',?,?,?,?,?,'running',?,?,NULL,?,?)`)
+          .run(jobId,generation,request.runId,request.pulseId,run.row.lifecycle_revision,run.row.world_revision,run.row.last_seq,
+            payload.json,payload.hash,request.ownerToken,request.claimToken,now,now);
+        const {row}=administrativeJobRow({jobId,generation});
+        return DirectorJobBeginResultSchema.parse({kind:'created',job:administrativeJobView(row),execution:administrativeExecution(row,context),context});
+      });
+    },
+    beginNarratorJob(input:unknown){
+      const request=NarratorJobBeginSchema.parse(input);return transact(()=>{
+        const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(value===undefined)return NarratorJobBeginResultSchema.parse({kind:'inactive'});
+        const run=parseWorldRun(value);const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+        if(configuration.narrationMode.kind!=='enabled')return NarratorJobBeginResultSchema.parse({kind:'inactive'});
+        const prior=database.prepare("SELECT job_id,generation FROM administrative_jobs WHERE run_id=? AND pulse_id=? AND role='narrator' ORDER BY generation DESC LIMIT 1").get(request.runId,request.pulseId);
+        if(prior!==undefined){const lookup=AdministrativeJobLookupSchema.parse({jobId:Reflect.get(prior,'job_id'),generation:Reflect.get(prior,'generation')});const {row,context}=administrativeJobRow(lookup);const job=administrativeJobView(row);
+          if(context.role!=='narrator')throw new Error('Job Narrador de otro rol');
+          if(row.state==='blocked')return NarratorJobBeginResultSchema.parse({kind:'blocked',job});
+          if(row.state==='running'&&(row.owner_token!==request.ownerToken||row.claim_token!==request.claimToken))return NarratorJobBeginResultSchema.parse({kind:'busy',job});
+          return NarratorJobBeginResultSchema.parse({kind:'existing',job,execution:administrativeExecution(row,context),context});}
+        const pulse=coordinatorPulseView(request);
+        if(run.row.lifecycle!=='running'||pulse?.state!=='running'||pulse.lifecycleRevision!==run.row.lifecycle_revision)return NarratorJobBeginResultSchema.parse({kind:'inactive'});
+        const director=database.prepare("SELECT job_id,generation FROM administrative_jobs WHERE run_id=? AND pulse_id=? AND role='director' ORDER BY generation DESC LIMIT 1").get(request.runId,request.pulseId);
+        if(director===undefined)return NarratorJobBeginResultSchema.parse({kind:'inactive'});
+        const directorLookup=AdministrativeJobLookupSchema.parse({jobId:Reflect.get(director,'job_id'),generation:Reflect.get(director,'generation')});
+        if(directorReceipt(directorLookup)===undefined)return NarratorJobBeginResultSchema.parse({kind:'inactive'});
+        const jobId=JobIdSchema.parse(randomUUID());const generation=RevisionSchema.parse(0);const seed=directorContextForPulse(run,request.pulseId,jobId,generation);
+        const context=validateNarratorContext({kind:'narrator-context',schemaVersion:1,role:'narrator',scope:seed.scope,
+          authorization:{kind:'omniscient-confirmed-world'},language:'es',snapshot:projectNarratorPhysicalSnapshot(run.snapshot),
+          recordedWorldFacts:projectNarratorRecordedWorldFacts(run.snapshot),confirmedEvents:seed.confirmedEvents,previousNarrations:narrationPublicationsAt(request.runId,run.row.last_seq)});
+        const payload=hashJson(context);const now=Date.now();database.prepare(`INSERT INTO administrative_jobs VALUES(?,?,?,?, 'narrator',?,?,?,?,?,'running',?,?,NULL,?,?)`)
+          .run(jobId,generation,request.runId,request.pulseId,run.row.lifecycle_revision,run.row.world_revision,run.row.last_seq,payload.json,payload.hash,request.ownerToken,request.claimToken,now,now);
+        const {row}=administrativeJobRow({jobId,generation});return NarratorJobBeginResultSchema.parse({kind:'created',job:administrativeJobView(row),execution:administrativeExecution(row,context),context});
+      });
+    },
+    readNarrationReceipt(input:unknown){return narrationReceipt(AdministrativeJobLookupSchema.parse(input));},
+    readNarrationPublications(input:unknown){const request=z.strictObject({runId:RunIdSchema,throughWorldSeq:WorldSeqSchema}).parse(input);return narrationPublicationsAt(request.runId,request.throughWorldSeq);},
+    stageNarration(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,proposal:NarratorJournalCandidateSchema.shape.proposal}).parse(input);return transact(()=>{
+      const job=claimedAdministrativeJob(request.execution);if(job.context.role!=='narrator'||administrativeEligibility(request.execution).kind!=='active')throw new Error('Narrador inactivo/de otro rol');
+      const proposal=validateNarrationProposal({context:job.context,proposal:request.proposal});const payload=hashJson({execution:request.execution,proposal});
+      const candidate=NarratorJournalCandidateSchema.parse({candidateHash:payload.hash,execution:request.execution,proposal});
+      const prior=database.prepare('SELECT candidate_hash FROM narration_candidates WHERE job_id=? AND generation=?').get(job.row.job_id,job.row.generation);
+      if(prior!==undefined)return narrationCandidate(request.execution,payload.hash);
+      database.prepare('INSERT INTO narration_candidates VALUES(?,?,?,?)').run(payload.hash,job.row.job_id,job.row.generation,canonicalJson(candidate));return candidate;
+    });},
+    acceptNarration(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,candidateHash:HashSchema,review:NarrationReviewSchema.options[0]}).parse(input);return transact(()=>{
+      const existing=narrationReceipt(request.execution.scope);if(existing!==undefined){const candidate=narrationCandidate(request.execution,request.candidateHash);
+        if(existing.kind!=='published'||candidate.proposal.kind!=='narrate'||canonicalJson(existing.publication.review)!==canonicalJson(request.review))throw new Error('Replay Narrador de otro resultado/review');return existing;}
+      const job=assertAdministrativeTerminal(request.execution);if(job.context.role!=='narrator')throw new Error('Publicación de otro rol');
+      const candidate=narrationCandidate(request.execution,request.candidateHash);if(candidate.proposal.kind!=='narrate')throw new Error('Abstención no es publicación');
+      const review=validateNarrationReview({context:job.context,proposal:candidate.proposal,review:request.review});if(review.kind!=='accepted')throw new Error('Publicación Narrador sin review aceptado');
+      const now=Date.now();const proposal=candidate.proposal;
+      const receipt=NarratorJobReceiptSchema.parse({kind:'published',publication:{kind:'narration-publication',publicationId:randomUUID(),scope:job.context.scope,
+        contextHash:job.row.context_hash,proposalHash:narrationValueHash(proposal),text:proposal.text,textHash:sha256(proposal.text),sourceEventIds:proposal.sourceEventIds,sourceRecordedFactIds:proposal.sourceRecordedFactIds,
+        sourceWorldRevision:proposal.sourceWorldRevision,uncertainty:proposal.uncertainty,review,publishedAt:now}});
+      const payload=hashJson(receipt);database.prepare('INSERT INTO narration_receipts VALUES(?,?,?,?,?,?,?,?)').run(job.row.job_id,job.row.generation,job.row.run_id,job.row.pulse_id,job.row.through_world_seq,payload.json,payload.hash,now);
+      const changed=database.prepare("UPDATE administrative_jobs SET state='accepted',updated_at=? WHERE job_id=? AND generation=? AND state='running' AND owner_token=? AND claim_token=?")
+        .run(now,job.row.job_id,job.row.generation,request.execution.lease.ownerToken,request.execution.lease.claimToken);if(changed.changes!==1)throw new Error('CAS Narrador cambió');return receipt;
+    });},
+    completeNarratorAbstention(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,candidateHash:HashSchema}).parse(input);return transact(()=>{
+      const existing=narrationReceipt(request.execution.scope);if(existing!==undefined){narrationCandidate(request.execution,request.candidateHash);if(existing.kind!=='abstained')throw new Error('Replay Narrador no es abstención');return existing;}
+      const job=assertAdministrativeTerminal(request.execution);if(job.context.role!=='narrator')throw new Error('Abstención de otro rol');
+      const candidate=narrationCandidate(request.execution,request.candidateHash);if(candidate.proposal.kind!=='abstain')throw new Error('Texto narrado no es abstención');
+      const now=Date.now();const receipt=NarratorJobReceiptSchema.parse({kind:'abstained',scope:job.context.scope,contextHash:job.row.context_hash,proposalHash:narrationValueHash(candidate.proposal),proposal:candidate.proposal,acceptedAt:now});
+      const payload=hashJson(receipt);database.prepare('INSERT INTO narration_receipts VALUES(?,?,?,?,?,?,?,?)').run(job.row.job_id,job.row.generation,job.row.run_id,job.row.pulse_id,job.row.through_world_seq,payload.json,payload.hash,now);
+      const changed=database.prepare("UPDATE administrative_jobs SET state='accepted',updated_at=? WHERE job_id=? AND generation=? AND state='running' AND owner_token=? AND claim_token=?")
+        .run(now,job.row.job_id,job.row.generation,request.execution.lease.ownerToken,request.execution.lease.claimToken);if(changed.changes!==1)throw new Error('CAS abstención Narrador cambió');return receipt;
+    });},
+
+    readAdministrativeJob(input:unknown){return administrativeJobView(administrativeJobRow(AdministrativeJobLookupSchema.parse(input)).row);},
+    loadAdministrativeSession(input:unknown){return administrativeSession(AdministrativeJobLookupSchema.parse(input));},
+    checkAdministrativeJobEligibility(input:unknown){return administrativeEligibility(AdministrativeJobExecutionSchema.parse(input));},
+    readDirectorReceipt(input:unknown){return directorReceipt(AdministrativeJobLookupSchema.parse(input));},
+    readDirectorAnnotations(input:unknown){const request=z.strictObject({runId:RunIdSchema,throughWorldSeq:WorldSeqSchema}).parse(input);return directorAnnotationsAt(request.runId,request.throughWorldSeq);},
+    registerAdministrativeSession(input:unknown){
+      const request=z.strictObject({execution:AdministrativeJobExecutionSchema,sessionId:z.string().min(1).max(200),sessionPath:z.string().min(1),baseLeafId:AdministrativeSessionSchema.shape.baseLeafId,profile:AdministrativeSessionSchema.shape.profile}).parse(input);
+      if(!isAbsolute(request.sessionPath))throw new Error('La sesión administrativa debe tener ruta absoluta');
+      return transact(()=>{
+        const {row}=claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active')throw new Error('Job administrativo inactivo');
+        if(canonicalJson(request.profile)!==canonicalJson(request.execution.scope.profile))throw new Error('Perfil administrativo diferente del contexto autorizado');
+        const existing=administrativeSession(request.execution.scope);
+        const session=AdministrativeSessionSchema.parse({jobId:row.job_id,generation:row.generation,role:row.role,contextHash:row.context_hash,
+          sessionId:request.sessionId,sessionPath:request.sessionPath,baseLeafId:request.baseLeafId,profile:request.profile});
+        if(existing!==undefined){if(canonicalJson(existing)!==canonicalJson(session))throw new Error('Sesión administrativa distinta');return 'existing';}
+        const duplicate=database.prepare(`SELECT 1 FROM actor_pi_sessions WHERE session_id=? OR session_path=?
+          UNION ALL SELECT 1 FROM continuista_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=?
+          UNION ALL SELECT 1 FROM administrative_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=? LIMIT 1`)
+          .get(request.sessionId,request.sessionPath,request.sessionId,request.sessionPath,request.sessionId,request.sessionPath);
+        if(duplicate!==undefined)throw new Error('La sesión administrativa no es independiente');
+        const payload=hashJson(session);database.prepare('INSERT INTO administrative_sessions VALUES(?,?,?,?)').run(row.job_id,row.generation,payload.json,payload.hash);return 'stored';
+      });
+    },
+    reserveAdministrativeRequest(input:unknown){
+      const request=z.strictObject({execution:AdministrativeJobExecutionSchema,clockEpochId:ModelTimeClockEpochIdSchema}).parse(input);return transact(()=>{
+        if(administrativeEligibility(request.execution).kind!=='active')throw new Error('Job administrativo inactivo');
+        if(administrativeSession(request.execution.scope)===undefined)throw new Error('Job administrativo sin sesión');
+        const scope=request.execution.scope;
+        if(database.prepare("SELECT 1 FROM request_reservations WHERE job_id=? AND generation=? AND state IN('reserved','dispatched','ambiguous') LIMIT 1").get(scope.jobId,scope.generation)!==undefined)throw new Error('Request administrativa pendiente/incierta');
+        const result=reserveNextWithinTransaction({runId:scope.runId,pulseId:scope.pulseId,jobId:scope.jobId,generation:scope.generation,
+          clockEpochId:request.clockEpochId,ownerToken:request.execution.lease.ownerToken});
+        if(result.kind==='reserved')database.prepare('INSERT INTO administrative_request_leases VALUES(?,?,?,?)')
+          .run(scope.jobId,scope.generation,result.requestSeq,canonicalJson(request.execution));return result;
+      });
+    },
+    transitionAdministrativeRequest(input:unknown){
+      const request=z.strictObject({execution:AdministrativeJobExecutionSchema,requestSeq:counter,target:ReservationTransitionSchema.shape.target,wallTime:ReservationTransitionSchema.shape.wallTime}).parse(input);
+      return transact(()=>{
+        const reservation=administrativeReservation(request.execution,request.requestSeq);
+        if(request.target==='dispatched'){
+          claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active'||reservation.state!=='reserved')throw new Error('Despacho administrativo inactivo o repetido');
+          const value=database.prepare("SELECT checkpoint_hash,payload_json FROM administrative_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='request-input' AND request_seq=?")
+            .get(request.execution.scope.jobId,request.execution.scope.generation,request.requestSeq);
+          const row=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(value);
+          const checkpoint=AdministrativeCheckpointSchema.parse(parseStoredJson(row.payload_json));
+          if(sha256(row.payload_json)!==row.checkpoint_hash||canonicalJson(checkpoint)!==row.payload_json||canonicalJson(checkpoint.execution)!==canonicalJson(request.execution))throw new Error('Checkpoint administrativo de otro lease');
+        }
+        transitionWithinTransaction({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,
+          target:request.target,ownerToken:request.execution.lease.ownerToken,...(request.wallTime===undefined?{}:{wallTime:request.wallTime})});
+      });
+    },
+    expireAdministrativeRequest(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,requestSeq:counter,clockEpochId:ModelTimeClockEpochIdSchema,reason:z.enum(['timeout','cancelled'])}).parse(input);
+      return transact(()=>{administrativeReservation(request.execution,request.requestSeq);return expireModelTimeWithinTransaction({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,clockEpochId:request.clockEpochId,reason:request.reason});});},
+    settleAdministrativeRequestWallTime(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,requestSeq:counter,clockEpochId:ModelTimeClockEpochIdSchema,monotonicNs:MonotonicNanosecondsSchema}).parse(input);
+      return transact(()=>{administrativeReservation(request.execution,request.requestSeq);return settleModelTimeWithinTransaction({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,clockEpochId:request.clockEpochId,monotonicNs:request.monotonicNs});});},
+    recordAdministrativeCheckpoint(input:unknown){const request=AdministrativeCheckpointSchema.parse(input);const payload=hashJson(request);return transact(()=>{
+      const existing=database.prepare('SELECT payload_json FROM administrative_checkpoints WHERE checkpoint_hash=?').get(payload.hash);
+      if(existing!==undefined){if(Reflect.get(existing,'payload_json')!==payload.json)throw new Error('Colisión checkpoint administrativo');return 'existing';}
+      claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active')throw new Error('Checkpoint administrativo fuera de época/corte');
+      const session=administrativeSession(request.execution.scope);if(session===undefined||session.sessionId!==request.snapshot.sessionId||session.sessionPath!==request.snapshot.sessionPath)throw new Error('Checkpoint administrativo de otra sesión');
+      if(request.purpose.kind==='job-base'&&request.snapshot.candidateLeafId!==session.baseLeafId)throw new Error('La base administrativa no coincide con el checkpoint registrado');
+      if(request.purpose.kind==='request-input'&&administrativeReservation(request.execution,request.purpose.requestSeq).state!=='reserved')throw new Error('Input administrativo sin reserva');
+      if(request.purpose.kind==='terminal-candidate'&&request.purpose.outcome==='completed'){
+        if(request.purpose.lastRequestSeq===null||request.snapshot.candidateLeafId===null||administrativeReservation(request.execution,request.purpose.lastRequestSeq).state!=='completed')throw new Error('Terminal administrativo sin request completada');
+        const last=z.strictObject({last:counter.nullable()}).parse(database.prepare('SELECT MAX(request_seq) last FROM request_reservations WHERE job_id=? AND generation=?').get(request.execution.scope.jobId,request.execution.scope.generation));
+        if(last.last!==request.purpose.lastRequestSeq)throw new Error('Terminal administrativo no liga última request');
+      }
+      database.prepare('INSERT INTO administrative_checkpoints VALUES(?,?,?,?,?,?,?)').run(payload.hash,request.execution.scope.jobId,request.execution.scope.generation,request.purpose.kind,
+        request.purpose.kind==='request-input'?request.purpose.requestSeq:null,payload.json,Date.now());return 'stored';
+    });},
+    stageDirectorObservation(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,observation:DirectorCandidateSchema.shape.observation}).parse(input);return transact(()=>{
+      const job=claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active')throw new Error('Director inactivo');
+      if(job.context.role!=='director')throw new Error('Observación Director de otro rol');
+      const observation=validateDirectorObservation({context:job.context,observation:request.observation});const payload=hashJson({execution:request.execution,observation});
+      const candidate=DirectorCandidateSchema.parse({candidateHash:payload.hash,execution:request.execution,observation});
+      const existing=database.prepare('SELECT candidate_hash,payload_json FROM director_candidates WHERE job_id=? AND generation=?').get(job.row.job_id,job.row.generation);
+      if(existing!==undefined){if(Reflect.get(existing,'candidate_hash')!==payload.hash||Reflect.get(existing,'payload_json')!==canonicalJson(candidate))throw new Error('Observación Director candidata en conflicto');return candidate;}
+      database.prepare('INSERT INTO director_candidates VALUES(?,?,?,?)').run(payload.hash,job.row.job_id,job.row.generation,canonicalJson(candidate));return candidate;
+    });},
+    acceptDirectorObservation(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,candidateHash:HashSchema}).parse(input);return transact(()=>{
+      const existing=directorReceipt(request.execution.scope);if(existing!==undefined){
+        const source=administrativeJobRow(request.execution.scope);
+        const candidateHash=z.strictObject({candidate_hash:HashSchema}).parse(database.prepare('SELECT candidate_hash FROM director_candidates WHERE job_id=? AND generation=?').get(request.execution.scope.jobId,request.execution.scope.generation)).candidate_hash;
+        if(candidateHash!==request.candidateHash||canonicalJson(administrativeExecution(source.row,source.context))!==canonicalJson(request.execution))throw new Error('Replay Director de otro candidato/claim');
+        return existing;
+      }
+      const job=claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active')throw new Error('Director fuera de época/corte antes de aceptación');
+      const candidate=DirectorCandidateSchema.parse(parseStoredJson(z.strictObject({payload_json:z.string()}).parse(database.prepare('SELECT payload_json FROM director_candidates WHERE candidate_hash=? AND job_id=? AND generation=?')
+        .get(request.candidateHash,job.row.job_id,job.row.generation)).payload_json));
+      const candidatePayload=hashJson({execution:candidate.execution,observation:candidate.observation});
+      if(candidatePayload.hash!==request.candidateHash||candidate.candidateHash!==request.candidateHash||canonicalJson(candidate.execution)!==canonicalJson(request.execution))throw new Error('Candidato Director alterado/ajeno');
+      if(job.context.role!=='director')throw new Error('Aceptación Director de otro rol');
+      validateDirectorObservation({context:job.context,observation:candidate.observation});
+      const terminalValues=database.prepare("SELECT checkpoint_hash,payload_json FROM administrative_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='terminal-candidate'").all(job.row.job_id,job.row.generation);
+      const terminals=terminalValues.map(value=>{const row=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(value);if(sha256(row.payload_json)!==row.checkpoint_hash)throw new Error('Terminal Director alterado');return AdministrativeCheckpointSchema.parse(parseStoredJson(row.payload_json));})
+        .filter(checkpoint=>checkpoint.purpose.kind==='terminal-candidate'&&checkpoint.purpose.outcome==='completed');
+      if(terminals.length!==1)throw new Error('Aceptación Director requiere terminal único completado');
+      const terminal=terminals[0];if(terminal===undefined||terminal.purpose.kind!=='terminal-candidate'||terminal.purpose.lastRequestSeq===null||terminal.snapshot.candidateLeafId===null
+        ||canonicalJson(terminal.execution)!==canonicalJson(request.execution)||administrativeReservation(request.execution,terminal.purpose.lastRequestSeq).state!=='completed')throw new Error('Terminal Director no prueba última request del lease');
+      const inputValue=database.prepare("SELECT checkpoint_hash,payload_json FROM administrative_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='request-input' AND request_seq=?")
+        .get(job.row.job_id,job.row.generation,terminal.purpose.lastRequestSeq);if(inputValue===undefined)throw new Error('Director sin input checkpoint exacto');
+      const inputRow=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(inputValue);const inputCheckpoint=AdministrativeCheckpointSchema.parse(parseStoredJson(inputRow.payload_json));
+      const session=administrativeSession(request.execution.scope);
+      if(sha256(inputRow.payload_json)!==inputRow.checkpoint_hash||canonicalJson(inputCheckpoint)!==inputRow.payload_json||canonicalJson(inputCheckpoint.execution)!==canonicalJson(request.execution)
+        ||session===undefined||terminal.snapshot.sessionId!==session.sessionId||terminal.snapshot.sessionPath!==session.sessionPath
+        ||inputCheckpoint.snapshot.sessionId!==session.sessionId||inputCheckpoint.snapshot.sessionPath!==session.sessionPath)throw new Error('Checkpoints Director no pertenecen a la sesión exacta');
+      const max=z.strictObject({last:counter.nullable()}).parse(database.prepare('SELECT MAX(request_seq) last FROM request_reservations WHERE job_id=? AND generation=?').get(job.row.job_id,job.row.generation));
+      if(max.last!==terminal.purpose.lastRequestSeq)throw new Error('Director no terminó última request');
+      const annotation=DirectorAnnotationSchema.parse({annotationId:randomUUID(),scope:job.context.scope,contextHash:job.row.context_hash,observation:candidate.observation});
+      const payload=hashJson(annotation);const now=Date.now();
+      database.prepare('INSERT INTO director_annotations VALUES(?,?,?,?,?,?,?,?,?)').run(annotation.annotationId,job.row.job_id,job.row.generation,job.row.run_id,job.row.pulse_id,job.row.through_world_seq,payload.json,payload.hash,now);
+      const updated=database.prepare("UPDATE administrative_jobs SET state='accepted',updated_at=? WHERE job_id=? AND generation=? AND state='running' AND owner_token=? AND claim_token=?")
+        .run(now,job.row.job_id,job.row.generation,request.execution.lease.ownerToken,request.execution.lease.claimToken);if(updated.changes!==1)throw new Error('CAS Director cambió antes de aceptación');
+      return DirectorJobReceiptSchema.parse({annotation,acceptedAt:now});
+    });},
+    failAdministrativeJob(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,code:AdministrativeJobFailureSchema}).parse(input);return transact(()=>{
+      const {row}=administrativeJobRow(request.execution.scope);
+      if(canonicalJson(administrativeExecution(row,administrativeJobRow(request.execution.scope).context))!==canonicalJson(request.execution))throw new Error('Fallo administrativo de otro claim');
+      if(row.state==='accepted'||row.state==='blocked')return administrativeJobView(row);
+      const now=Date.now();database.prepare("UPDATE administrative_jobs SET state='blocked',failure_code=?,updated_at=? WHERE job_id=? AND generation=? AND state='running'").run(request.code,now,row.job_id,row.generation);
+      finishStepJob(row.run_id,'failed');
+      const paused=database.prepare("UPDATE world_runs SET lifecycle='paused',lifecycle_revision=lifecycle_revision+1,updated_at=? WHERE run_id=? AND lifecycle='running' AND lifecycle_revision=?").run(now,row.run_id,row.lifecycle_revision);
+      if(paused.changes===1)blockRunningActorJobs(row.run_id,now);
+      return administrativeJobView(administrativeJobRow(request.execution.scope).row);
+    });},
+    recoverAbandonedAdministrativeJobs(input:unknown){const {ownerToken}=ActorTurnJobRecoverySchema.parse(input);return Number(transact(()=>database.prepare("UPDATE administrative_jobs SET state='blocked',failure_code='recovery-required',updated_at=? WHERE state='running' AND owner_token<>?").run(Date.now(),ownerToken).changes));},
+
+    interruptRunStepJob(input: unknown) {
+      const {runId} = z.strictObject({runId:RunIdSchema}).parse(input);
+      return transact(() => {
+        const job = activeStepJob(runId);
+        if (job === undefined) return undefined;
+        const now = Date.now();
+        database.prepare("UPDATE run_step_jobs SET state='interrupted',revision=revision+1,updated_at=? WHERE job_id=?").run(now,job.jobId);
+        database.prepare("UPDATE world_runs SET lifecycle='paused',lifecycle_revision=lifecycle_revision+1,updated_at=? WHERE run_id=? AND lifecycle='running' AND lifecycle_revision=?")
+          .run(now,runId,job.lifecycleRevision);
+        blockRunningActorJobs(runId,now);
+        return stepJobView({runId,jobId:job.jobId});
+      });
+    },
+
+    readRunStepJob(input: unknown) {
+      return stepJobView(z.strictObject({runId:RunIdSchema,jobId:JobIdSchema}).parse(input));
+    },
+    readActiveRunStepJob(input: unknown) {
+      return activeStepJob(z.strictObject({runId:RunIdSchema}).parse(input).runId);
+    },
+    completeRunStepJob(input: unknown) {
+      const request = z.strictObject({runId:RunIdSchema,jobId:JobIdSchema,failed:z.boolean().default(false)}).parse(input);
+      return transact(() => {
+        const job = stepJobView(request);
+        if (job === undefined || (job.state !== 'running' && job.state !== 'queued')) return job;
+        if (job.pulseId === null) return finishStepJob(request.runId,request.failed ? 'failed' : 'succeeded');
+        const pulse = coordinatorPulseView({runId:request.runId,pulseId:job.pulseId});
+        if (pulse === undefined || pulse.state === 'running') return job;
+        const undelivered = database.prepare(`SELECT d.state FROM world_deliveries d
+          JOIN world_perceptions p ON p.perception_id=d.perception_id
+          JOIN world_proposals w ON w.run_id=p.run_id AND w.attempt_id=p.origin_id AND p.origin_kind='actorAttempt'
+          JOIN actor_turn_jobs a ON a.run_id=w.run_id AND a.job_id=w.job_id AND a.generation=w.generation
+          WHERE a.run_id=? AND a.pulse_id=? AND d.state<>'delivered' LIMIT 1`).get(request.runId,job.pulseId);
+        return finishStepJob(request.runId,request.failed || pulse.state === 'blocked' || undelivered !== undefined ? 'failed' : 'succeeded');
+      });
+    },
+
     beginCoordinatorPulse(input: unknown) {
       const request = CoordinatorPulseRequestSchema.parse(input);
       return transact(() => {
@@ -4712,11 +5372,21 @@ export function openJournal(input: { path: string }) {
         if (value === undefined) return CoordinatorPulseBeginResultSchema.parse({ kind: 'inactive' });
         const run = parseWorldRun(value);
         if (run.row.lifecycle !== 'running') return CoordinatorPulseBeginResultSchema.parse({ kind: 'inactive' });
+        const step = activeStepJob(request.runId);
+        const bindStep = (pulseId: z.infer<typeof PulseIdSchema>) => {
+          if (step !== undefined && step.pulseId === null) database.prepare("UPDATE run_step_jobs SET pulse_id=?,state='running',revision=revision+1,updated_at=? WHERE job_id=? AND pulse_id IS NULL").run(pulseId,Date.now(),step.jobId);
+        };
+        if (step?.pulseId !== undefined && step.pulseId !== null) {
+          const pulse = coordinatorPulseView({runId:request.runId,pulseId:step.pulseId});
+          if (pulse === undefined) throw new Error('El paso perdió su pulso durable');
+          if (pulse.state !== 'running') return CoordinatorPulseBeginResultSchema.parse({kind:'existing',pulse,jobs:pulse.jobs});
+        }
         const configuration = ReadyRunConfigurationSchema.parse(run.configuration);
         if (configuration.runId !== request.runId || configuration.configRevision !== run.row.config_revision) throw new Error('Configuración ready ajena al pulso');
         const running = database.prepare(`SELECT pulse_id FROM coordinator_pulses WHERE run_id=? AND state='running'`).get(request.runId);
         if (running !== undefined) {
           const pulseId = z.strictObject({ pulse_id: PulseIdSchema }).parse(running).pulse_id;
+          bindStep(pulseId);
           const pulse = coordinatorPulseView({ runId: request.runId, pulseId });
           if (pulse === undefined) throw new Error('Pulso durable perdido');
           if (pulse.lifecycleRevision !== run.row.lifecycle_revision) {
@@ -4754,13 +5424,17 @@ export function openJournal(input: { path: string }) {
             actor_id: CharacterIdSchema, perception_id: PerceptionIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt']), origin_id: z.string(), commit_index: counter }).parse(item));
         if (pending.length > 100_000) throw new Error('Demasiadas intenciones para coordinar un pulso');
         const cause = pending[0];
-        if (cause === undefined) return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
+        if (cause === undefined) {
+          if (step !== undefined) finishStepJob(request.runId,'succeeded');
+          return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
+        }
         const previous = database.prepare('SELECT pulse_id FROM coordinator_pulses WHERE run_id=? AND origin_kind=? AND origin_id=?')
           .get(request.runId, cause.origin_kind, cause.origin_id);
         if (previous !== undefined) {
           const pulseId = z.strictObject({ pulse_id: PulseIdSchema }).parse(previous).pulse_id;
           const pulse = coordinatorPulseView({ runId: request.runId, pulseId });
           if (pulse === undefined) throw new Error('Pulso de causa perdido');
+          bindStep(pulseId);
           return CoordinatorPulseBeginResultSchema.parse({ kind: 'existing', pulse, jobs: pulse.jobs });
         }
         const scene = run.snapshot.scenes.find((item) => item.id === run.snapshot.activeSceneId);
@@ -4775,7 +5449,10 @@ export function openJournal(input: { path: string }) {
             && database.prepare(`SELECT 1 FROM actor_turn_jobs j WHERE run_id=? AND actor_id=? AND state IN('queued','running','blocked')
               AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.job_id=j.job_id AND newer.generation>j.generation) LIMIT 1`).get(request.runId, actorId) === undefined;
         });
-        if (eligible.length === 0) return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
+        if (eligible.length === 0) {
+          if (step !== undefined) finishStepJob(request.runId,'failed');
+          return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
+        }
         const existingBudget = database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId);
         if (existingBudget === undefined) database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)').run(request.runId, configuration.budget.maxPiCallsPerRun);
         else if (budgetRow.parse(existingBudget).max_calls !== configuration.budget.maxPiCallsPerRun) throw new Error('Presupuesto run difiere de configuración ready');
@@ -4795,6 +5472,7 @@ export function openJournal(input: { path: string }) {
             run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at) VALUES(?,?,?,0,?,'assigned',?,NULL)`)
             .run(request.runId, actorId, jobId, perception.perception_id, timestamp);
         }
+        bindStep(pulseId);
         const pulse = coordinatorPulseView({ runId: request.runId, pulseId });
         if (pulse === undefined) throw new Error('Pulso no persistido');
         return CoordinatorPulseBeginResultSchema.parse({ kind: 'started', pulse, jobs: pulse.jobs });
@@ -4806,7 +5484,8 @@ export function openJournal(input: { path: string }) {
     listCoordinatorPulseTargets(input: unknown = {}) {
       const request = z.strictObject({ limit: counter.min(1).max(1_000).default(100) }).parse(input);
       return database.prepare(`SELECT run_id FROM world_runs r WHERE lifecycle='running' AND
-        (EXISTS(SELECT 1 FROM coordinator_pulses c WHERE c.run_id=r.run_id AND c.state='running') OR
+        (EXISTS(SELECT 1 FROM run_step_jobs s WHERE s.run_id=r.run_id AND s.state IN('queued','running')) OR
+         EXISTS(SELECT 1 FROM coordinator_pulses c WHERE c.run_id=r.run_id AND c.state='running') OR
          EXISTS(SELECT 1 FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id
            WHERE i.run_id=r.run_id AND i.state='queued' AND d.state='delivered'
            AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))))
@@ -4833,8 +5512,12 @@ export function openJournal(input: { path: string }) {
           return database.prepare(`SELECT 1 FROM world_commits WHERE run_id=? AND origin_kind='actorAttempt' AND origin_id=?`)
             .get(job.runId,proposal.attemptId) !== undefined;
         });
-        if (terminal && !awaiting) database.prepare(`UPDATE coordinator_pulses SET state=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='running'`)
-          .run(pulse.jobs.some((job) => job.state === 'blocked') ? 'blocked' : 'completed', Date.now(), request.runId, request.pulseId);
+        const admins=database.prepare(`SELECT state FROM administrative_jobs j WHERE run_id=? AND pulse_id=?
+          AND NOT EXISTS(SELECT 1 FROM administrative_jobs newer WHERE newer.job_id=j.job_id AND newer.generation>j.generation)`)
+          .all(request.runId,request.pulseId).map(value=>z.strictObject({state:z.enum(['running','accepted','blocked'])}).parse(value));
+        const adminsTerminal=admins.every(job=>job.state!=='running');
+        if (terminal && !awaiting && adminsTerminal) database.prepare(`UPDATE coordinator_pulses SET state=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='running'`)
+          .run(pulse.jobs.some((job) => job.state === 'blocked') || admins.some(job=>job.state==='blocked') ? 'blocked' : 'completed', Date.now(), request.runId, request.pulseId);
         const closed = coordinatorPulseView(request);
         if (closed === undefined) throw new Error('Pulso perdió registro al cerrar');
         return closed;
@@ -4848,6 +5531,8 @@ export function openJournal(input: { path: string }) {
         if (runValue === undefined) throw new Error('World run del job actoral inexistente');
         const run = parseWorldRun(runValue);
         if (run.row.lifecycle !== 'running') return ActorTurnJobScheduleResultSchema.parse({kind:'empty'});
+        const step = activeStepJob(request.runId);
+        if (step !== undefined && step.pulseId !== request.pulseId) return ActorTurnJobScheduleResultSchema.parse({kind:'empty'});
         const pulseValue = database.prepare('SELECT run_id,max_calls,consumed FROM pulses WHERE pulse_id=?')
           .get(request.pulseId);
         if (pulseValue === undefined) throw new Error('El pulso del job actoral no está configurado');

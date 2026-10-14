@@ -16,7 +16,7 @@ import { JobIdSchema, RunIdSchema } from '../domain/values.ts';
 import { RunPreflightJobDocumentSchema } from '../domain/run-preflight-jobs.ts';
 
 type Journal = Pick<ReturnType<typeof openJournal>, 'readWorldLifecycle' | 'readWorldConfiguration' | 'loadWorld'
-  | 'readRunModelTimeBudget' | 'readRunLifecycleCommand' | 'applyRunLifecycleCommand'>;
+  | 'readRunModelTimeBudget' | 'readRunLifecycleCommand' | 'applyRunLifecycleCommand' | 'readRunStepJob'>;
 type PreflightReader = { readJob(input: { runId: string; jobId: string }): unknown | Promise<unknown> };
 type Runtime = {
   scheduleRun(input: unknown): Promise<boolean>;
@@ -39,6 +39,7 @@ export function createRunLifecycleApplication(input: {
   journal: Journal;
   preflights?: PreflightReader;
   runtime?: Runtime;
+  readVoiceBudget?: (runId: string) => unknown;
 }) {
   function readRunView(rawRunId: string) {
     const runId = RunIdSchema.parse(rawRunId);
@@ -69,20 +70,17 @@ export function createRunLifecycleApplication(input: {
       runId: storedConfiguration.runId,
       configRevision: storedConfiguration.configRevision,
       name: storedConfiguration.name,
-      fictionalAt: storedConfiguration.fictionalAt,
-      continuity: storedConfiguration.continuity,
-      roster: storedConfiguration.roster,
-      humanParticipants: storedConfiguration.humanParticipants,
-      worldSnapshot: snapshot,
-      dramaticLine: storedConfiguration.dramaticLine,
-      circadianPolicy: storedConfiguration.circadianPolicy,
+      fictionalAt: snapshot.clock.instant,
+      continuity: {continuityId:storedConfiguration.continuity.continuityId,revision:storedConfiguration.continuity.revision},
+      roster: {activeCharacterCount:storedConfiguration.roster.activeCharacterIds.length},
+      humanParticipantCount: storedConfiguration.humanParticipants.length,
       language: storedConfiguration.language,
       spanishVariety: storedConfiguration.spanishVariety,
       narrationMode: storedConfiguration.narrationMode,
       ...(storedConfiguration.inferenceProfile === undefined ? {} : { inferenceProfile: storedConfiguration.inferenceProfile }),
       budget: storedConfiguration.budget,
       maxReformulations: storedConfiguration.maxReformulations,
-      audio: storedConfiguration.audio,
+      audio: {mode:storedConfiguration.audio.mode},
     });
     const reservedCalls = Math.min(modelBudget.reservedPiCalls, modelBudget.runCallsUsed);
     const callRemaining = Math.max(0, modelBudget.maxPiCallsPerRun - modelBudget.runCallsUsed);
@@ -94,6 +92,12 @@ export function createRunLifecycleApplication(input: {
     const counters = (limit: number, used: number, reserved = 0) => ({
       limit, used, reserved, remaining: Math.max(0, limit - used - reserved),
     });
+    const voiceBudgetSchema=z.strictObject({voiceDesignCalls:RunBudgetViewSchema.shape.voiceDesignCalls,ttsCalls:RunBudgetViewSchema.shape.ttsCalls,sfxCalls:RunBudgetViewSchema.shape.sfxCalls});
+    let voiceBudget: z.infer<typeof voiceBudgetSchema> | undefined;
+    if(input.readVoiceBudget!==undefined) {
+      try {voiceBudget=voiceBudgetSchema.parse(input.readVoiceBudget(runId));}
+      catch { /* Audio availability must not prevent pausing a model request. */ }
+    }
     const budget = RunBudgetViewSchema.parse({
       modelCalls: counters(modelBudget.maxPiCallsPerRun, modelBudget.runCallsUsed - reservedCalls, reservedCalls),
       modelWallTimeMs: {
@@ -102,9 +106,10 @@ export function createRunLifecycleApplication(input: {
         reserved: modelBudget.wallTimeReservedMs,
         remaining: wallTimeRemaining,
       },
-      voiceDesignCalls: counters(0, 0),
-      ttsCalls: counters(0, 0),
-      sfxCalls: counters(0, 0),
+      voiceDesignCalls: voiceBudget?.voiceDesignCalls ?? counters(0, 0),
+      ttsCalls: voiceBudget?.ttsCalls ?? counters(0, 0),
+      sfxCalls: voiceBudget?.sfxCalls ?? counters(0, 0),
+      ...(input.readVoiceBudget===undefined?{}:{audioBudgetStatus:voiceBudget===undefined?'unavailable':'known'}),
       status: budgetStatus,
     });
     const lifecycle = state.lifecycle === 'closed'
@@ -116,9 +121,9 @@ export function createRunLifecycleApplication(input: {
       maxConcurrentCalls: modelBudget.maxConcurrentPiRequests,
       requestTimeoutMs: modelBudget.requestTimeoutMs,
       maxModelWallTimeMsPerRun: modelBudget.maxWallTimeMs,
-      maxTtsCallsPerRun: 0,
-      maxDesignCallsPerRun: 0,
-      maxSfxCallsPerRun: 0,
+      maxTtsCallsPerRun: Math.min(10_000,voiceBudget?.ttsCalls.limit ?? 0),
+      maxDesignCallsPerRun: Math.min(10_000,voiceBudget?.voiceDesignCalls.limit ?? 0),
+      maxSfxCallsPerRun: Math.min(10_000,voiceBudget?.sfxCalls.limit ?? 0),
       maxReformulations: configuration.maxReformulations,
     });
     return RunViewSchema.parse({
@@ -128,7 +133,7 @@ export function createRunLifecycleApplication(input: {
       lifecycleRevision: state.lifecycleRevision,
       lastWorldSeq: snapshot.seq,
       lifecycle,
-      config: { ...configuration, worldSnapshot: snapshot },
+      config: configuration,
       clock: snapshot.clock,
       limits,
       budget,
@@ -139,6 +144,12 @@ export function createRunLifecycleApplication(input: {
 
   function mapJournalResult(result: z.infer<typeof RunLifecycleCommandResultSchema>, replayed: boolean, runId: string) {
     switch (result.kind) {
+      case 'accepted': {
+        const run = readRunView(result.state.runId);
+        const job = input.journal.readRunStepJob({runId:result.state.runId,jobId:result.job.jobId}) ?? result.job;
+        return run === undefined ? RunControlApplicationResultSchema.parse({kind:'missing'})
+          : RunControlApplicationResultSchema.parse({kind:'accepted',run,job:{jobId:job.jobId,revision:job.revision,state:job.state},replayed});
+      }
       case 'updated':
       case 'existing': {
         const run = readRunView(result.state.runId);
@@ -153,6 +164,7 @@ export function createRunLifecycleApplication(input: {
       }
       case 'missing': return RunControlApplicationResultSchema.parse({ kind: 'missing' });
       case 'invalidLifecycle': return RunControlApplicationResultSchema.parse(result);
+      case 'budgetExhausted': return RunControlApplicationResultSchema.parse({kind:'budgetExhausted'});
       case 'preflightRequired': return RunControlApplicationResultSchema.parse({ kind: 'preflightRequired' });
       case 'preflightBlocked': return RunControlApplicationResultSchema.parse({ kind: 'preflightBlocked' });
       case 'preflightStale': {
@@ -179,12 +191,11 @@ export function createRunLifecycleApplication(input: {
 
   async function controlRun(rawInput: unknown) {
     const request = ControlInputSchema.parse(rawInput);
-    if (request.command.kind === 'step') return RunControlApplicationResultSchema.parse({ kind: 'stepUnavailable' });
 
-    const journalCommand = request.command.kind === 'start' || request.command.kind === 'resume'
+    const journalCommand = request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step'
       ? { kind: request.command.kind }
       : request.command;
-    const preflightJobId = request.command.kind === 'start' || request.command.kind === 'resume'
+    const preflightJobId = request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step'
       ? JobIdSchema.parse(request.command.preflightJobId) : undefined;
     const lookupInput = {
       principalId: request.principalId,
@@ -197,7 +208,7 @@ export function createRunLifecycleApplication(input: {
     if (lookup.kind === 'idempotencyConflict') return RunControlApplicationResultSchema.parse({ kind: 'idempotencyConflict' });
     if (lookup.kind === 'found') return mapJournalResult(lookup.result, true, request.runId);
 
-    if (request.command.kind === 'start' || request.command.kind === 'resume') {
+    if (request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') {
       if (input.runtime === undefined || input.runtime.isClosed === true) {
         return RunControlApplicationResultSchema.parse({ kind: 'runtimeUnavailable' });
       }
@@ -226,17 +237,17 @@ export function createRunLifecycleApplication(input: {
       ...(preflightJobId === undefined ? {} : { preflightJobId }),
     }));
     const result = mapJournalResult(commandResult, false, request.runId);
-    if (result.kind !== 'updated' || commandResult.kind !== 'updated') return result;
+    if ((result.kind !== 'updated' && result.kind !== 'accepted') || (commandResult.kind !== 'updated' && commandResult.kind !== 'accepted')) return result;
 
     try {
-      if (request.command.kind === 'start' || request.command.kind === 'resume') {
+      if (request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') {
         const scheduled = await input.runtime!.scheduleRun({ runId: request.runId });
         if (!scheduled) throw new Error('Runtime refused the durable schedule request.');
       } else if (request.command.kind === 'pause' || request.command.kind === 'stop' || request.command.kind === 'close') {
         await input.runtime?.cancelRun({ runId: request.runId });
       }
     } catch {
-      if (request.command.kind === 'start' || request.command.kind === 'resume') {
+      if (request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') {
         await input.runtime?.cancelRun({ runId: request.runId }).catch(() => false);
         const paused = RunLifecycleCommandResultSchema.safeParse(input.journal.applyRunLifecycleCommand({
           principalId: request.principalId,
@@ -260,7 +271,7 @@ export function createRunLifecycleApplication(input: {
     return result;
   }
 
-  return Object.freeze({ readRunView: ({ runId }: { runId: string }) => readRunView(runId), controlRun });
+  return Object.freeze({ readStepJob: (request: {runId:string;jobId:string}) => input.journal.readRunStepJob(request), readRunView: ({ runId }: { runId: string }) => readRunView(runId), controlRun });
 }
 
 function deriveCompensationKey(idempotencyKey: string): string {

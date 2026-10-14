@@ -14,7 +14,7 @@ export function preflightEtag(job: RunPreflightJobView) { return `"run-preflight
 export function preflightTerminal(job: RunPreflightJobView) { return ['completed', 'failed', 'canceled', 'interrupted'].includes(job.state); }
 export function capturePreflightIntent(input: { document: DraftDocument; key: string }): PreflightIntent {
   const view = RunConfigurationDraftViewSchema.parse(input.document.view);
-  if (view.state.lifecycle !== 'ready' || view.state.worldRevision === null || view.validation.kind !== 'valid' || view.validation.promotion !== 'promoted') throw new Error('Guardá y validá una configuración Ready antes de comprobar la ejecución.');
+  if (!['ready', 'paused', 'stopped'].includes(view.state.lifecycle) || view.state.worldRevision === null || view.validation.kind !== 'valid' || view.validation.promotion !== 'promoted') throw new Error('Guardá y validá una configuración Ready antes de comprobar la ejecución.');
   if (view.configuration.revision !== view.state.configurationRevision || input.document.etag !== `"run-config:${view.configuration.runId}:c${view.state.configurationRevision}"`) throw new Error('La preparación guardada no coincide con su revisión.');
   return { kind: 'evaluate', key: KeySchema.parse(input.key), runId: view.configuration.runId, configurationRevision: view.state.configurationRevision, worldRevision: view.state.worldRevision };
 }

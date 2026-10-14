@@ -2,6 +2,26 @@
 
 El objetivo completo sigue activo. PRD y S01–S07 tienen cierre documental; la implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 32: integración local verificada y servidor operativo
+
+Journal v27 compone Director con sesión/contexto/ledger propio y presupuesto común. Voces e intercambio usan datos privados, cuotas separadas, integridad y rutas de operador; Chromium verificó los flujos positivos con REST fixture, sin proveedores reales. Inspector opt-in distingue secuencia/revisión/commit y no importa reconocimiento actual en cortes históricos. SSE invalida lecturas públicas con fallback; backup detiene admisión y drena escritores reales. Restore y revisor productivo del Narrador siguen pendientes.
+
+Se corrigió la recuperación de ownership Linux cuando el proceso anterior es zombie, sin matar ni liberar procesos vivos o ambiguos ni borrar datos. El launcher inició, respondió HTML/health/bundle, cerró y reabrió limpiamente y sirve el último build. **522 pruebas aprobadas, cero fallidas y omitidas**, tipos y build aprobados (422 módulos, 758,83 kB principal y 47,67 kB voces; aviso de tamaño pendiente). [Evidencia y límites](continuacion-cloud.md).
+
+La ampliación v28 del revisor Narrador quedó preservada fuera del checkout ejecutable; planner de iniciativa/rutinas y Configurador siguen parciales. El objetivo no se cierra: no hubo login, inferencia de proveedor ni audio remoto, y los 77 requisitos todavía requieren aceptación integral.
+
+## Corte 31: proyección pública, Escenario y compositor humano
+
+RunView deja de transportar la configuración privada completa: la observación pública usa DTO propios para escenario, eventos, conversaciones y jobs, paginados y ligados a cortes confirmados. El plano SVG representa conexiones de forma esquemática explícita, sin inventar coordenadas. Transcript distingue emisión, audiencia efectiva, entrega y proyección de memoria, sin tratar palabras como creencias confirmadas. El compositor deriva identidad/canal de sesión, conserva intención incierta y borradores, y bloquea un nuevo envío si el lifecycle confirmado del padre ya indica pausa aunque el polling de Escenario aún esté atrasado.
+
+Chromium con launcher y tres corridas sintéticas verificó **17 comprobaciones**, incluidas intervención publicada, filtro y preservación de borrador en pausa, sin errores JavaScript. Se corrigió un parser UUID que rechazaba IDs humanos válidos como `visitante-prueba`, y una carrera de lifecycle entre vistas. El build pasó con 407 módulos y bundle de 738,04 kB. Esta evidencia no es inferencia de proveedor ni aceptación integral de Escenario/conversación. Voces, roles administrativos e intercambio siguen en integración; el gate global de 406 pruebas corresponde al corte anterior.
+
+## Corte 30: continuación Cloud, paso durable y controles gráficos
+
+Checkout actualizado a main b6246e1; Node 24.19.0, ICM 0.11.4 Linux oficial verificado. Journal v26 conserva job de un paso, pulso único, presupuesto/CAS, recuperación conservadora y hashes originales/proyectados del preflight del corte actual. Controles gráficos muestran estado/budget y siguen el job durable. Chromium verificó bloqueos sin preflight, stop/cierre y aislamiento al cambiar de corrida con respuestas pendientes. **406 pruebas aprobadas en Cloud, cero fallidas y cero omitidas**, tipos y build aprobados. [Evidencia, límites y configuración guardada](continuacion-cloud.md).
+
+No hubo login ni inferencia de proveedor real. El objetivo y los 77 criterios integrales permanecen abiertos; la siguiente integración conecta Escenario gráfico, conversación e intervención desde GUI.
+
 ## Corte 29: RunView host-owned y proyección del ledger
 
 El host ahora conecta `GET /runs/{id}` y los controles lifecycle con el journal, el broker de preflight y el runtime de representación. `RunView` usa ETag con revisiones de configuración, Escenario y lifecycle; la lectura valida la configuración Ready hash-verificada y proyecta sólo campos públicos, agregando el snapshot y budget actuales. Start/resume requieren un preflight pasado y vigente antes del CAS y del despacho. Si el runtime rechaza el inicio, el host cancela y trata de dejar la corrida pausada. El `step` sigue bloqueado hasta contar con un job durable de pulso único.

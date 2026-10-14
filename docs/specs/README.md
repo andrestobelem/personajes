@@ -1,6 +1,6 @@
 # Especificaciones de implementación
 
-Versión 1.0, **revisión documental cerrada para implementar**, después del [cierre documental del PRD](../auditoria/cierre-prd.md). Estas especificaciones describen el producto completo; no acreditan que exista código o una integración ejecutada. El [PRD1.0](../PRD.md) y sus77requisitos conservan autoridad funcional.
+Versión 1.0, **revisión documental cerrada para implementar**, después del [cierre documental del PRD](../auditoria/cierre-prd.md). Estas especificaciones describen el producto completo; no acreditan que exista código o una integración ejecutada. El [PRD 1.0](../PRD.md) y sus 77 requisitos conservan autoridad funcional.
 
 ## Componentes
 
@@ -16,7 +16,7 @@ Versión 1.0, **revisión documental cerrada para implementar**, después del [c
 
 ## Decisiones de implementación
 
-Aplicación local de escritorio mediante navegador: **servidor Node24+, TypeScript, React/Vite y Escenografía SVG2D**. Se compone un dominio propio, sin herencia propia, con adaptadores separados para Pi1.2.0, ICM0.11.4 y ElevenLabs. Las versiones exactas de dependencias se fijan en lockfile al instalar y se verifican contra sus tipos/documentación. El host actual tiene Node24.18.0.
+Aplicación local de escritorio mediante navegador: **servidor Node 24+, TypeScript, React/Vite y Escenografía SVG 2D**. Se compone un dominio propio, sin herencia propia, con adaptadores separados para Pi 1.2.0, ICM 0.11.4 y ElevenLabs. Las versiones exactas de dependencias se fijan en lockfile al instalar y se verifican contra sus tipos/documentación. La ejecución Cloud del 14 de octubre usa Node 24.19.0; el mínimo declarado es 24.18.0.
 
 Se elige un renderer propio porque AI Town limita conversaciones a dos y mezcla responsabilidades que aquí necesitan privacidad, múltiples participantes e inspectores completos. Esa comparación no obliga a adoptar su motor. SVG se limita a representar proyecciones; no resuelve acontecimientos. No reduce el alcance a una animación: las funciones completas del PRD siguen obligatorias.
 
@@ -32,7 +32,7 @@ tests/            dominio, disco/adaptadores, API, E2E y gates live
 docs/ y obra/     corpus/contratos versionados; no credenciales
 ```
 
-El almacenamiento vivo pertenece a un directorio privado del host, fuera del repositorio: journal, memorias por corrida/actor, sesiones Pi, medios y backups. OAuth/key no se incluyen en export/snapshots. `PERSONAJES_DATA_DIR` es configuración de host; actor y contenido importado no la eligen.
+El almacenamiento vivo pertenece a un directorio privado del host, fuera del repositorio: journal, memorias por corrida/actor, sesiones Pi, medios y backups. OAuth/key no se incluyen en export/snapshots. `PERSONAJES_PRIVATE_DATA_ROOT` es configuración de host; actor y contenido importado no la eligen.
 
 ## Fuentes técnicas verificadas
 

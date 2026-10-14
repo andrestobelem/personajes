@@ -231,10 +231,14 @@ export const RunLifecycleStateSchema = z.strictObject({
     context.addIssue({ code: 'custom', path: ['closedAt'], message: 'Sólo un lifecycle cerrado tiene instante de cierre.' });
   }
 });
+export { RunStepJobViewSchema } from './run-lifecycle.ts';
+import { RunStepJobViewSchema } from './run-lifecycle.ts';
+
 export const RunLifecycleCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('start') }),
   z.strictObject({ kind: z.literal('pause') }),
   z.strictObject({ kind: z.literal('resume') }),
+  z.strictObject({ kind: z.literal('step') }),
   z.strictObject({ kind: z.literal('stop') }),
   z.strictObject({ kind: z.literal('close') }),
 ]);
@@ -248,19 +252,21 @@ export const RunLifecycleCommandWriteSchema = z.strictObject({
   command: RunLifecycleCommandSchema,
   preflightJobId: JobIdSchema.optional(),
 }).superRefine((request, context) => {
-  if ((request.command.kind === 'start' || request.command.kind === 'resume') && request.preflightJobId === undefined) {
+  if ((request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') && request.preflightJobId === undefined) {
     context.addIssue({ code: 'custom', path: ['preflightJobId'], message: 'Iniciar o reanudar requiere un preflight durable.' });
   }
-  if (request.command.kind !== 'start' && request.command.kind !== 'resume' && request.preflightJobId !== undefined) {
+  if (request.command.kind !== 'start' && request.command.kind !== 'resume' && request.command.kind !== 'step' && request.preflightJobId !== undefined) {
     context.addIssue({ code: 'custom', path: ['preflightJobId'], message: 'Este comando no consume un preflight.' });
   }
 });
 export const RunLifecycleCommandResultSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('accepted'), state: RunLifecycleStateSchema, job: RunStepJobViewSchema }),
   z.strictObject({ kind: z.literal('updated'), state: RunLifecycleStateSchema }),
   z.strictObject({ kind: z.literal('existing'), state: RunLifecycleStateSchema }),
   z.strictObject({ kind: z.literal('stale'), state: RunLifecycleStateSchema }),
   z.strictObject({ kind: z.literal('missing') }),
   z.strictObject({ kind: z.literal('invalidLifecycle'), lifecycle: WorldLifecycleSchema }),
+  z.strictObject({ kind: z.literal('budgetExhausted') }),
   z.strictObject({ kind: z.literal('preflightRequired') }),
   z.strictObject({ kind: z.literal('preflightBlocked') }),
   z.strictObject({ kind: z.literal('preflightStale') }),
@@ -273,10 +279,10 @@ export const RunLifecycleCommandLookupSchema = z.strictObject({
   command: RunLifecycleCommandSchema,
   preflightJobId: JobIdSchema.optional(),
 }).superRefine((request, context) => {
-  if ((request.command.kind === 'start' || request.command.kind === 'resume') && request.preflightJobId === undefined) {
+  if ((request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') && request.preflightJobId === undefined) {
     context.addIssue({ code: 'custom', path: ['preflightJobId'], message: 'Iniciar o reanudar requiere un preflight durable.' });
   }
-  if (request.command.kind !== 'start' && request.command.kind !== 'resume' && request.preflightJobId !== undefined) {
+  if (request.command.kind !== 'start' && request.command.kind !== 'resume' && request.command.kind !== 'step' && request.preflightJobId !== undefined) {
     context.addIssue({ code: 'custom', path: ['preflightJobId'], message: 'Este comando no consume un preflight.' });
   }
 });
@@ -301,6 +307,7 @@ export const HumanInterventionCommitSchema = z.strictObject({
 });
 
 export const HumanInterventionCommitResultSchema = z.discriminatedUnion('kind', [
+  z.strictObject({kind:z.literal('invalidLifecycle'),lifecycle:WorldLifecycleSchema}),
   z.strictObject({ kind: z.literal('stored'), commitIndex: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(), resolution: HumanInterventionResolutionSchema }),
   z.strictObject({ kind: z.literal('existing'), commitIndex: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(), resolution: HumanInterventionResolutionSchema }),
   z.strictObject({ kind: z.literal('idempotencyConflict') }),

@@ -20,6 +20,7 @@ export function openLocalHost(input: { privateDataRoot: string }) {
     journal.recoverAbandonedActorTurnJobClaims({ ownerToken: ownership.ownerToken });
     // Administrative claims share ownership, but keep their own sessions and reservations.
     journal.recoverAbandonedContinuistaClaims({ ownerToken: ownership.ownerToken });
+    journal.recoverAbandonedAdministrativeJobs({ ownerToken: ownership.ownerToken });
   } catch (error) {
     try { journal?.close(); } finally { ownership.release(); }
     throw error;

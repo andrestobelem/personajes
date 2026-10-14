@@ -422,6 +422,7 @@ export async function createPiOAuthJobs(rawInput: {
     readInteraction,
     close,
     get isClosed() { return closed; },
+    get backupBusy(){return active.size>0||queue.length>0||workers.size>0||inFlight.size>0||pump!==undefined;},
   });
 }
 

@@ -13,7 +13,8 @@ export function projectHumanInteractionContext(input: { snapshot: unknown; profi
   const presence = profile.presence;
   const place = snapshot.places.find((candidate) => candidate.id === presence.placeId);
   const channel = snapshot.channels.find((candidate) => candidate.id === presence.channelId);
-  if (place === undefined || channel?.kind !== 'speech' || !channel.enabled || !channel.placeIds.includes(place.id)) return undefined;
+  if ((presence.kind === 'inScene' && (presence.sceneId !== scene.id || !scene.placeIds.includes(presence.placeId))) || place === undefined
+    || presence.position.x < 0 || presence.position.x > place.width || presence.position.y < 0 || presence.position.y > place.height || channel?.kind !== 'speech' || !channel.enabled || !channel.placeIds.includes(place.id)) return undefined;
   const source = { placeId: place.id, position: presence.position };
   const recipients = scene.participantIds.flatMap((characterId) => {
     if (!characterCanReceiveAt({ snapshot, characterId }) || !canHearSpeechAt({

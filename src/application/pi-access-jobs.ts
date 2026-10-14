@@ -164,5 +164,6 @@ export async function createPiAccessJobs(input: {
     }); },
     close,
     get isClosed() { return closed; },
+    get backupBusy(){return active.size>0||queue.length>0||inFlight.size>0||pump!==undefined;},
   });
 }

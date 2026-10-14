@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { chmodSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 
 const LOCK_NAME = 'host-ownership.json';
@@ -63,6 +63,37 @@ function writeAll(input: { descriptor: number; bytes: Buffer }): void {
  * A process crash while holding the gate leaves it for explicit operator review.
  */
 function withOperationGate<T>(input: { root: string; operation: () => T }): T {
+  const releaseExternal=acquireExternalDirectoryOperation(input.root);
+  try{return withInternalOperationGate(input);}finally{releaseExternal();}
+}
+
+/** Parent-level gate survives an atomic exchange of the private directory. All host
+ * ownership operations cooperate with it; a stale gate requires explicit inspection. */
+function acquireExternalDirectoryOperation(root:string){
+  const parent=dirname(root);
+  if(realpathSync(parent)!==parent)throw failure({code:'ROOT_INVALID',message:'El padre del directorio debe ser canónico.'});
+  const path=join(parent,`.${basename(root)}.personajes-host-operation`);
+  let fd:number;
+  try{fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}
+  catch{throw failure({code:'OPERATION_BUSY',message:'Hay una operación externa del directorio activa o pendiente de revisión.'});}
+  const record=OperationRecordSchema.parse({kind:'host-ownership-operation',schemaVersion:1,nonce:randomUUID(),pid:process.pid,processStartedAt:new Date(Date.now()-process.uptime()*1000).toISOString()});
+  const bytes=Buffer.from(JSON.stringify(record));
+  try{writeAll({descriptor:fd,bytes});fsyncSync(fd);}catch(error){closeSync(fd);throw error;}
+  let released=false;
+  return ()=>{
+    if(released)return;
+    try{const opened=fstatSync(fd);const current=lstatSync(path);if(!current.isFile()||current.isSymbolicLink()||current.dev!==opened.dev||current.ino!==opened.ino)throw failure({code:'LOCK_CHANGED',message:'Cambió el gate externo; se conserva para inspección.'});unlinkSync(path);released=true;}finally{closeSync(fd);}
+  };
+}
+
+/** Restore already owns the stopped host before entering this gate. No root can be
+ * acquired by another process while the canonical directory is exchanged. */
+export async function withHostDirectoryOperation<T>(input:{privateDataRoot:string;operation:()=>Promise<T>}):Promise<T>{
+  const root=privateRoot({path:input.privateDataRoot});const release=acquireExternalDirectoryOperation(root);
+  try{return await input.operation();}finally{release();}
+}
+
+function withInternalOperationGate<T>(input: { root: string; operation: () => T }): T {
   const gatePath = join(input.root, OPERATION_NAME);
   let descriptor: number;
   try {
@@ -188,6 +219,26 @@ export function inspectHostOwnership(input: { privateDataRoot: string }) {
   } });
 }
 
+/** A zombie has already exited and cannot retain a writable journal or session FD.
+ * Both proc records must agree on PID/state; opaque start ticks distinguish reuse. */
+export function parseLinuxZombieEvidence(input:{pid:number;status:unknown;stat:unknown}):{kind:'zombie';startTicks:string}|{kind:'alive'}|{kind:'ambiguous'}{
+  if(typeof input.status!=='string'||typeof input.stat!=='string')return {kind:'ambiguous'};
+  const pidLine=/^Pid:\s+(\d+)\s*$/m.exec(input.status);
+  const stateLine=/^State:\s+([A-Z])(?:\s|\()/m.exec(input.status);
+  const close=input.stat.lastIndexOf(')');const prefix=/^(\d+) \(/.exec(input.stat);
+  if(!pidLine||Number(pidLine[1])!==input.pid||!stateLine||!prefix||Number(prefix[1])!==input.pid||close<0)return {kind:'ambiguous'};
+  const fields=input.stat.slice(close+1).trim().split(/\s+/);
+  const startTicks=fields[19];
+  if(!startTicks||!/^\d+$/.test(startTicks)||fields[0]!==stateLine[1])return {kind:'ambiguous'};
+  return stateLine[1]==='Z'?{kind:'zombie',startTicks}:{kind:'alive'};
+}
+
+function linuxZombieEvidence(pid:number){
+  if(process.platform!=='linux')return {kind:'ambiguous'} satisfies {kind:'ambiguous'};
+  try{return parseLinuxZombieEvidence({pid,status:readFileSync(`/proc/${pid}/status`,'utf8'),stat:readFileSync(`/proc/${pid}/stat`,'utf8')});}
+  catch{return {kind:'ambiguous'} satisfies {kind:'ambiguous'};}
+}
+
 /** Explicit operator recovery. A live or ambiguous PID is never overridden. */
 export function recoverHostOwnership(input: { privateDataRoot: string; expectedNonce: string; operatorConfirmed: true }): void {
   z.strictObject({ expectedNonce: z.string().uuid(), operatorConfirmed: z.literal(true) }).parse({
@@ -209,6 +260,17 @@ export function recoverHostOwnership(input: { privateDataRoot: string; expectedN
       }
       throw failure({ code: 'PROCESS_AMBIGUOUS', message: 'No se puede verificar la ausencia del proceso. Se conserva ownership.' });
     }
+    // kill(pid,0) succeeds for Linux zombies. Check twice inside both operation
+    // gates and retain the record on incomplete evidence, disagreement or PID reuse.
+    const first=linuxZombieEvidence(stored.record.pid);
+    if(first.kind==='zombie'){
+      const second=linuxZombieEvidence(stored.record.pid);
+      if(second.kind==='zombie'&&second.startTicks===first.startTicks){
+        removeMatchingRecord({lockPath,nonce:input.expectedNonce,content:stored.content,dev:stored.dev,inode:stored.inode});return;
+      }
+      throw failure({code:'PROCESS_AMBIGUOUS',message:'Cambió la evidencia del proceso; se conserva ownership.'});
+    }
+    if(process.platform==='linux'&&first.kind==='ambiguous')throw failure({code:'PROCESS_AMBIGUOUS',message:'No se puede comprobar el estado del proceso; se conserva ownership.'});
     throw failure({ code: 'PROCESS_ACTIVE', message: 'El PID registrado está activo o fue reutilizado. Se conserva ownership.' });
   } });
 }

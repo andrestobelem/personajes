@@ -30,7 +30,7 @@ import { RunPreflightJobStartResultSchema, RunPreflightJobMutationResultSchema }
 import { HumanInterventionRequestSchema, HumanInteractionContextSchema } from '../domain/interaction.ts';
 import {
   HumanInterventionCommitResultSchema, RunDraftMutationResultSchema, RunDraftPatchSchema,
-  RunDraftStateSchema, RunDraftValidationResultSchema,
+  RunDraftStateSchema, RunDraftValidationResultSchema, RunStepJobViewSchema,
 } from '../domain/world-journal.ts';
 import {
   CatalogCharacterEntrySchema, CatalogDocumentEntrySchema, DossierSchema,
@@ -39,6 +39,26 @@ import { CharacterIdSchema, JobIdSchema, RunIdSchema } from '../domain/values.ts
 import { RunConfigurationDraftSchema } from '../domain/production.ts';
 import { validateRunConfiguration } from '../application/production-preflight.ts';
 import { RunModelTimeBudgetSchema } from '../domain/model-time-budget.ts';
+import { OperatorResponseSchema, type OperatorExtension, type OperatorRequest } from './operator-extension.ts';
+import { InspectorCharactersSchema, InspectorRequestSchema, InspectorViewSchema } from '../domain/run-inspector.ts';
+import type { RunInspectorApplication } from '../application/run-inspector.ts';
+
+import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema } from '../domain/run-observation.ts';
+import { WorldSeqSchema } from '../domain/values.ts';
+import { RunRefreshSchema, type RunRefresh } from '../domain/run-refresh.ts';
+import type { createHostRequestBarrier } from '../application/host-request-barrier.ts';
+
+const ObservationSequenceQuerySchema = z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(WorldSeqSchema);
+const ObservationStageQuerySchema = z.strictObject({atWorldSeq:ObservationSequenceQuerySchema.optional()});
+const ObservationEventsQuerySchema = z.strictObject({fromWorldSeq:ObservationSequenceQuerySchema.optional(),toWorldSeq:ObservationSequenceQuerySchema.optional(),
+  pageCursor:z.string().min(1).max(2048).optional(),limit:z.string().regex(/^\d{1,3}$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional()});
+const ObservationJobsQuerySchema = z.strictObject({cursor:z.string().min(1).max(2048).optional(),limit:z.string().regex(/^\d{1,3}$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional()});
+export type RunObservationApplicationPort = {
+  readStage(input:unknown):unknown|Promise<unknown>;
+  readEvents(input:unknown):unknown|Promise<unknown>;
+  readConversations(input:unknown):unknown|Promise<unknown>;
+  readJobs(input:unknown):unknown|Promise<unknown>;
+};
 
 const SESSION_COOKIE = 'personajes_session';
 const SESSION_IDLE_TTL_MS = 30 * 60 * 1_000;
@@ -219,6 +239,7 @@ export type RunPreflightJobsApplicationPort = {
  * runtime cancellation/dispatch and step scheduling. HTTP passes only authenticated
  * operator scope plus the exact revisions parsed from If-Match. */
 export type RunLifecycleApplicationPort = {
+  readStepJob?(input: { readonly runId: string; readonly jobId: string }): unknown | undefined | Promise<unknown | undefined>;
   readRunView(input: { readonly runId: string }): unknown | undefined | Promise<unknown | undefined>;
   controlRun(input: {
     readonly principalId: string;
@@ -253,11 +274,22 @@ export type LocalHttpOptions = {
   readonly runPreflightJobs?: RunPreflightJobsApplicationPort;
   /** Optional until the host composes the durable lifecycle application service. */
   readonly runLifecycle?: RunLifecycleApplicationPort;
+  /** Public, read-only stage/event/delivery/job projections under the host session. */
+  readonly runObservation?: RunObservationApplicationPort;
+  readonly runInspector?: RunInspectorApplication;
+  readonly onInspectorRead?: (metadata: {runId:string;characterId?:string;atWorldSeq?:number;requestId:string}) => void;
+  /** Host-composed operator services; core routes and their authority take precedence. */
+  readonly operatorExtensions?: readonly OperatorExtension[];
   /** Read-only durable usage snapshot; omitted when the host has no journal budget reader. */
   readonly readRunModelTimeBudget?: (input: { readonly runId: string }) => unknown | Promise<unknown>;
   /** Optional future persistence boundary for other run/curation mutations. */
   readonly durableApiOperations?: DurableApiOperationPort;
   readonly now?: () => number;
+  /** Bounded read-notification transport; never a worker or durable stream ledger. */
+  readonly runRefreshStream?: { readonly pollIntervalMs?: number; readonly heartbeatMs?: number; readonly maxClients?: number; readonly maxClientsPerSession?: number };
+  readonly admissionBarrier?:ReturnType<typeof createHostRequestBarrier>;
+  /** Local composition only. Must not probe providers or infer availability from credentials. */
+  readonly runtimeComposition?:()=>{kind:'composed'}|{kind:'unavailable'};
 };
 
 export type LocalHttpServer = {
@@ -359,13 +391,13 @@ function parseQuery<S extends z.ZodType>(url: URL, schema: S): z.output<S> {
   return parseSchema(schema, raw);
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readJsonBody(req: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): Promise<unknown> {
   const contentType = req.headers['content-type'];
   if (typeof contentType !== 'string' || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(contentType.trim())) {
     fail({ status: 415, kind: 'validation', code: 'UNSUPPORTED_MEDIA_TYPE', message: 'Se requiere application/json UTF-8.', issues: [] });
   }
   const contentLength = req.headers['content-length'];
-  if (typeof contentLength === 'string' && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_JSON_BODY_BYTES) {
+  if (typeof contentLength === 'string' && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
     req.resume();
     fail({ status: 413, kind: 'validation', code: 'BODY_TOO_LARGE', message: 'La solicitud supera el tamaño permitido.', issues: [] });
   }
@@ -378,7 +410,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     }
     const bytes = Buffer.from(input);
     total += bytes.byteLength;
-    if (total > MAX_JSON_BODY_BYTES) {
+    if (total > maxBytes) {
       req.resume();
       fail({ status: 413, kind: 'validation', code: 'BODY_TOO_LARGE', message: 'La solicitud supera el tamaño permitido.', issues: [] });
     }
@@ -1006,6 +1038,73 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
   const bootstraps = new Map<string, BootstrapGrant>();
   const now = options.now ?? Date.now;
   let listening = false;
+  const refreshOptions=options.runRefreshStream;
+  const refreshPollMs=z.number().int().min(20).max(60000).parse(refreshOptions?.pollIntervalMs??1000);
+  const refreshHeartbeatMs=z.number().int().min(20).max(60000).parse(refreshOptions?.heartbeatMs??15000);
+  const refreshMaxClients=z.number().int().min(1).max(64).parse(refreshOptions?.maxClients??16);
+  const refreshMaxPerSession=z.number().int().min(1).max(8).parse(refreshOptions?.maxClientsPerSession??4);
+  type RefreshClient={res:ServerResponse;session:LocalSession;runId:string;cursor:string;lastHeartbeat:number;blocked:boolean;blockedAt:number};
+  const refreshClients=new Set<RefreshClient>();
+  let refreshTimer:ReturnType<typeof setInterval>|undefined;
+  let refreshTick:Promise<void>|undefined;
+  let serverClosing=false;
+  function refreshCursor(value:RunRefresh){return `rf1.${value.runId}.c${value.configRevision}.w${value.worldRevision}.l${value.lifecycleRevision}.s${value.lastWorldSeq}`;}
+  function validateRefreshCursor(value:unknown,runId:string,current:RunRefresh){
+    if(value===undefined)return;
+    if(typeof value!=='string'||value.length>200)fail({status:400,kind:'validation',code:'INVALID_CURSOR',message:'El cursor de notificación no es válido.',issues:[]});
+    const match=/^rf1\.([0-9a-f-]{36})\.c(0|[1-9]\d{0,15})\.w(0|[1-9]\d{0,15})\.l(0|[1-9]\d{0,15})\.s(0|[1-9]\d{0,15})$/.exec(value);
+    if(!match||match[1]!==runId)fail({status:400,kind:'validation',code:'INVALID_CURSOR',message:'El cursor no pertenece a esta corrida.',issues:[]});
+    const parsed=RunRefreshSchema.safeParse({kind:'run.refresh',runId:match[1],configRevision:Number(match[2]),worldRevision:Number(match[3]),lifecycleRevision:Number(match[4]),lastWorldSeq:Number(match[5])});
+    if(!parsed.success)fail({status:400,kind:'validation',code:'INVALID_CURSOR',message:'El cursor de notificación no es válido.',issues:[]});
+    if(parsed.data.configRevision>current.configRevision||parsed.data.worldRevision>current.worldRevision||parsed.data.lifecycleRevision>current.lifecycleRevision||parsed.data.lastWorldSeq>current.lastWorldSeq)
+      fail({status:410,kind:'precondition',code:'CURSOR_EXPIRED',message:'El cursor requiere volver a consultar el estado actual.'});
+  }
+  async function readRefresh(runId:string):Promise<RunRefresh|undefined>{
+    const raw=await options.runLifecycle?.readRunView({runId});
+    if(raw===undefined||raw===null)return undefined;
+    const view=RunViewSchema.parse(raw);
+    if(view.runId!==runId)throw new Error('RUN_REFRESH_SCOPE_MISMATCH');
+    return RunRefreshSchema.parse({kind:'run.refresh',runId:view.runId,configRevision:view.configRevision,worldRevision:view.worldRevision,lifecycleRevision:view.lifecycleRevision,lastWorldSeq:view.lastWorldSeq});
+  }
+  function closeRefresh(client:RefreshClient){
+    refreshClients.delete(client);
+    if(!client.res.writableEnded)client.res.end();
+    if(refreshClients.size===0&&refreshTimer!==undefined){clearInterval(refreshTimer);refreshTimer=undefined;}
+  }
+  function writeRefresh(client:RefreshClient,frame:string){
+    if(client.res.destroyed||client.res.writableEnded){closeRefresh(client);return;}
+    // Do not queue frames behind a slow browser. It reconnects and re-reads current state.
+    if(client.blocked||client.res.writableLength>64*1024){closeRefresh(client);return;}
+    if(!client.res.write(frame)){client.blocked=true;client.blockedAt=now();}
+  }
+  async function tickRefresh(){
+    if(options.admissionBarrier?.isHeld)return;
+    const active=new Map<string,RefreshClient[]>();
+    for(const client of refreshClients){
+      if(serverClosing||sessions.get(client.session.token)!==client.session||client.session.expiresAtMs<=now()||(client.blocked&&now()-client.blockedAt>=refreshPollMs)){closeRefresh(client);continue;}
+      const group=active.get(client.runId)??[];group.push(client);active.set(client.runId,group);
+    }
+    await Promise.all(Array.from(active,async([runId,clients])=>{
+      let view:RunRefresh|undefined;
+      try{view=await readRefresh(runId);}catch{for(const client of clients)closeRefresh(client);return;}
+      for(const client of clients){
+        // An asynchronous read cannot deliver after logout, expiry or server shutdown.
+        if(!refreshClients.has(client))continue;
+        if(serverClosing||sessions.get(client.session.token)!==client.session||client.session.expiresAtMs<=now()||view===undefined){closeRefresh(client);continue;}
+        const cursor=refreshCursor(view);
+        if(cursor!==client.cursor){client.cursor=cursor;writeRefresh(client,`id: ${cursor}\nevent: run.refresh\ndata: ${JSON.stringify(view)}\n\n`);}
+        else if(now()-client.lastHeartbeat>=refreshHeartbeatMs){client.lastHeartbeat=now();writeRefresh(client,': heartbeat\n\n');}
+      }
+    }));
+  }
+  function startRefreshTimer(){
+    if(refreshTimer!==undefined)return;
+    refreshTimer=setInterval(()=>{
+      if(refreshTick!==undefined)return;
+      refreshTick=tickRefresh().catch(()=>{for(const client of refreshClients)closeRefresh(client);}).finally(()=>{refreshTick=undefined;});
+    },refreshPollMs);
+    refreshTimer.unref();
+  }
 
   const server: Server = createServer((req, res) => {
     const requestId = randomUUID();
@@ -1032,6 +1131,13 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     const url = parseRequestUrl(req, origin);
     const segments = parseSegments(url.pathname);
     const method = req.method ?? 'GET';
+    let releaseAdmission:()=>void;
+    try{releaseAdmission=options.admissionBarrier?.enter({method,path:segments})??(()=>{});}
+    catch{fail({status:503,kind:'dependency',code:'HOST_BACKUP_IN_PROGRESS',message:'El host está preparando un backup; reintentá al terminar.',safeCode:'HOST_BACKUP_IN_PROGRESS',retryable:true});}
+    try{return await handleAdmitted(req,res,url,segments,method);}finally{releaseAdmission();}
+  }
+
+  async function handleAdmitted(req:IncomingMessage,res:ServerResponse,url:URL,segments:string[],method:string):Promise<void>{
     const pathname = url.pathname;
     const isRoot = pathname === '/' && segments.length === 0;
 
@@ -1065,10 +1171,11 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     }
     const route = segments.slice(2);
     if (route.length === 1 && route[0] === 'health' && method === 'GET') {
+      const composition=options.runtimeComposition===undefined?undefined:z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('composed')}),z.strictObject({kind:z.literal('unavailable')})]).parse(options.runtimeComposition());
       const health = parseSchema(HealthViewSchema, {
-        kind: 'degraded',
-        checks: { http: 'ok', catalog: 'ok', runtime: 'unavailable' },
-        version: 'http-catalog-slice',
+        kind: composition?.kind==='unavailable'?'unavailable':'degraded',
+        checks: { http: 'ok', catalog: 'ok', runtime: composition?.kind==='composed'?'degraded':'unavailable' },
+        version: composition===undefined?'http-catalog-slice':'personajes-local-runtime',
       });
       sendJson(res, 200, health);
       return;
@@ -1104,6 +1211,65 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     if (route.length === 0 || route[0] !== 'health') {
       const session = requireSession(req, sessions, now());
 
+      if(route.length===4&&route[0]==='runs'&&route[2]==='events'&&route[3]==='stream'&&method==='GET'){
+        parseQuery(url,z.strictObject({}));
+        const runId=parseSchema(RunIdSchema,route[1]);
+        if(options.runLifecycle===undefined)fail({status:503,kind:'dependency',code:'RUN_REFRESH_UNAVAILABLE',message:'La notificación de lectura no está disponible.',safeCode:'RUN_REFRESH_UNAVAILABLE',retryable:true});
+        if(refreshClients.size>=refreshMaxClients||Array.from(refreshClients).filter(client=>client.session===session).length>=refreshMaxPerSession)
+          fail({status:429,kind:'budget',code:'STREAM_CLIENT_LIMIT',message:'Hay demasiadas conexiones de notificación.',recoverable:true});
+        const view=await readRefresh(runId);
+        if(view===undefined)fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        validateRefreshCursor(req.headers['last-event-id'],runId,view);
+        if(serverClosing||sessions.get(session.token)!==session||session.expiresAtMs<=now())fail({status:401,kind:'unauthenticated',code:'SESSION_EXPIRED',message:'La sesión local expiró.'});
+        // Recheck cap after async reads so simultaneous handshakes cannot exceed it.
+        if(refreshClients.size>=refreshMaxClients||Array.from(refreshClients).filter(client=>client.session===session).length>=refreshMaxPerSession)
+          fail({status:429,kind:'budget',code:'STREAM_CLIENT_LIMIT',message:'Hay demasiadas conexiones de notificación.',recoverable:true});
+        res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'private, no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});
+        res.flushHeaders();
+        const client:RefreshClient={res,session,runId,cursor:refreshCursor(view),lastHeartbeat:now(),blocked:false,blockedAt:now()};
+        refreshClients.add(client);
+        res.on('drain',()=>{client.blocked=false;});res.once('close',()=>closeRefresh(client));
+        // Always provide the latest public invalidation on connection/reconnection.
+        // No missed-event replay is claimed; clients refresh HTTP snapshots/pages.
+        writeRefresh(client,`retry: 2000\nid: ${client.cursor}\nevent: run.refresh\ndata: ${JSON.stringify(view)}\n\n`);
+        startRefreshTimer();return;
+      }
+
+      if (route.length === 3 && route[0] === 'runs' && ['stage','events','conversations','jobs'].includes(route[2] ?? '') && method === 'GET') {
+        const runId = parseSchema(RunIdSchema,route[1]);
+        const port = options.runObservation;
+        if (port === undefined) fail({status:503,kind:'dependency',code:'RUN_OBSERVATION_UNAVAILABLE',message:'La observación pública no está disponible.',safeCode:'RUN_OBSERVATION_UNAVAILABLE',retryable:true});
+        const surface = route[2];
+        const query = surface === 'stage' ? parseQuery(url,ObservationStageQuerySchema)
+          : surface === 'jobs' ? parseQuery(url,ObservationJobsQuerySchema)
+            : parseQuery(url,ObservationEventsQuerySchema);
+        const request = {runId,...query};
+        const raw = surface === 'stage' ? await port.readStage(request) : surface === 'jobs' ? await port.readJobs(request)
+          : surface === 'events' ? await port.readEvents(request) : await port.readConversations(request);
+        const result = z.discriminatedUnion('kind',[
+          z.strictObject({kind:z.literal('found'),value:z.unknown()}),z.strictObject({kind:z.literal('missing')}),
+          z.strictObject({kind:z.literal('invalidRequest'),code:z.enum(['invalid-cut','invalid-cursor'])}),
+        ]).parse(raw);
+        if (result.kind === 'missing') fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        if (result.kind === 'invalidRequest') fail({status:422,kind:'validation',code:'MALFORMED_REQUEST',message:result.code==='invalid-cut'?'El corte o intervalo debe pertenecer a la historia confirmada.':'El cursor no pertenece a esta corrida, superficie o intervalo.',issues:[]});
+        const value = surface === 'stage' ? RunStageViewSchema.parse(result.value) : surface === 'jobs' ? TechnicalJobPageSchema.parse(result.value)
+          : surface === 'events' ? ConfirmedEventPageSchema.parse(result.value) : ConversationPageSchema.parse(result.value);
+        if (value.runId !== runId) throw new Error('Proyección pública fuera del ámbito solicitado');
+        const etag = `"observation:${runId}:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}"`;
+        sendJson(res,200,value,{ETag:etag});
+        return;
+      }
+
+      if (route.length === 4 && route[0] === 'runs' && route[2] === 'steps' && method === 'GET') {
+        const runId = parseSchema(RunIdSchema, route[1]); const jobId = parseSchema(JobIdSchema, route[3]);
+        const value = await options.runLifecycle?.readStepJob?.({ runId, jobId });
+        if (value === undefined || value === null) fail({ status: 404, kind: 'notFound', code: 'NOT_FOUND', message: 'Trabajo de pulso no encontrado.' });
+        const job = RunStepJobViewSchema.parse(value);
+        if (job.runId !== runId || job.jobId !== jobId) throw new Error('El trabajo de pulso pertenece a otro ámbito');
+        sendJson(res, 200, job, { ETag: `"run-step:${job.jobId}:r${job.revision}"` });
+        return;
+      }
+
       if (route.length === 2 && route[0] === 'runs' && method === 'GET' && options.runLifecycle !== undefined) {
         const runId = parseSchema(RunIdSchema, route[1]);
         const value = await options.runLifecycle.readRunView({ runId });
@@ -1114,7 +1280,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         return;
       }
 
-      if (route.length === 3 && route[0] === 'runs' && route[2] === 'controls' && method === 'POST') {
+      if (route.length === 3 && route[0] === 'runs' && ['controls', 'start', 'pause', 'resume', 'step', 'stop', 'close'].includes(route[2] ?? '') && method === 'POST') {
         requireCsrf(req, session);
         if (options.runLifecycle === undefined) {
           fail({ status: 503, kind: 'dependency', code: 'RUN_LIFECYCLE_UNAVAILABLE', message: 'Los controles de la corrida no están disponibles.', safeCode: 'RUN_LIFECYCLE_UNAVAILABLE', retryable: true });
@@ -1123,6 +1289,9 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         const rawBody = await readJsonBody(req);
         enforceJsonWireLimits(rawBody);
         const command = parseSchema(RunLifecycleControlRequestSchema, rawBody);
+        if (route[2] !== 'controls' && command.kind !== route[2]) {
+          fail({ status: 422, kind: 'validation', code: 'MALFORMED_REQUEST', message: 'El comando no coincide con la ruta solicitada.', issues: [] });
+        }
         const idempotencyKey = readIdempotencyKey(req);
         const expected = readExpectedRunViewRevisions(req, runId);
         const result = RunControlApplicationResultSchema.parse(await options.runLifecycle.controlRun({
@@ -1142,13 +1311,13 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           }
           case 'accepted': {
             if (result.run.runId !== runId) throw new Error('El job de control pertenece a otra corrida');
-            if (command.kind === 'step' && result.run.lifecycle.kind !== 'paused') {
-              throw new Error('El pulso acotado aceptado debe conservar la corrida en pausa');
+            if (command.kind === 'step' && ['queued','running','waiting'].includes(result.job.state) && result.run.lifecycle.kind !== 'running') {
+              throw new Error('El pulso acotado aceptado debe activar una época exclusiva');
             }
             const receipt = RunControlReceiptSchema.parse({ kind: 'run-control-receipt', run: result.run, job: result.job });
             sendJson(res, 202, receipt, {
               ETag: runViewEtag(result.run),
-              Location: `/api/v1/runs/${runId}`,
+              Location: command.kind === 'step' ? `/api/v1/runs/${runId}/steps/${result.job.jobId}` : `/api/v1/runs/${runId}`,
               'Retry-After': '1',
               ...(result.replayed ? { 'Idempotency-Replayed': 'true' } : {}),
             });
@@ -1455,6 +1624,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
       if (route.length === 1 && route[0] === 'session' && method === 'DELETE') {
         requireCsrf(req, session);
         sessions.delete(session.token);
+        for(const client of refreshClients)if(client.session===session)closeRefresh(client);
         session.observerViews.clear();
         session.operations.clear();
         res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/api/v1; HttpOnly; SameSite=Strict; Max-Age=0`);
@@ -1670,6 +1840,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra intervención.' });
         }
+        if (result.kind === 'invalidLifecycle') fail({status:409,kind:'conflict',code:'INVALID_LIFECYCLE',message:'La representación debe estar ejecutándose para recibir una intervención nueva.'});
         if (result.resolution.kind === 'stale') {
           const current = await loadHumanInteractionContext(options, { runId, participantId: session.mode.participantId });
           fail({ status: 412, kind: 'precondition', code: 'PRECONDITION_FAILED', message: 'El Escenario cambió; actualizá el contexto antes de intervenir.', ...(current === undefined ? {} : { currentEtag: humanInteractionEtag(current) }) });
@@ -1713,6 +1884,30 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         rememberOperation({ req, session, key, path: pathname, body, status: 200, result, etag });
         sendJson(res, 200, result, { ETag: etag });
         return;
+      }
+
+      if (route[0]==='runs' && route[2]==='inspector' && method==='GET' && (route.length===3 || (route.length===4&&route[3]==='characters'))) {
+        const runId=z.string().uuid().parse(route[1]);
+        const inspectionRequestId=z.string().uuid().parse(res.getHeader('X-Request-ID'));
+        if(session.observerViews.get(runId)!=='internal')fail({status:403,kind:'forbidden',code:'CAPABILITY_REQUIRED',message:'Activá explícitamente el inspector privado para esta corrida.'});
+        if(options.runInspector===undefined)fail({status:503,kind:'dependency',code:'INSPECTOR_UNAVAILABLE',message:'El inspector privado no está disponible.',safeCode:'INSPECTOR_UNAVAILABLE',retryable:false});
+        if(route.length===4) {
+          parseQuery(url,z.strictObject({}));
+          const result=options.runInspector.characters({runId});
+          if(result.kind!=='found')fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'La representación no está disponible.'});
+          const view=InspectorCharactersSchema.parse(result.view);
+          if(view.runId!==runId)throw new Error('Inspector scope mismatch');
+          options.onInspectorRead?.({runId,requestId:inspectionRequestId});
+          sendJson(res,200,view);return;
+        }
+        const query=parseQuery(url,z.strictObject({characterId:InspectorRequestSchema.shape.characterId,atWorldSeq:z.coerce.number().int().nonnegative().safe().optional(),worldRevision:z.coerce.number().int().nonnegative().safe().optional()}));
+        const result=options.runInspector.inspect({runId,...query});
+        if(result.kind==='invalidCut')fail({status:422,kind:'validation',code:'INVALID_REQUEST',message:'El corte solicitado no es un snapshot confirmado.',issues:[{path:['atWorldSeq'],code:'invalid-cut'}]});
+        if(result.kind==='missing')fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'El personaje no está disponible en ese corte.'});
+        const view=InspectorViewSchema.parse(result.view);
+        if(view.runId!==runId||view.characterId!==query.characterId||(query.atWorldSeq!==undefined&&view.atWorldSeq!==query.atWorldSeq)||(query.worldRevision!==undefined&&view.worldRevision!==query.worldRevision))throw new Error('Inspector scope mismatch');
+        options.onInspectorRead?.({runId,characterId:view.characterId,atWorldSeq:view.atWorldSeq,requestId:inspectionRequestId});
+        sendJson(res,200,view);return;
       }
 
       if (route.length === 1 && route[0] === 'catalog' && method === 'GET') {
@@ -1847,6 +2042,39 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         return;
       }
 
+      const extension = options.operatorExtensions?.find(service => service.matches({ path: route, method }));
+      if (extension !== undefined) {
+        const common = {
+          path: route, query: url.searchParams, principalId: localOperatorPrincipalId(), mode: session.mode,
+          ifMatch: typeof req.headers['if-match'] === 'string' ? req.headers['if-match'] : null,
+          ifNoneMatch: typeof req.headers['if-none-match'] === 'string' ? req.headers['if-none-match'] : null,
+        };
+        let request: OperatorRequest;
+        if (method === 'GET') request = { ...common, kind: 'read', method };
+        else if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+          requireCsrf(req, session);
+          const idempotencyKey = readIdempotencyKey(req);
+          const maxBytes = z.number().int().min(1).max(24 * 1024 * 1024).parse(extension.maxBodyBytes ?? MAX_JSON_BODY_BYTES);
+          const emptyDelete = method === 'DELETE' && req.headers['content-length'] === undefined && req.headers['transfer-encoding'] === undefined;
+          request = { ...common, kind: 'write', method, idempotencyKey, body: emptyDelete ? {} : await readJsonBody(req, maxBytes) };
+        } else fail({ status: 405, kind: 'validation', code: 'METHOD_NOT_ALLOWED', message: 'Método HTTP no permitido.', issues: [] });
+        let result: z.infer<typeof OperatorResponseSchema>;
+        try { result = OperatorResponseSchema.parse(await extension.handle(request)); }
+        catch (error) { if (error instanceof z.ZodError) throw validationFailure(error); throw error; }
+        switch (result.kind) {
+          case 'json': sendJson(res, result.status, result.body, {
+            ...(result.headers.ETag === undefined ? {} : { ETag: result.headers.ETag }),
+            ...(result.headers.Location === undefined ? {} : { Location: result.headers.Location }),
+          }); return;
+          case 'binary': {
+            if (createHash('sha256').update(result.bytes).digest('hex') !== result.sha256) throw new Error('Artifact checksum mismatch');
+            noStoreBinary(res, 200, result.mimeType, result.bytes, result.sha256, result.filename); return;
+          }
+          case 'problem': fail({ status: HttpFailureStatusSchema.parse(result.status), ...result.error });
+          default: { const exhaustive: never = result; throw new Error(String(exhaustive)); }
+        }
+      }
+
       if (method === 'GET' || method === 'HEAD') {
         fail({ status: 404, kind: 'notFound', code: 'NOT_FOUND', message: 'Recurso no encontrado.' });
       }
@@ -1881,6 +2109,10 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     },
     async close() {
       if (!listening) return;
+      serverClosing=true;
+      if(refreshTimer!==undefined){clearInterval(refreshTimer);refreshTimer=undefined;}
+      for(const client of refreshClients)closeRefresh(client);
+      await refreshTick;
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error === undefined ? resolve() : reject(error));
       });

@@ -62,7 +62,7 @@ El worker persiste fallos como jobs bloqueados; no reintenta automáticamente. S
 
 `createRepresentationRuntime` compone workers, entregas, ICM, actor, Continuista y coordinador bajo el host dueño existente. Crear la factory no inicia una corrida ni inferencia. Los targets durables se recuperan y la memoria se proyecta/verifica antes de convocar; fallos de ICM no se presentan como ausencia de recuerdos. Callbacks y operaciones públicas quedan registrados para cerrar sólo después de cancelación/settlement. `waitForIdle` exige estabilidad del epoch y las colas. El launcher crea este compositor si `PERSONAJES_ICM_BINARY` fija una ruta absoluta; sin ella conserva entrega mecánica. No inicia una corrida por construirlo. Ver [auditoría](../auditoria/launcher-y-borradores.md).
 
-El compositor expone el puerto OAuth del mismo ModelRuntime, con provider/tipo fijos y metadatos sin credenciales. `oauth-configured` no acredita acceso a la cuenta/modelo. Login/logout se serializan y se cancelan con el host; la interfaz humana aporta callbacks del SDK. No hay todavía HTTP/UI de login ni autenticación real ejecutada. [Evidencia](../auditoria/recuperacion-parental-y-runtime.md).
+El compositor expone el puerto OAuth del mismo ModelRuntime, con provider/tipo fijos y metadatos sin credenciales. `oauth-configured` no acredita acceso a la cuenta/modelo. Login/logout se serializan y se cancelan con el host; la interfaz humana aporta callbacks del SDK. El corte original no incluía HTTP/UI; su integración durable posterior está documentada en la [auditoría OAuth y preparación](../auditoria/oauth-y-preparacion.md). Sigue sin acreditarse autenticación real. [Evidencia del puerto original](../auditoria/recuperacion-parental-y-runtime.md).
 
 ## Pulso y lifecycle
 

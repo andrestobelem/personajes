@@ -93,7 +93,7 @@ test('v23 crea jobs preflight para Ready/pausa/detenida y conserva receipt inici
     const beforeMigration=new DatabaseSync(path);
     try{beforeMigration.exec(`DROP TABLE run_preflight_job_operations;DROP TABLE run_preflight_job_results;DROP TABLE run_preflight_job_history;DROP TABLE run_preflight_jobs;
       DROP TABLE model_time_spans; DROP TABLE model_time_run_state;
-      DELETE FROM schema_version WHERE version IN(21,22,23,24,25);`);}finally{beforeMigration.close();}
+      DELETE FROM schema_version WHERE version IN(21,22,23,24,25,26,27);`);}finally{beforeMigration.close();}
     journal.close();journal=openJournal({path});
     const result=journal.createRunPreflightJob({principalId,idempotencyKey:uuid(12),runId:created.draft.runId,expectedConfigurationRevision:0,expectedWorldRevision:4});
     assert.equal(result.kind,'created');if(result.kind!=='created')assert.fail('No job');
@@ -103,7 +103,7 @@ test('v23 crea jobs preflight para Ready/pausa/detenida y conserva receipt inici
     const found=journal.readRunPreflightJob({runId:created.draft.runId,jobId:result.job.jobId});assert.equal(found.kind,'found');
     if(found.kind==='found'){assert.equal(found.document.report.kind,'current');assert.equal(found.document.report.result,null);}
     assert.equal(journal.readRunConfigurationDraftState({runId:created.draft.runId})?.lifecycle,'ready');
-    const inspect=new DatabaseSync(path);try{assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version,25);
+    const inspect=new DatabaseSync(path);try{assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version,27);
       assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_events').get()?.n,0);assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_commits').get()?.n,0);
       assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(),[]);}finally{inspect.close();}
   }finally{journal.close();fixture.close();rmSync(directory,{recursive:true,force:true});}
@@ -356,4 +356,209 @@ test('controles de corrida requieren preflight, son idempotentes y conservan lif
     assert.deepEqual(fixture.journal.readWorldLifecycle({runId:fixture.runId}),close.state);
     assert.deepEqual(fixture.reopen().readWorldLifecycle({runId:fixture.runId}),close.state);
   }finally{fixture.close();}
+});
+
+async function passedPreflight(fixture: Awaited<ReturnType<typeof readyJournal>>, key: number) {
+  const state = fixture.journal.readWorldLifecycle({runId:fixture.runId}); assert.ok(state);
+  const created = start(fixture.journal,fixture.runId,key,state.configRevision,state.worldRevision);
+  if (created.kind !== 'created') assert.fail(`Preflight no creado: ${created.kind}`);
+  const lease = {ownerToken:uuid(key+1),claimToken:uuid(key+2)};
+  const claimed = fixture.journal.claimRunPreflightJob({runId:fixture.runId,jobId:created.job.jobId,expectedRevision:0,...lease});
+  if (claimed.kind !== 'claimed') assert.fail('Preflight no reclamado');
+  const frozen = fixture.journal.readRunPreflightJobInput({runId:fixture.runId,jobId:created.job.jobId,lease});
+  if (frozen.kind !== 'found') assert.fail('Preflight sin corte');
+  const receipt = attachAccessReceipt(fixture.journal,key+3);
+  const completed = fixture.journal.completeRunPreflightJob({runId:fixture.runId,jobId:created.job.jobId,
+    expectedRevision:claimed.job.revision,lease,evaluation:evaluation({fence:frozen.fence,receipt})});
+  assert.equal(completed.kind,'updated');
+  return created.job.jobId;
+}
+
+async function prepareStep(fixture: Awaited<ReturnType<typeof readyJournal>>, causes = 0) {
+  const initial = fixture.journal.readWorldLifecycle({runId:fixture.runId}); assert.ok(initial);
+  assert.equal(fixture.journal.setWorldLifecycle({runId:fixture.runId,expectedConfigRevision:initial.configRevision,
+    expectedWorldRevision:initial.worldRevision,target:'running'}),'updated');
+  const actorId = fixture.configuration.roster.activeCharacterIds[0]; assert.ok(actorId);
+  for (let index = 0; index < causes; index += 1) {
+    const snapshot = fixture.journal.loadWorld({runId:fixture.runId}); assert.ok(snapshot);
+    const intervention = fixture.journal.commitHumanIntervention({runId:fixture.runId,participantId:'visitante-prueba',
+      expectedRevision:snapshot.revision,idempotencyKey:uuid(1500+index),request:{kind:'speech',recipientCharacterIds:[actorId],
+      channelId:'00000000-0000-4000-8000-000000000104',content:{kind:'speech',text:`Causa sintética ${index}`}}});
+    assert.equal(intervention.kind,'stored');
+    const {createDeliverWorldWorker} = await import('../src/application/deliver-world.ts');
+    assert.equal((await createDeliverWorldWorker({journal:fixture.journal,runId:fixture.runId,actorId}).drain()).kind,'completed');
+  }
+  const running = fixture.journal.readWorldLifecycle({runId:fixture.runId}); assert.ok(running);
+  assert.equal(fixture.journal.setWorldLifecycle({runId:fixture.runId,expectedConfigRevision:running.configRevision,
+    expectedWorldRevision:running.worldRevision,target:'paused'}),'updated');
+  const preflightJobId = await passedPreflight(fixture,1600);
+  const state = fixture.journal.readWorldLifecycle({runId:fixture.runId}); assert.ok(state);
+  const command = {principalId,idempotencyKey:uuid(1700),runId:fixture.runId,expectedLifecycleRevision:state.lifecycleRevision,
+    expectedConfigRevision:state.configRevision,expectedWorldRevision:state.worldRevision,command:{kind:'step' as const},preflightJobId};
+  return {command,actorId};
+}
+
+test('step vacío tiene job durable, vuelve paused y replays no crean otra ejecución',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture);
+    const accepted = fixture.journal.applyRunLifecycleCommand(command);
+    if (accepted.kind !== 'accepted') assert.fail(`Step no aceptado: ${accepted.kind}`);
+    assert.equal(accepted.state.lifecycle,'running');
+    assert.equal(accepted.job.pulseId,null);
+    assert.deepEqual(fixture.journal.applyRunLifecycleCommand(command),accepted);
+    assert.equal(fixture.journal.beginCoordinatorPulse({runId:fixture.runId}).kind,'idle');
+    assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.runId})?.lifecycle,'paused');
+    const completed = fixture.journal.readRunStepJob({runId:fixture.runId,jobId:accepted.job.jobId});
+    assert.equal(completed?.state,'succeeded');
+    assert.deepEqual(fixture.reopen().readRunStepJob({runId:fixture.runId,jobId:accepted.job.jobId}),completed);
+    assert.deepEqual(fixture.journal.applyRunLifecycleCommand(command),accepted);
+    assert.equal(fixture.journal.readActiveRunStepJob({runId:fixture.runId}),undefined);
+  } finally {fixture.close();}
+});
+
+test('step consume exactamente una causa, conserva su pulso al reinicio y no convoca la siguiente',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture,2);
+    const accepted = fixture.journal.applyRunLifecycleCommand(command);
+    if (accepted.kind !== 'accepted') assert.fail('Step no aceptado');
+    const begin = fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    if (begin.kind !== 'started') assert.fail('Step no inició pulso');
+    assert.equal(begin.jobs.length,1);
+    const pulseId = begin.pulse.pulseId;
+    assert.equal(fixture.journal.readRunStepJob({runId:fixture.runId,jobId:accepted.job.jobId})?.pulseId,pulseId);
+    fixture.reopen();
+    const recovered = fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    if (recovered.kind !== 'existing') assert.fail('No recuperó el mismo pulso');
+    assert.equal(recovered.pulse.pulseId,pulseId);
+    const job = recovered.jobs[0]; assert.ok(job);
+    const claim = fixture.journal.claimActorTurnJob({runId:job.runId,actorId:job.actorId,jobId:job.jobId,
+      generation:job.generation,ownerToken:uuid(1800),claimToken:uuid(1801)});
+    if (claim.kind !== 'claimed') assert.fail('No reclamó job');
+    fixture.journal.failActorTurnJob({execution:{runId:job.runId,actorId:job.actorId,jobId:job.jobId,generation:job.generation,
+      pulseId,lease:{ownerToken:claim.ownerToken,claimToken:claim.claimToken}},code:'execution-failed'});
+    assert.equal(fixture.journal.closeCoordinatorPulse({runId:fixture.runId,pulseId}).state,'blocked');
+    const noSecond = fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    if (noSecond.kind !== 'existing') assert.fail('Perdió pulso acotado');
+    assert.equal(noSecond.pulse.pulseId,pulseId);
+    assert.equal(fixture.journal.completeRunStepJob({runId:fixture.runId,jobId:accepted.job.jobId})?.state,'failed');
+    assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.runId})?.lifecycle,'paused');
+    assert.equal(fixture.journal.beginCoordinatorPulse({runId:fixture.runId}).kind,'inactive');
+    const database = new DatabaseSync(fixture.path);
+    try {assert.equal(database.prepare('SELECT COUNT(*) n FROM coordinator_pulses WHERE run_id=?').get(fixture.runId)?.n,1);}
+    finally {database.close();}
+  } finally {fixture.close();}
+});
+
+test('recovery interrumpe step sin inferencia; nuevo control fresco reutiliza job y pulso con época nueva',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture,1);
+    const accepted = fixture.journal.applyRunLifecycleCommand(command);
+    if (accepted.kind !== 'accepted') assert.fail('Step no aceptado');
+    const begin = fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    if (begin.kind !== 'started') assert.fail('Sin pulso');
+    const interrupted = fixture.reopen().interruptRunStepJob({runId:fixture.runId});
+    assert.equal(interrupted?.state,'interrupted');
+    assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.runId})?.lifecycle,'paused');
+    assert.equal(fixture.journal.beginCoordinatorPulse({runId:fixture.runId}).kind,'inactive');
+    const state = fixture.journal.readWorldLifecycle({runId:fixture.runId}); assert.ok(state);
+    const fresh = await passedPreflight(fixture,1900);
+    const resumed = fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(1910),preflightJobId:fresh,
+      expectedLifecycleRevision:state.lifecycleRevision});
+    if (resumed.kind !== 'accepted') assert.fail(`No reanudó: ${resumed.kind}`);
+    assert.equal(resumed.job.jobId,accepted.job.jobId);
+    assert.equal(resumed.job.pulseId,begin.pulse.pulseId);
+    assert.ok(resumed.job.lifecycleRevision > accepted.job.lifecycleRevision);
+    const same = fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    if (same.kind !== 'existing') assert.fail('Cambió pulso');
+    assert.equal(same.pulse.pulseId,begin.pulse.pulseId);
+    assert.equal(same.jobs[0]?.lifecycleRevision,resumed.job.lifecycleRevision);
+  } finally {fixture.close();}
+});
+
+test('pausa/stop cancela el job de paso y fence impide nuevas escrituras actorales',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture,1);
+    const accepted = fixture.journal.applyRunLifecycleCommand(command);
+    if (accepted.kind !== 'accepted') assert.fail('Step no aceptado');
+    const begin = fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    if (begin.kind !== 'started') assert.fail('Sin pulso');
+    const job = begin.jobs[0]; assert.ok(job);
+    const lease = {ownerToken:uuid(2000),claimToken:uuid(2001)};
+    const claim = fixture.journal.claimActorTurnJob({runId:job.runId,actorId:job.actorId,jobId:job.jobId,generation:job.generation,...lease});
+    assert.equal(claim.kind,'claimed');
+    const stopped = fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2002),command:{kind:'stop'},
+      preflightJobId:undefined,expectedLifecycleRevision:accepted.state.lifecycleRevision});
+    assert.equal(stopped.kind,'updated');
+    assert.equal(fixture.journal.readRunStepJob({runId:fixture.runId,jobId:accepted.job.jobId})?.state,'canceled');
+    const eligibility = fixture.journal.checkActorJobEligibility({runId:job.runId,actorId:job.actorId,jobId:job.jobId,
+      generation:job.generation,pulseId:job.pulseId,lease});
+    assert.equal(eligibility.kind,'inactive');
+  } finally {fixture.close();}
+});
+
+test('step conserva CAS, rechaza preflight ajeno y presupuesto agotado dentro del commit durable',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture,1);
+    assert.equal(fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2100),expectedWorldRevision:command.expectedWorldRevision-1}).kind,'stale');
+    assert.equal(fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2101),preflightJobId:uuid(2102)}).kind,'preflightBlocked');
+    const database = new DatabaseSync(fixture.path);
+    try {database.prepare('INSERT INTO run_budgets(run_id,max_calls,consumed) VALUES(?,?,?)').run(fixture.runId,20,20);}
+    finally {database.close();}
+    assert.equal(fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2103)}).kind,'budgetExhausted');
+    assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.runId})?.lifecycle,'paused');
+    assert.equal(fixture.journal.readActiveRunStepJob({runId:fixture.runId}),undefined);
+  } finally {fixture.close();}
+});
+
+test('reanudar normalmente abandona el job step interrumpido y un paso posterior crea otro job',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture,1);
+    const first = fixture.journal.applyRunLifecycleCommand(command);
+    if (first.kind !== 'accepted') assert.fail('No primer step');
+    fixture.journal.beginCoordinatorPulse({runId:fixture.runId});
+    fixture.journal.interruptRunStepJob({runId:fixture.runId});
+    const paused = fixture.journal.readWorldLifecycle({runId:fixture.runId}); assert.ok(paused);
+    const preflightJobId = await passedPreflight(fixture,2200);
+    const resumed = fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2210),command:{kind:'resume'},
+      expectedLifecycleRevision:paused.lifecycleRevision,preflightJobId});
+    if (resumed.kind !== 'updated') assert.fail(`No resume: ${resumed.kind}`);
+    assert.equal(fixture.journal.readRunStepJob({runId:fixture.runId,jobId:first.job.jobId})?.state,'canceled');
+    const again = fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2211),command:{kind:'pause'},preflightJobId:undefined,
+      expectedLifecycleRevision:resumed.state.lifecycleRevision});
+    if (again.kind !== 'updated') assert.fail('No pause');
+    const fresh = await passedPreflight(fixture,2300);
+    const second = fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2310),preflightJobId:fresh,
+      expectedLifecycleRevision:again.state.lifecycleRevision});
+    if (second.kind !== 'accepted') assert.fail('No segundo step');
+    assert.notEqual(second.job.jobId,first.job.jobId);
+  } finally {fixture.close();}
+});
+
+test('preflight snapshot fresco no permite alterar campos estáticos bajo el hash del setup original',async()=>{
+  const fixture = await readyJournal();
+  try {
+    const {command} = await prepareStep(fixture,1);
+    const database = new DatabaseSync(fixture.path);
+    try {
+      const row = database.prepare('SELECT configuration_json,original_configuration_json,configuration_hash FROM run_preflight_jobs WHERE job_id=?').get(command.preflightJobId);
+      assert.ok(row);
+      const source = ReadyRunConfigurationSchema.parse(JSON.parse(String(row.original_configuration_json)));
+      const frozen = ReadyRunConfigurationSchema.parse(JSON.parse(String(row.configuration_json)));
+      assert.notEqual(source.worldSnapshot.revision,frozen.worldSnapshot.revision);
+      assert.equal(hash(source),row.configuration_hash);
+      const changed = canonical({...frozen,name:'Setup adulterado'});
+      database.prepare('UPDATE run_preflight_jobs SET configuration_json=?,configuration_payload_hash=? WHERE job_id=?')
+        .run(changed,createHash('sha256').update(changed).digest('hex'),command.preflightJobId);
+    } finally {database.close();}
+    assert.throws(()=>fixture.journal.readRunPreflightJob({runId:fixture.runId,jobId:command.preflightJobId}),/Metadata durable del preflight alterada/);
+    assert.throws(()=>fixture.journal.applyRunLifecycleCommand(command),/Metadata durable del preflight alterada/);
+    assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.runId})?.lifecycle,'paused');
+    assert.equal(fixture.journal.readActiveRunStepJob({runId:fixture.runId}),undefined);
+  } finally {fixture.close();}
 });

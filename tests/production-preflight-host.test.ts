@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { openJournal } from '../src/adapters/journal.ts';
@@ -21,6 +21,7 @@ import type { PiAccessCheckStoredResult } from '../src/domain/pi-access-jobs.ts'
 import { setup, draftFixture, canonical } from './fixtures/continuista.ts';
 
 const files = (directory: string) => readdirSync(directory, { recursive: true }).map(String).sort();
+const realIcmBinary = process.env.PERSONAJES_ICM_TEST_BINARY;
 async function fullSetup() {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-host-preflight-'));
   const journal = openJournal({ path: join(directory, 'world.sqlite') });
@@ -158,11 +159,12 @@ test('schema SQLite sintético incompleto se rechaza readonly; preflight nunca p
 });
 
 
-test('ICM 0.11.4 nativo provisionado fuera del preflight se reabre readonly y conserva bytes del SQLite', { skip: !existsSync('/tmp/personajes-icm-0.11.4-audit/install/bin/icm') }, async () => {
+test('ICM 0.11.4 nativo provisionado fuera del preflight se reabre readonly y conserva bytes del SQLite', { skip: realIcmBinary === undefined ? 'Definí PERSONAJES_ICM_TEST_BINARY para verificar ICM real en el host.' : false }, async () => {
   const fixture = await fullSetup();
   let provisionedConnection: DatabaseSync | undefined;
   try {
-    const binaryPath = '/tmp/personajes-icm-0.11.4-audit/install/bin/icm';
+    assert.ok(realIcmBinary);
+    const binaryPath = realIcmBinary;
     const actorId = fixture.configuration.roster.activeCharacterIds[0]; assert.ok(actorId);
     const memory = await createIcmMemoryAdapter({ privateDataRoot: fixture.directory, runId: fixture.configuration.runId, actorId, binaryPath, ledger: { findReceipt: () => undefined } });
     await memory.projector.store(freezeExperience({ schemaVersion: 1, experienceId: randomUUID(), runId: fixture.configuration.runId, actorId, kind: 'belief', content: 'Synthetic owned belief, not a canonical character fact.', sourceRefs: [], fictitiousAt: fixture.configuration.fictionalAt, receivedAt: fixture.configuration.fictionalAt, worldSeq: fixture.configuration.worldSnapshot.seq, confidence: 0.5, revision: 0, predecessor: { kind: 'initial' }, basedOn: [] }));

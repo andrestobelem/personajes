@@ -7,6 +7,7 @@ import { RunDraftWorkspace } from './RunDraftWorkspace.tsx';
 import { PiAccessPanel } from './PiAccessPanel.tsx';
 import { PiAccessCheckPanel } from './PiAccessCheckPanel.tsx';
 import { DocumentBody } from './DocumentBody.tsx';
+import { DossierExchangePanel } from './DossierExchangePanel.tsx';
 
 type LibraryState = { kind: 'loading' } | { kind: 'error'; message: string } |
   { kind: 'ready'; catalog: CatalogPage; library: LibraryPage; avatars: AvatarPage };
@@ -14,7 +15,7 @@ type Selection = { kind: 'none' } | { kind: 'loading'; title: string } |
   { kind: 'dossier'; data: DossierResponse } | { kind: 'document'; data: TextDocumentResponse } |
   { kind: 'paper'; id: string; title: string } |
   { kind: 'error'; message: string };
-type Tab = 'characters' | 'research' | 'sources' | 'runs' | 'access';
+type Tab = 'characters' | 'research' | 'sources' | 'runs' | 'access' | 'exchange';
 type CharacterSearch = { kind: 'idle' } | { kind: 'loading' } | { kind: 'ready'; items: CatalogPage['items'] } | { kind: 'error'; message: string };
 
 function readableError(error: unknown) {
@@ -130,12 +131,14 @@ export function App() {
         <button aria-current={tab === 'characters' ? 'page' : undefined} onClick={() => changeTab('characters')}>◇ Personajes</button>
         <button aria-current={tab === 'research' ? 'page' : undefined} onClick={() => changeTab('research')}>▤ Investigaciones</button>
         <button aria-current={tab === 'sources' ? 'page' : undefined} onClick={() => changeTab('sources')}>↗ Fuentes y paper</button>
+        <button aria-current={tab === 'exchange' ? 'page' : undefined} onClick={() => changeTab('exchange')}>⇄ Importar y exportar</button>
       </nav><div className="nav-label">CONFIGURACIÓN</div><nav aria-label="Acceso"><button aria-current={tab === 'access' ? 'page' : undefined} onClick={() => changeTab('access')}>◎ Acceso a Pi</button></nav><div className="sidebar-note">Identidad · Historia · Memoria<br />Deseo · Acción · Consecuencia</div>
     </aside>
-    <main><header className="topbar"><span>{tab === 'runs' ? 'Representaciones / Preparación' : tab === 'access' ? 'Configuración / Acceso a Pi' : <>Biblioteca / {tab === 'characters' ? 'Reparto' : tab === 'research' ? 'Investigaciones' : 'Fuentes'}</>}</span>{reading && <button className="back-button" onClick={() => { ++selectionEpoch.current; setSelection({ kind: 'none' }); requestAnimationFrame(() => catalogHeading.current?.focus()); }}>← Volver al catálogo</button>}<span className="status-chip">{tab === 'access' ? 'Administración del host' : 'Observación · Sin representación activa'}</span></header>
+    <main><header className="topbar"><span>{tab === 'runs' ? 'Representaciones / Preparación' : tab === 'access' ? 'Configuración / Acceso a Pi' : tab === 'exchange' ? 'Biblioteca / Importar y exportar' : <>Biblioteca / {tab === 'characters' ? 'Reparto' : tab === 'research' ? 'Investigaciones' : 'Fuentes'}</>}</span>{reading && <button className="back-button" onClick={() => { ++selectionEpoch.current; setSelection({ kind: 'none' }); requestAnimationFrame(() => catalogHeading.current?.focus()); }}>← Volver al catálogo</button>}<span className="status-chip">{tab === 'access' ? 'Administración del host' : tab === 'runs' ? 'Estado consultado desde el host' : 'Biblioteca de preparación'}</span></header>
       {state.kind === 'ready' && <div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} /></div>}
       {tab === 'access' && <div><PiAccessPanel /><PiAccessCheckPanel /></div>}
-      <div hidden={tab === 'runs' || tab === 'access'}><div className="workspace" data-reading={reading}><section className="catalog-panel" aria-label="Catálogo">
+      {state.kind==='ready'&&<div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items}/></div>}
+      <div hidden={tab === 'runs' || tab === 'access' || tab === 'exchange'}><div className="workspace" data-reading={reading}><section className="catalog-panel" aria-label="Catálogo">
         <span className="eyebrow">EL MUNDO EMPIEZA CON SUS PERSONAJES</span><h1 tabIndex={-1} ref={catalogHeading}>{tab === 'characters' ? 'El reparto' : tab === 'research' ? 'Ideas para la obra' : 'Las fuentes'}</h1>
         <p className="intro">{tab === 'characters' ? 'Cada ficha conserva una voz, una historia y un punto de vista.' : 'Investigación, evidencia y propuestas de interpretación.'}</p>
         <label className="search-label" htmlFor="catalog-search">{tab === 'characters' ? 'Buscar por nombre, alias o texto' : 'Buscar por título'}</label><input id="catalog-search" type="search" maxLength={200} placeholder="Buscar en esta sección…" value={query} onChange={(event) => setQuery(event.target.value)} />

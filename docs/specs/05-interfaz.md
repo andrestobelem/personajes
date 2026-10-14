@@ -71,7 +71,7 @@ La UI consume proyecciones generadas por el host a partir de los objetos de S01 
 | Preparación | Revisión de configuración; `PreparedCharacter` seleccionado; campos, valores y procedencia; propuestas sin confirmar; resultado y faltantes de preflight. |
 | Escenario | Run/revisión/seq, momento ficticio, lugares/conexiones, entidades/posiciones, escena/presencias, eventos y canales visibles para esa vista. La identidad real/percepción privada sólo entra a la superficie autorizada. |
 | Conversación pública | Sólo texto de mensajes publicados/emitidos conforme a audiencia; hablante/destinatarios/audiencia, IDs, momento y estados de recepción/entrega. Para propuestas no emitidas muestra estado técnico e ID, nunca texto, resumen del texto ni feedback privado. |
-| Inspector técnico autorizado | Contenido exacto de una propuesta/revisión sólo con `observer-view=internal` para la sesión y opt-in explícito; feedback privado separado del transcript. La UI lo marca como no emitido y nunca lo presenta como parlamento, no lo envía a actores ni lo copia al replay público. El permiso no habilita cambiar el veredicto de Regidor/Continuista ni publicar. |
+| Inspector técnico autorizado | Contenido exacto de una propuesta/revisión sólo con la capacidad de inspección interna autorizada para la sesión y opt-in explícito, conforme S04; es independiente del modo de participación. Feedback privado separado del transcript. La UI lo marca como no emitido y nunca lo presenta como parlamento, no lo envía a actores ni lo copia al replay público. El permiso no habilita cambiar el veredicto de Regidor/Continuista ni publicar. |
 | Dirección | Línea dramática tipada, referencias a eventos, estado sufficient/insufficient/revised y las metas visibles al operador, sin sustituir hechos por interpretaciones. |
 | Diagnóstico | Estados de autenticación, perfil, disponibilidad, llamada/job, error sanitizado, recuperación y cursor; nunca credenciales o reasoning. |
 | Voces | Receta, convención de idioma/variedad elegida o propuesta, credencial disponible sí/no, modelo/voz validados, estado de preview/guardado/síntesis y artefactos publicados. Secretos se representan sólo como presencia/ausencia. |
@@ -186,7 +186,7 @@ La barra de modo muestra nombre, icono/etiqueta accesible y destinatario actual 
 |---|---|
 | **Iniciar/continuar** | Corre sólo tras preflight y perfil válido. Indica trabajos convocados, presupuesto y hora ficticia; no etiqueta latencia como tiempo diegético. |
 | **Pausar corrida** | Detiene nuevas convocatorias y congela reloj ficticio. Eventos confirmados quedan visibles; respuestas tardías quedan pendientes sin efecto. Un job en curso se distingue del actor que eligió callar. |
-| **Avanzar un paso** | Disponible desde pausa; solicita un pulso acotado del ciclo percepción→actuación→revisión→resolución→entrega y termina pausado. UI muestra alcance y resultado de ese paso; no equivale a escena/acto/día. |
+| **Avanzar un paso** | Disponible desde pausa con preflight pasado y vigente del corte actual; solicita un pulso acotado del ciclo percepción→actuación→revisión→resolución→entrega y termina pausado. UI muestra alcance y resultado de ese paso; no equivale a escena/acto/día. |
 | **Detener** | Cancela trabajos pendientes según host, detiene nuevas convocatorias y congela reloj. Conserva confirmado/outbox; fallo de cancelación se diagnostica. Continuación requiere revalidación. |
 | **Cerrar corrida** | Acción terminal separada, requiere confirmación con nombre/ID y advierte que no acepta más turnos. Conserva historia; no borra ni sobrescribe. Una nueva rama/corrida tiene ID diferente. |
 | **Pausar replay/visor** | Detiene únicamente la reproducción histórica/animación; el control indica «Replay» y no afecta el runtime actual. |
@@ -194,6 +194,10 @@ La barra de modo muestra nombre, icono/etiqueta accesible y destinatario actual 
 Los botones permanecen utilizables durante inferencia conforme NFR-05. Una operación en curso identifica job y permite cancelación cuando aplica. El reintento usa misma operación/idempotency key sólo para recuperar resultado existente; generar nueva actuación requiere una nueva tentativa explícita, se registra como nueva versión/generación y nunca reemite un evento ya confirmado. Los workers mecánicos de entrega pueden seguir/reconstruirse en pausa o con OAuth vencido; no provocan nuevas inferencias.
 
 Al volver a abrir una corrida, la UI carga snapshot/eventos al `eventFence` confirmado y pendientes de S02. Distingue `pending`, `interrupted`, `failed`, `cancelled`, `delivered` y `unknown` con descripción legible y ruta disponible. Si OAuth expiró, Biblioteca, configuración, historia, replay y estado confirmado siguen disponibles; iniciar/reanudar inferencias queda bloqueado hasta revalidar acceso. No se presentan contenidos de job no durable como respuesta recuperada.
+
+### Corte implementado en Cloud
+
+La preparación incluye controles conectados a RunView y lectura periódica del presupuesto. El host confirma los cambios de lifecycle; una respuesta incierta conserva comando, clave y corte para recuperar el mismo resultado. El paso aceptado se consulta por su job durable y se presenta separado de la finalización. El preflight se puede evaluar desde Ready, pausa o detenido sobre el corte actual. Los datos pendientes de edición impiden controlar con una configuración distinta de la guardada. Este corte no implementa aún SSE, escena gráfica, conversación, inspector, dirección, audio ni replay completos; su evidencia está en [continuación Cloud](../auditoria/continuacion-cloud.md).
 
 ## 8. Inspector, historia, evolución y dramaturgia
 

@@ -1,6 +1,6 @@
 # Brecha de lifecycle y controles de representación
 
-Estado al 14 de octubre de 2026. Auditoría de S01–S05, PRD y código local. Es un informe de faltantes; no acredita una representación operada ni acceso live a un proveedor.
+Auditoría histórica anterior al corte 29 del 14 de octubre de 2026. Los faltantes enumerados abajo describen ese momento, no el código actual. El corte 29 ya compuso RunView/ETag, API de controles, gate fresco de preflight, CAS y cancelación por corrida. La continuación Cloud se registra en [evidencia de Cloud](continuacion-cloud.md). Ninguna de estas integraciones acredita por sí sola una representación operada ni acceso live a un proveedor.
 
 ## Qué ya existe
 
@@ -13,7 +13,7 @@ Estado al 14 de octubre de 2026. Auditoría de S01–S05, PRD y código local. E
 
 La evidencia y límites de estos componentes están en [progreso de implementación](implementacion-progreso.md), [preflight durable](preflight-durable.md) y [S02](../specs/02-persistencia-e-icm.md).
 
-## Qué impide operar el lifecycle
+## Qué impedía operar el lifecycle antes del corte 29
 
 1. **No hay caso de uso ni rutas de control.** El host aún no expone `GET /runs/{id}`, `POST /runs/{id}/start` ni `POST /runs/{id}/controls` conforme S04; tampoco hay SSE del run. El `GET` existente de corrida devuelve la preparación/borrador. La GUI termina en edición y preflight y mantiene “Sin representación activa”.
 2. **La autoridad durable ya está a medio camino.** `applyRunLifecycleCommand` persiste revisión de lifecycle, resultado idempotente y timestamp de cierre, y gatea start/resume dentro de una transacción SQLite. Falta que la aplicación use esta operación como única vía de control; `setWorldLifecycle` sigue siendo una primitiva interna usada por fixtures/compatibilidad y no debe conectarse a la GUI.
@@ -22,7 +22,7 @@ La evidencia y límites de estos componentes están en [progreso de implementaci
 5. **`step` no equivale a un pulso todavía.** El supervisor normal drena trabajo causal hasta quedar ocioso. Hace falta una operación durable acotada que abra exactamente un pulso desde pausa y vuelva a pausa al completarlo o bloquearse.
 6. **No está resuelto el primer disparador sin inventar ficción.** Iniciar debe activar la puesta y convocatorias justificadas por rutina/meta, sin crear una conversación, acción o evento de mundo para dar la impresión de que arrancó.
 
-## Orden recomendado del corte vertical
+## Orden recomendado en aquella auditoría
 
 1. Terminar la capa de aplicación host-owned para start, pausa, resume, un solo pulso, stop y close; gatear por lectura vigente del broker y coordinar con runtime/cancelación por corrida.
 2. Exponer `RunView`, ETag, rutas de control y seguimiento de jobs. Mantener autenticación local, CSRF e idempotencia durable; reintentar una respuesta incierta con la misma clave.

@@ -10,13 +10,13 @@ export type { PiAccessJobView } from './pi-access-jobs.ts';
 import { WorldLifecycleSchema } from './run-lifecycle.ts';
 import { CatalogDocumentKindSchema, DossierSchema } from './catalog.ts';
 import {
-  CircadianPolicySchema, DramaticLineSchema, HumanParticipantProfilesSchema, NarrationModeSchema,
-  ProductionAudioSchema, ProductionRosterSchema, ProductionValidationIssueSchema, RunBudgetSchema,
+  NarrationModeSchema,
+  ProductionAudioSchema, ProductionValidationIssueSchema, RunBudgetSchema,
   RunConfigurationDraftSchema,
 } from './production.ts';
 import { PersistedInferenceProfileSchema } from './inference-profile.ts';
-import { ContinuityContextSchema, SpanishVarietyForActingSchema } from './preparation.ts';
-import { WorldClockSchema, WorldSnapshotSchema } from './world-schema.ts';
+import { SpanishVarietyForActingSchema } from './preparation.ts';
+import { WorldClockSchema } from './world-schema.ts';
 import { JobIdSchema } from './values.ts';
 import {
   CharacterIdSchema, EventIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
@@ -356,23 +356,14 @@ export type RunConfigurationDraftPage = z.infer<typeof RunConfigurationDraftPage
 /** Public, operator-facing configuration projection. Internal preflight fences,
  * prompts, memory state, credentials and local filesystem paths are excluded. */
 export const RunViewConfigurationSchema = z.strictObject({
-  runId: RunIdSchema,
-  configRevision: RevisionSchema,
-  name: z.string().trim().min(1).max(120),
+  runId: RunIdSchema, configRevision: RevisionSchema, name: z.string().trim().min(1).max(120),
   fictionalAt: z.number().int().min(-8_640_000_000_000_000).max(8_640_000_000_000_000),
-  continuity: ContinuityContextSchema,
-  roster: ProductionRosterSchema,
-  humanParticipants: HumanParticipantProfilesSchema,
-  worldSnapshot: WorldSnapshotSchema,
-  dramaticLine: DramaticLineSchema,
-  circadianPolicy: CircadianPolicySchema,
-  language: z.literal('es'),
-  spanishVariety: SpanishVarietyForActingSchema,
-  narrationMode: NarrationModeSchema,
-  inferenceProfile: PersistedInferenceProfileSchema.optional(),
-  budget: RunBudgetSchema,
-  maxReformulations: z.number().int().min(0).max(2),
-  audio: ProductionAudioSchema,
+  continuity: z.strictObject({continuityId:z.string().min(1).max(80),revision:RevisionSchema}),
+  roster: z.strictObject({activeCharacterCount:z.number().int().min(0).max(100)}),
+  humanParticipantCount:z.number().int().min(0).max(100),
+  language: z.literal('es'),spanishVariety: SpanishVarietyForActingSchema,narrationMode: NarrationModeSchema,
+  inferenceProfile: PersistedInferenceProfileSchema.optional(),budget:RunBudgetSchema,maxReformulations:z.number().int().min(0).max(2),
+  audio:z.strictObject({mode:ProductionAudioSchema.shape.mode}),
 });
 export type RunViewConfiguration = z.infer<typeof RunViewConfigurationSchema>;
 
@@ -412,6 +403,8 @@ export const RunBudgetViewSchema = z.strictObject({
   voiceDesignCalls: BudgetCountersSchema,
   ttsCalls: BudgetCountersSchema,
   sfxCalls: BudgetCountersSchema,
+  /** Audio diagnostics are separate from inference eligibility. */
+  audioBudgetStatus: z.enum(['known','unavailable']).optional(),
   status: z.enum(['available', 'exhausted', 'uncertain', 'unknown']),
 }).superRefine((budget, context) => {
   if ((budget.modelWallTimeMs.measured === null) !== (budget.modelWallTimeMs.remaining === null)) {
@@ -452,20 +445,7 @@ export const RunViewSchema = z.strictObject({
 }).superRefine((view, context) => {
   if (view.config.runId !== view.runId) context.addIssue({ code: 'custom', path: ['config', 'runId'], message: 'La configuración refiere otra corrida.' });
   if (view.config.configRevision !== view.configRevision) context.addIssue({ code: 'custom', path: ['config', 'configRevision'], message: 'La revisión de configuración no coincide.' });
-  if (view.config.worldSnapshot.runId !== view.runId) context.addIssue({ code: 'custom', path: ['config', 'worldSnapshot', 'runId'], message: 'El Escenario refiere otra corrida.' });
-  if (view.config.worldSnapshot.revision !== view.worldRevision) context.addIssue({ code: 'custom', path: ['config', 'worldSnapshot', 'revision'], message: 'La revisión del Escenario no coincide.' });
-  if (view.config.worldSnapshot.seq !== view.lastWorldSeq) context.addIssue({ code: 'custom', path: ['lastWorldSeq'], message: 'La secuencia del Escenario no coincide.' });
-  const viewConvention = view.clock.convention;
-  const snapshotConvention = view.config.worldSnapshot.clock.convention;
-  const sameConvention = viewConvention.kind === snapshotConvention.kind
-    && (viewConvention.kind === 'fixedOffset' && snapshotConvention.kind === 'fixedOffset'
-      ? viewConvention.offsetMinutes === snapshotConvention.offsetMinutes && viewConvention.label === snapshotConvention.label
-      : viewConvention.kind === 'ianaZone' && snapshotConvention.kind === 'ianaZone'
-        ? viewConvention.zone === snapshotConvention.zone
-        : false);
-  if (view.config.worldSnapshot.clock.instant !== view.clock.instant || !sameConvention) {
-    context.addIssue({ code: 'custom', path: ['clock'], message: 'El reloj no coincide con el Escenario.' });
-  }
+  if (view.config.fictionalAt !== view.clock.instant) context.addIssue({code:'custom',path:['config','fictionalAt'],message:'El momento de configuración pública no coincide con el reloj confirmado.'});
 });
 export type RunView = z.infer<typeof RunViewSchema>;
 

@@ -257,7 +257,7 @@ export async function setup(inferenceProfile?: PersistedInferenceProfile | 'hist
   const speech = journal.commitHumanIntervention({ runId, participantId: 'visitante-prueba', expectedRevision: configuration.worldSnapshot.revision,
     idempotencyKey: randomUUID(), request: { kind: 'speech', recipientCharacterIds: [actorId],
       channelId: '00000000-0000-4000-8000-000000000104', content: { kind: 'speech', text: 'Mensaje sintético para activar la prueba.' } } });
-  if (speech.kind === 'idempotencyConflict') throw new Error('Conflicto de fixture');
+  if (speech.kind === 'idempotencyConflict' || speech.kind === 'invalidLifecycle') throw new Error('Conflicto de fixture');
   assert.equal(speech.resolution.kind, 'applied');
   assert.equal((await createDeliverWorldWorker({ journal, runId, actorId }).drain()).kind, 'completed');
   const pulseId = PulseIdSchema.parse(randomUUID());

@@ -45,6 +45,8 @@ export function createCoordinatorPulseSupervisor(input: {
     result: ActorTurnWorkerResult;
   }) => void;
   onFailure?: (failure: SupervisorFailure) => void;
+  beforeClosePulse?: (pulse: {runId: RunId; pulseId: PulseId}, signal: AbortSignal) => Promise<boolean>;
+  onPulseClosed?: (pulse: {runId: RunId; pulseId: PulseId}) => Promise<void>;
 }) {
   const ownerToken = OwnerTokenSchema.parse(input.ownerToken);
   const active = new Map<RunId, ActiveRun>();
@@ -93,10 +95,14 @@ export function createCoordinatorPulseSupervisor(input: {
     while (!closed && !signal.aborted) {
       const begin = input.journal.beginCoordinatorPulse({ runId });
       if (begin.kind === 'inactive' || begin.kind === 'idle') return 'quiescent';
-      if (begin.pulse.state !== 'running') return 'suspended';
+      if (begin.pulse.state !== 'running') {
+        await input.onPulseClosed?.({runId,pulseId:begin.pulse.pulseId});
+        return 'suspended';
+      }
 
       const drained = await drainPulse({ runId, pulseId: begin.pulse.pulseId }, signal);
       if (drained === 'suspended') return 'suspended';
+      await input.onPulseClosed?.({runId,pulseId:begin.pulse.pulseId});
       pulsesSinceYield += 1;
       if (pulsesSinceYield >= MAX_PULSES_PER_BATCH) {
         pulsesSinceYield = 0;
@@ -114,6 +120,8 @@ export function createCoordinatorPulseSupervisor(input: {
       const next = jobs.find((job) => (job.state === 'queued' || job.state === 'accepted') && !processed.has(jobKey(job)));
       if (next === undefined) {
         if (jobs.some((job) => job.state === 'running')) return 'suspended';
+        if (input.beforeClosePulse !== undefined && !await input.beforeClosePulse(inputPulse,signal)) return 'suspended';
+        if (closed || signal.aborted) return 'suspended';
         const pulse = input.journal.closeCoordinatorPulse(inputPulse);
         return pulse.state === 'running' ? 'suspended' : 'terminal';
       }

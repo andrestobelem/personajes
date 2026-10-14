@@ -18,7 +18,7 @@ test('draft vacío durable usa ID/autor host, historial e idempotencia tras migr
   try{
     journal.configureRun({runId:uuid(1),maxCalls:4});journal.close();
     const before=new DatabaseSync(path);
-    try{before.exec('DROP TABLE model_time_spans;DROP TABLE model_time_run_state;DROP TABLE run_preflight_job_operations;DROP TABLE run_preflight_job_results;DROP TABLE run_preflight_job_history;DROP TABLE run_preflight_jobs;DROP TABLE pi_access_job_operations;DROP TABLE pi_access_job_results;DROP TABLE pi_access_job_history;DROP TABLE pi_access_jobs;DROP TABLE pi_oauth_job_operations;DROP TABLE pi_oauth_job_history;DROP TABLE pi_oauth_jobs;DROP TABLE run_draft_validation_reports;DROP TABLE run_draft_operations;DROP TABLE run_configuration_draft_history;DROP TABLE run_configuration_drafts;DELETE FROM schema_version WHERE version IN(17,18,19,20,21,22,23,24,25);');}finally{before.close();}
+    try{before.exec('DROP TABLE model_time_spans;DROP TABLE model_time_run_state;DROP TABLE run_preflight_job_operations;DROP TABLE run_preflight_job_results;DROP TABLE run_preflight_job_history;DROP TABLE run_preflight_jobs;DROP TABLE pi_access_job_operations;DROP TABLE pi_access_job_results;DROP TABLE pi_access_job_history;DROP TABLE pi_access_jobs;DROP TABLE pi_oauth_job_operations;DROP TABLE pi_oauth_job_history;DROP TABLE pi_oauth_jobs;DROP TABLE run_draft_validation_reports;DROP TABLE run_draft_operations;DROP TABLE run_configuration_draft_history;DROP TABLE run_configuration_drafts;DELETE FROM schema_version WHERE version IN(17,18,19,20,21,22,23,24,25,26,27);');}finally{before.close();}
     journal=openJournal({path});
     const request={principalId,idempotencyKey:uuid(2)};
     const first=journal.createRunConfigurationDraft(request);if(first.kind!=='created')assert.fail('Draft no creado');
@@ -34,7 +34,7 @@ test('draft vacío durable usa ID/autor host, historial e idempotencia tras migr
     const history=journal.readRunConfigurationDraftHistory({runId:first.draft.runId});assert.equal(history.length,1);assert.equal(history[0]?.principalId,principalId);
     assert.match(history[0]?.recordedAt??'',/^\d{4}-\d{2}-\d{2}T/);
     const inspect=new DatabaseSync(path);try{
-      assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version,25);
+      assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version,27);
       assert.equal(inspect.prepare('SELECT max_calls FROM run_budgets WHERE run_id=?').get(uuid(1))?.max_calls,4);
       assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_runs').get()?.n,0);
       assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_events').get()?.n,0);

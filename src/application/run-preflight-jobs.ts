@@ -163,5 +163,6 @@ export async function createRunPreflightJobs(input: {
         const task = active.get(result.job.jobId); if (task !== undefined) { task.revision = result.job.revision; task.controller.abort(); }
       } return result;
     }); }, close,
+    get backupBusy(){return active.size>0||queue.length>0||inFlight.size>0||pump!==undefined;},
   });
 }

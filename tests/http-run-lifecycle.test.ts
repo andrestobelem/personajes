@@ -30,19 +30,16 @@ function makeRunView(): RunView {
       configRevision: configuration.configRevision,
       name: configuration.name,
       fictionalAt: configuration.fictionalAt,
-      continuity: configuration.continuity,
-      roster: configuration.roster,
-      humanParticipants: configuration.humanParticipants,
-      worldSnapshot: configuration.worldSnapshot,
-      dramaticLine: configuration.dramaticLine,
-      circadianPolicy: configuration.circadianPolicy,
+      continuity: {continuityId:configuration.continuity.continuityId,revision:configuration.continuity.revision},
+      roster: {activeCharacterCount:configuration.roster.activeCharacterIds.length},
+      humanParticipantCount:configuration.humanParticipants.length,
       language: configuration.language,
       spanishVariety: configuration.spanishVariety,
       narrationMode: configuration.narrationMode,
       ...(configuration.inferenceProfile === undefined ? {} : { inferenceProfile: configuration.inferenceProfile }),
       budget: configuration.budget,
       maxReformulations: configuration.maxReformulations,
-      audio: configuration.audio,
+      audio:{mode:configuration.audio.mode},
     },
     clock: configuration.worldSnapshot.clock,
     limits: {
@@ -184,16 +181,16 @@ test('control pasa CAS y principal al puerto; replay, step y resultados de domin
   const paused = RunViewSchema.parse({ ...state.view, lifecycle: { kind: 'paused' }, lifecycleRevision: state.view.lifecycleRevision + 1 });
   state.setView(paused);
   state.setResult({ kind: 'stepUnavailable' });
-  const stepUnavailable = await fetch(host.origin + path, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(paused) }, body: JSON.stringify({ kind: 'step' }) });
+  const stepUnavailable = await fetch(host.origin + path, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(paused) }, body: JSON.stringify({ kind: 'step', preflightJobId: randomUUID() }) });
   assert.equal(stepUnavailable.status, 503);
   assert.equal((await stepUnavailable.json()).error.code, 'STEP_UNAVAILABLE');
 
   state.setResult({ kind: 'updated', run: paused, replayed: false });
-  const falseStepSuccess = await fetch(host.origin + path, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(paused) }, body: JSON.stringify({ kind: 'step' }) });
+  const falseStepSuccess = await fetch(host.origin + path, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(paused) }, body: JSON.stringify({ kind: 'step', preflightJobId: randomUUID() }) });
   assert.equal(falseStepSuccess.status, 503, 'step cannot be claimed complete without an accepted bounded-pulse job');
 
-  state.setResult({ kind: 'accepted', run: paused, job: { jobId: randomUUID(), revision: 0, state: 'queued' }, replayed: false });
-  const stepAccepted = await fetch(host.origin + path, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(paused) }, body: JSON.stringify({ kind: 'step' }) });
+  state.setResult({ kind: 'accepted', run: { ...paused, lifecycle: { kind: 'running' } }, job: { jobId: randomUUID(), revision: 0, state: 'queued' }, replayed: false });
+  const stepAccepted = await fetch(host.origin + path, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(paused) }, body: JSON.stringify({ kind: 'step', preflightJobId: randomUUID() }) });
   assert.equal(stepAccepted.status, 202);
 });
 
@@ -220,8 +217,48 @@ test('lifecycle result mapping returns current ETag and never exposes host diagn
     assert.equal((await response.json()).error.code, code);
   }
   const otherRunId = randomUUID();
-  const otherRun = RunViewSchema.parse({ ...newer, runId: otherRunId, config: { ...newer.config, runId: otherRunId, worldSnapshot: { ...newer.config.worldSnapshot, runId: otherRunId } } });
+  const otherRun = RunViewSchema.parse({ ...newer, runId: otherRunId, config: { ...newer.config, runId: otherRunId } });
   const wrongScope = await send({ kind: 'stale', current: otherRun });
   assert.equal(wrongScope.status, 500);
   assert.doesNotMatch(await wrongScope.text(), /PRIVATE|unexpected|runId/);
+});
+
+
+test('dedicated lifecycle routes share controls validation and reject mismatched commands', async (t) => {
+  const state = controlledLifecycle(); const host = await setup(t, state.port);
+  const post = (route: string, command: unknown) => fetch(`${host.origin}/api/v1/runs/${state.view.runId}/${route}`, { method: 'POST', headers: { ...host.headers, 'Idempotency-Key': randomUUID(), 'If-Match': etag(state.view) }, body: JSON.stringify(command) });
+  const preflightJobId = randomUUID();
+  assert.equal((await post('start', { kind: 'start', preflightJobId })).status, 200);
+  assert.deepEqual(state.controls[0]?.command, { kind: 'start', preflightJobId });
+  assert.equal((await post('start', { kind: 'pause' })).status, 422);
+  assert.equal(state.controls.length, 1);
+  for (const kind of ['pause', 'stop', 'close']) assert.equal((await post(kind, { kind })).status, 200);
+  assert.equal((await post('resume', { kind: 'resume', preflightJobId })).status, 200);
+});
+
+test('durable step job read is authenticated, scope checked and revision tagged', async (t) => {
+  const state = controlledLifecycle(); const jobId = randomUUID();
+  const job = { jobId, runId: state.view.runId, pulseId: null, state: 'queued', revision: 0, lifecycleRevision: 4, createdAt: Date.now(), updatedAt: Date.now() };
+  const host = await setup(t, { ...state.port, readStepJob: ({ runId, jobId: requested }) => runId === job.runId && requested === job.jobId ? job : undefined });
+  const path = `${host.origin}/api/v1/runs/${job.runId}/steps/${jobId}`;
+  const response = await fetch(path, { headers: host.headers });
+  assert.equal(response.status, 200); assert.equal(response.headers.get('etag'), `"run-step:${jobId}:r0"`);
+  assert.deepEqual(await response.json(), job);
+  assert.equal((await fetch(path, { headers: { Origin: host.origin, 'Sec-Fetch-Site': 'same-origin' } })).status, 401);
+  assert.equal((await fetch(`${host.origin}/api/v1/runs/${job.runId}/steps/${randomUUID()}`, { headers: host.headers })).status, 404);
+  const invalid = await setup(t, { ...state.port, readStepJob: () => ({ ...job, runId: randomUUID() }) });
+  const denied = await fetch(`${invalid.origin}/api/v1/runs/${job.runId}/steps/${jobId}`, { headers: invalid.headers });
+  assert.equal(denied.status, 500); assert.doesNotMatch(await denied.text(), /pulseId|lifecycleRevision/);
+});
+
+test('replay de step ya terminado conserva receipt accepted con corrida pausada y job terminal',async(t)=>{
+  const state=controlledLifecycle();const host=await setup(t,state.port);
+  const paused=RunViewSchema.parse({...state.view,lifecycle:{kind:'paused'}});
+  const jobId=randomUUID();
+  state.setResult({kind:'accepted',run:paused,job:{jobId,revision:3,state:'succeeded'},replayed:true});
+  const response=await fetch(`${host.origin}/api/v1/runs/${paused.runId}/step`,{method:'POST',headers:{...host.headers,
+    'Idempotency-Key':randomUUID(),'If-Match':etag(paused)},body:JSON.stringify({kind:'step',preflightJobId:randomUUID()})});
+  assert.equal(response.status,202);assert.equal(response.headers.get('idempotency-replayed'),'true');
+  const receipt=RunControlReceiptSchema.parse(await response.json());
+  assert.equal(receipt.run.lifecycle.kind,'paused');assert.equal(receipt.job.jobId,jobId);assert.equal(receipt.job.state,'succeeded');
 });

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { RunPreflightJobDocument, RunPreflightJobView } from '../domain/http.ts';
 import { capturePreflightIntent, createRunPreflightClient, preflightRejection, preflightTerminal, type PreflightDocument, type PreflightIntent, type RunPreflightClient } from './run-preflight-client.ts';
+import type { RunDocument } from './run-controls-client.ts';
 import type { DraftDocument } from './run-drafts-client.ts';
 import { RunBudgetPanel } from './RunBudgetPanel.tsx';
 
@@ -21,7 +22,7 @@ export function RunPreflightReport({ value }: { value: RunPreflightJobDocument }
   </div>;
 }
 type Selection = { kind: 'none' } | { kind: 'receipt'; job: RunPreflightJobView } | { kind: 'document'; document: PreflightDocument };
-export function RunPreflightPanel({ document, disabled = false, api = client }: { document: DraftDocument; disabled?: boolean; api?: RunPreflightClient }) {
+export function RunPreflightPanel({ document, currentRun, disabled = false, api = client }: { document: DraftDocument; currentRun?: RunDocument; disabled?: boolean; api?: RunPreflightClient }) {
   const runId = document.view.configuration.runId;
   const [selection, setSelection] = React.useState<Selection>({ kind: 'none' });
   const [history, setHistory] = React.useState<{ kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; items: RunPreflightJobDocument[]; truncated: boolean }>({ kind: 'loading' });
@@ -37,7 +38,7 @@ export function RunPreflightPanel({ document, disabled = false, api = client }: 
     const controller = new AbortController();
     api.history(runId, controller.signal).then(page => { if (!controller.signal.aborted) setHistory({ kind: 'ready', ...page }); }).catch(() => { if (!controller.signal.aborted) setHistory({ kind: 'unavailable' }); });
     return () => controller.abort();
-  }, [api, runId, refresh, document.view.state.configurationRevision, document.view.state.worldRevision]);
+  }, [api, runId, refresh, (currentRun?.view.configRevision ?? document.view.state.configurationRevision), (currentRun?.view.worldRevision ?? document.view.state.worldRevision)]);
   const selectedJob = selection.kind === 'none' ? null : selection.kind === 'receipt' ? selection.job : selection.document.value.job;
   const jobId = selectedJob?.jobId;
   const needsRead = selection.kind === 'receipt' || (selectedJob !== null && !preflightTerminal(selectedJob));
@@ -54,7 +55,7 @@ export function RunPreflightPanel({ document, disabled = false, api = client }: 
       if (!controller.signal.aborted) timer = setTimeout(() => { void poll(); }, 1500);
     }
     void poll(); return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer); };
-  }, [api, runId, jobId, needsRead, refresh, document.view.state.configurationRevision, document.view.state.worldRevision]);
+  }, [api, runId, jobId, needsRead, refresh, (currentRun?.view.configRevision ?? document.view.state.configurationRevision), (currentRun?.view.worldRevision ?? document.view.state.worldRevision)]);
   async function mutate(captured: PreflightIntent) {
     const controller = lifetime.current; if (controller === null || activeMutation.current) return;
     activeMutation.current = true; setBusy(true); setIntent(captured); setMessage(null);
@@ -70,7 +71,7 @@ export function RunPreflightPanel({ document, disabled = false, api = client }: 
       }
     } finally { activeMutation.current = false; if (!controller.signal.aborted) setBusy(false); }
   }
-  function evaluate() { try { void mutate(capturePreflightIntent({ document, key: crypto.randomUUID() })); } catch { setMessage('Guardá y validá la preparación antes de comprobar requisitos.'); } }
+  function evaluate() { try { void mutate(currentRun === undefined ? capturePreflightIntent({ document, key: crypto.randomUUID() }) : { kind: 'evaluate', key: crypto.randomUUID(), runId, configurationRevision: currentRun.view.configRevision, worldRevision: currentRun.view.worldRevision }); } catch { setMessage('Guardá y validá la preparación antes de comprobar requisitos.'); } }
   async function recover(job: RunPreflightJobView) {
     const controller = lifetime.current; if (controller === null || busy) return;
     setBusy(true); setMessage(null);
@@ -79,14 +80,14 @@ export function RunPreflightPanel({ document, disabled = false, api = client }: 
     finally { if (!controller.signal.aborted) setBusy(false); }
   }
   const activeJobs = history.kind === 'ready' && history.items.some(value => !preflightTerminal(value.job));
-  const notReady = document.view.state.lifecycle !== 'ready' || document.view.state.worldRevision === null;
+  const notReady = !['ready', 'paused', 'stopped'].includes(currentRun?.view.lifecycle.kind ?? document.view.state.lifecycle) || (currentRun?.view.worldRevision ?? document.view.state.worldRevision) === null;
   return <section className="run-preflight-panel" aria-labelledby={`preflight-${runId}`}><h2 id={`preflight-${runId}`}>Requisitos de ejecución</h2><p>Comprobá la configuración guardada, el Escenario y los servicios necesarios. Esta comprobación no inicia la obra ni llama al modelo.</p>
     <div className="draft-actions"><button type="button" disabled={disabled || notReady || busy || intent !== null || activeJobs || history.kind !== 'ready' || needsRead} onClick={evaluate}>Comprobar requisitos de ejecución</button><button type="button" onClick={() => setRefresh(value => value + 1)}>Actualizar historia de comprobaciones</button></div>
     {(disabled || notReady) && <p className="muted">Guardá los cambios y completá la validación Ready para evaluar el corte persistido.</p>}
     {!notReady && <RunBudgetPanel runId={runId} api={api} />}
     {message && <p role="alert">{message}</p>}{intent !== null && !busy && <button type="button" onClick={() => void mutate(intent)}>Recuperar resultado de la operación</button>}
     {selection.kind === 'receipt' && <p role="status">Operación registrada: {states[selection.job.state]}. Consultando su resultado actual…</p>}
-    {selection.kind === 'document' && <><RunPreflightReport value={{ ...selection.document.value, report: { ...selection.document.value.report, kind: selection.document.value.job.configurationRevision !== document.view.state.configurationRevision || selection.document.value.job.worldRevision !== document.view.state.worldRevision ? 'stale' : selection.document.value.report.kind } }} />{!preflightTerminal(selection.document.value.job) && selection.document.value.job.state !== 'cancel-requested' && <button type="button" disabled={busy || intent !== null} onClick={() => void mutate({ kind: 'cancel', key: crypto.randomUUID(), document: selection.document })}>Solicitar cancelación de la comprobación</button>}</>}
+    {selection.kind === 'document' && <><RunPreflightReport value={{ ...selection.document.value, report: { ...selection.document.value.report, kind: selection.document.value.job.configurationRevision !== (currentRun?.view.configRevision ?? document.view.state.configurationRevision) || selection.document.value.job.worldRevision !== (currentRun?.view.worldRevision ?? document.view.state.worldRevision) ? 'stale' : selection.document.value.report.kind } }} />{!preflightTerminal(selection.document.value.job) && selection.document.value.job.state !== 'cancel-requested' && <button type="button" disabled={busy || intent !== null} onClick={() => void mutate({ kind: 'cancel', key: crypto.randomUUID(), document: selection.document })}>Solicitar cancelación de la comprobación</button>}</>}
     <h3>Comprobaciones guardadas</h3>{history.kind === 'loading' ? <p role="status">Consultando historia local…</p> : history.kind === 'unavailable' ? <p role="alert">No se pudo consultar la historia. Actualizala antes de crear otro trabajo.</p> : <><ul>{history.items.map(value => <li key={value.job.jobId}>{states[value.job.state]} · configuración {value.job.configurationRevision} · Escenario {value.job.worldRevision}{value.report.kind === 'stale' && ' · desactualizado'} <button type="button" disabled={busy || intent !== null} onClick={() => void recover(value.job)}>Consultar comprobación {value.job.jobId}</button></li>)}</ul>{history.items.length === 0 && <p>No hay comprobaciones guardadas.</p>}{history.truncated && <p className="muted">Se muestran los 1.000 trabajos más recientes.</p>}</>}
   </section>;
 }
