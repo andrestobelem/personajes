@@ -32,7 +32,7 @@ El [índice general](../README.md), la [constitución](../constitucion.md), el [
 | C13 | Aporte sobre comedia antigua, agón, parábasis y consecuencias después del triunfo. | [Aristófanes: estructura](../investigaciones/aristofanes-estructura-y-mundo.md). | Guardado como esquema variable, no seis actos obligatorios. |
 | C14 | Línea de fondo y director que registra cuándo se cumplen etapas. | [Dirección ICM](../../obra/direccion/CONTEXT.md), dramaturgia. | Preparado. Etapas con evidencia y lectura revisable; no forzar decisiones del reparto. |
 | C15 | Uno o más personajes pueden conformar una escena. | [Escenas](../../obra/references/escenas.md), constitución. | Guardado: acción solitaria, monólogo o silencio también son escenas. |
-| C16 | Voz en off como narrador omnisciente. | [Narrador](../diseno/narrador-y-voz-en-off.md), [contrato ICM](../../obra/narrador/CONTEXT.md). | Preparado y opcional; dirigido al público, sin crear hechos ni revelar razonamiento interno. |
+| C16 | Voz en off como narrador omnisciente. | [Narrador](../diseno/narrador-y-voz-en-off.md), [contrato ICM](../../obra/narrador/CONTEXT.md). | **Parcial:** Narrador opcional y revisor independiente compuestos, publicaciones verificadas y panel público por corte; pruebas SDK/SQLite/ICM controladas. No crea hechos ni recuerdos del reparto ni revela razonamiento interno. Faltan aceptación integral con inferencia y audio reales. Ver [Cloud](continuacion-cloud.md). |
 
 ## 2. Investigaciones y conservación
 

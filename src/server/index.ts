@@ -1,4 +1,6 @@
 import { createRunObservationApplication } from '../application/run-observation.ts';
+import { createNarrationObservation } from '../application/narration-observation.ts';
+import { createNarrationRoutes } from './narration-routes.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
 import { homedir } from 'node:os';
@@ -82,6 +84,7 @@ try {
       host, piRuntime, icmBinaryPath: process.env.PERSONAJES_ICM_BINARY,
       onDiagnostic: (diagnostic) => process.stderr.write(JSON.stringify({ kind: 'representationDiagnostic', diagnostic }) + '\n'),
       onWorldCommitted: event => voices?.onWorldCommitted({runId:event.runId,eventIds:event.eventIds}),
+      onNarrationPublished: event => voices?.onNarrationPublished(event),
     });
   }
 } catch (error) {
@@ -139,7 +142,7 @@ try {
     staticAssets,
     admissionBarrier,
     runtimeComposition:()=>({kind:representation!==undefined&&!representation.isClosed?'composed':'unavailable'}),
-    operatorExtensions:[...(voices===undefined?[]:[voices.routes]),...(exchange===undefined?[]:[exchange.routes])],
+    operatorExtensions:[createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),...(exchange===undefined?[]:[exchange.routes])],
     runConfigurationDrafts: host.journal,
     readRunModelTimeBudget: (request) => host.journal.readRunModelTimeBudget(request),
     ...(oauthJobs === undefined ? {} : { piOAuthJobs: oauthJobs }),

@@ -8,6 +8,8 @@ import type { CreatePiSessionInput, PiSessionHandle } from '../adapters/pi.ts';
 import { CharacterIdSchema, RunIdSchema } from '../domain/values.ts';
 import type { WorldIdSource } from '../domain/world.ts';
 import { createActorTurnWorker } from './actor-turn-worker.ts';
+import { createNarratorPiWorker } from './narrator-pi-worker.ts';
+import { createNarrationReviewPiPort } from './narration-review-pi-worker.ts';
 import { createDirectorPiWorker } from './director-pi-worker.ts';
 import { createContinuistaPiWorker } from './continuista-pi-worker.ts';
 import { createCoordinatorPulseSupervisor } from './coordinator-pulse-supervisor.ts';
@@ -47,6 +49,7 @@ const TestTransportSchema = z.strictObject({
   actorSessionFactory: PiSessionFactorySchema,
   continuistaSessionFactory: PiSessionFactorySchema,
   directorSessionFactory: PiSessionFactorySchema,
+  narratorSessionFactory:PiSessionFactorySchema.optional(),narrationReviewSessionFactory:PiSessionFactorySchema.optional(),
 });
 
 /**
@@ -59,6 +62,7 @@ export interface ControlledPiTestTransport {
   actorSessionFactory: PiSessionFactory;
   continuistaSessionFactory: PiSessionFactory;
   directorSessionFactory: PiSessionFactory;
+  narratorSessionFactory?:PiSessionFactory;narrationReviewSessionFactory?:PiSessionFactory;
 }
 
 export type RepresentationRuntimeDiagnostic =
@@ -78,6 +82,7 @@ export async function createRepresentationRuntime(input: {
   testTransport?: ControlledPiTestTransport;
   onDiagnostic?: (diagnostic: RepresentationRuntimeDiagnostic) => void;
   onWorldCommitted?: (event: {runId: string; eventIds: string[]}) => void;
+  onNarrationPublished?: (event: {runId: string; publicationId: string}) => void;
 }) {
   const parsed = InputSchema.parse({ icmBinaryPath: input.icmBinaryPath });
   const testTransport = input.testTransport === undefined ? undefined : TestTransportSchema.parse(input.testTransport);
@@ -211,6 +216,9 @@ export async function createRepresentationRuntime(input: {
   const director=createDirectorPiWorker({journal:input.host.journal,runtime,ownerToken,
     ...(testTransport===undefined?{}:{sessionFactory:testTransport.directorSessionFactory})});
 
+  const narratorReady=testTransport===undefined||(testTransport.narratorSessionFactory!==undefined&&testTransport.narrationReviewSessionFactory!==undefined);
+  const reviewer=createNarrationReviewPiPort({journal:input.host.journal,runtime,ownerToken,...(testTransport?.narrationReviewSessionFactory===undefined?{}:{sessionFactory:testTransport.narrationReviewSessionFactory})});
+  const narrator=createNarratorPiWorker({journal:input.host.journal,runtime,ownerToken,reviewer,...(testTransport?.narratorSessionFactory===undefined?{}:{sessionFactory:testTransport.narratorSessionFactory})});
   const coordinator = createCoordinatorPulseSupervisor({
     journal: input.host.journal,
     ownerToken,
@@ -219,7 +227,16 @@ export async function createRepresentationRuntime(input: {
       await delivery.waitForRunIdle({runId});
       if(closed||signal.aborted)return false;
       const result=await director.run({runId,pulseId},{signal});
-      return result.kind==='accepted'||result.kind==='existing'||result.kind==='blocked';
+      if(result.kind==='blocked')return true;
+      if(result.kind!=='accepted'&&result.kind!=='existing')return false;
+      const configuration=ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({runId}));
+      if(configuration.narrationMode.kind==='disabled')return true;
+      if(!narratorReady)return false;
+      const narrated=await narrator.run({runId,pulseId},{signal});
+      if(narrated.kind==='published' && narrated.receipt.kind==='published') {
+        try { input.onNarrationPublished?.({runId,publicationId:narrated.receipt.publication.publicationId}); } catch { /* Presentation failure cannot revoke confirmed narration. */ }
+      }
+      return narrated.kind==='published'||narrated.kind==='existing'||narrated.kind==='abstained'||narrated.kind==='blocked';
     },
     async onPulseClosed({runId,pulseId}) {
       const step = input.host.journal.readActiveRunStepJob({runId});
@@ -410,7 +427,7 @@ export async function createRepresentationRuntime(input: {
     suspendAdmissions,
     close,
     get isClosed() { return closed; },
-    get roleReadiness() { return {actor:!closed,continuista:!closed,director:!closed,narrator:false}; },
+    get roleReadiness() { return {actor:!closed,continuista:!closed,director:!closed,narrator:!closed&&narratorReady}; },
   });
 }
 

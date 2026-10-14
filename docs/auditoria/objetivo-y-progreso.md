@@ -34,4 +34,4 @@ La ausencia de credenciales o de una decisión de puesta no impide construir flu
 
 ## Continuación Cloud
 
-El handoff conserva los ocho pasos de este objetivo. El checkout se actualizó a `main` en `b6246e1f2c6ecedc7f0dc6869bfeb336f47bfd4b`; no hubo push. La herramienta de Goal formal no está disponible en esta tarea: el objetivo sigue siendo una instrucción vigente, no una fase cerrada. Ver [evidencia y revisión en Cloud](continuacion-cloud.md).
+El handoff conserva los ocho pasos de este objetivo. El checkout se actualizó a `main` en `b6246e1f2c6ecedc7f0dc6869bfeb336f47bfd4b`. Tras autorización posterior del usuario se publicó el checkpoint `cd4873344677c853fb8e89a05594406c9aa90973`. No hay herramienta disponible para crear o consultar un Goal formal; la herramienta ahora visible sólo permite finalizar o bloquear uno existente. El objetivo de ocho pasos sigue vigente y no se ha declarado completo ni bloqueado. Ver [evidencia y revisión en Cloud](continuacion-cloud.md).

@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
+import { readPiSessionCheckpointPrefix, verifyPiSessionCheckpointChain } from './pi-session-integrity.ts';
 import { z } from 'zod';
 import { StoredPiProfileSchema, PersistedInferenceProfileSchema, LEGACY_INFERENCE_PROFILE, resolveStoredPiProfile, resolveReadyInferenceProfile } from '../domain/inference-profile.ts';
 import { validateContinuistaReviewContext, validateContinuistaContextReview } from '../domain/continuista-review.ts';
@@ -162,9 +163,11 @@ import {
 } from '../domain/values.ts';
 
 import { AdministrativeJobExecutionSchema, AdministrativeJobFailureSchema, AdministrativeJobViewSchema, AdministrativeJobLookupSchema,
-  DirectorJobBeginSchema, DirectorJobBeginResultSchema, NarratorJobBeginSchema, NarratorJobBeginResultSchema, NarratorJournalCandidateSchema, NarratorJobReceiptSchema, AdministrativeSessionSchema, AdministrativeCheckpointSchema, DirectorCandidateSchema, DirectorJobReceiptSchema } from '../domain/admin-role-jobs.ts';
+  NarrationReviewJobBeginSchema, NarrationReviewJobBeginResultSchema, NarrationReviewJournalCandidateSchema, NarrationReviewJobReceiptSchema, DirectorJobBeginSchema, DirectorJobBeginResultSchema, NarratorJobBeginSchema, NarratorJobBeginResultSchema, NarratorJournalCandidateSchema, NarratorJobReceiptSchema, AdministrativeSessionSchema, AdministrativeCheckpointSchema, DirectorCandidateSchema, DirectorJobReceiptSchema } from '../domain/admin-role-jobs.ts';
 import { NarratorContextSchema, NarrationReviewSchema } from '../domain/narration.ts';
 import { validateNarratorContext, projectNarratorPhysicalSnapshot, projectNarratorRecordedWorldFacts, narratorContextHash, validateNarrationProposal, validateNarrationReview, narrationValueHash } from '../application/narrator-context.ts';
+import { NarrationReviewContextSchema } from '../domain/narration-review.ts';
+import { validateNarrationReviewContext, narrationReviewContextHash, validateNarrationReviewDecision } from '../application/narration-review-context.ts';
 import { DirectorContextSchema, DirectorAnnotationSchema } from '../domain/admin-roles.ts';
 import { directorContextHash, validateDirectorContext, validateDirectorObservation } from '../application/director-context.ts';
 
@@ -443,6 +446,7 @@ function hashJson(value: unknown): { json: string; hash: z.infer<typeof HashSche
 
 /** Internal adapter. Its path is chosen by the host, never by actor input. */
 export function openJournal(input: { path: string }) {
+  const journalPrivateDataRoot=dirname(input.path);
   if (input.path === ':memory:') throw new Error('El journal requiere archivo durable');
   mkdirSync(dirname(input.path), { recursive: true, mode: 0o700 });
   const database = new DatabaseSync(input.path);
@@ -453,7 +457,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1485,6 +1489,37 @@ export function openJournal(input: { path: string }) {
         PRIMARY KEY(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
       INSERT INTO schema_version VALUES(27);COMMIT;`); }
     catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+
+  if (initialVersion === undefined || initialVersion < 28) {
+    try { database.exec(`PRAGMA foreign_keys=OFF;BEGIN IMMEDIATE;
+      CREATE TABLE administrative_jobs_v28(
+        job_id TEXT NOT NULL,generation INTEGER NOT NULL CHECK(generation>=0),run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        pulse_id TEXT NOT NULL REFERENCES coordinator_pulses(pulse_id) ON DELETE RESTRICT,role TEXT NOT NULL CHECK(role IN('director','narrator','configurator','narration-reviewer')),
+        lifecycle_revision INTEGER NOT NULL,world_revision INTEGER NOT NULL,through_world_seq INTEGER NOT NULL,
+        context_json TEXT NOT NULL,context_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('running','accepted','blocked')),
+        owner_token TEXT NOT NULL,claim_token TEXT NOT NULL,failure_code TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,
+        PRIMARY KEY(job_id,generation),UNIQUE(run_id,pulse_id,role,generation),CHECK((state='blocked')=(failure_code IS NOT NULL)));
+      INSERT INTO administrative_jobs_v28 SELECT * FROM administrative_jobs;
+      DROP TABLE administrative_jobs;
+      ALTER TABLE administrative_jobs_v28 RENAME TO administrative_jobs;
+      CREATE TABLE IF NOT EXISTS legacy_narration_publications(job_id TEXT NOT NULL,generation INTEGER NOT NULL,payload_hash TEXT NOT NULL,
+        PRIMARY KEY(job_id,generation),FOREIGN KEY(job_id,generation) REFERENCES narration_receipts(job_id,generation) ON DELETE RESTRICT);
+      INSERT OR IGNORE INTO legacy_narration_publications SELECT job_id,generation,payload_hash FROM narration_receipts WHERE json_extract(payload_json,'$.kind')='published';
+      CREATE TABLE IF NOT EXISTS administrative_checkpoint_integrity(checkpoint_hash TEXT PRIMARY KEY REFERENCES administrative_checkpoints(checkpoint_hash) ON DELETE RESTRICT,
+        prefix_hash TEXT NOT NULL,file_hash TEXT NOT NULL,byte_length INTEGER NOT NULL CHECK(byte_length>0));
+      CREATE TABLE IF NOT EXISTS narration_review_candidates(candidate_hash TEXT PRIMARY KEY,job_id TEXT NOT NULL,generation INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,UNIQUE(job_id,generation),
+        FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE TABLE IF NOT EXISTS narration_review_receipts(job_id TEXT NOT NULL,generation INTEGER NOT NULL,parent_job_id TEXT NOT NULL,parent_generation INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,accepted_at INTEGER NOT NULL,
+        PRIMARY KEY(job_id,generation),UNIQUE(parent_job_id,parent_generation),
+        FOREIGN KEY(job_id,generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT,
+        FOREIGN KEY(parent_job_id,parent_generation) REFERENCES administrative_jobs(job_id,generation) ON DELETE RESTRICT);
+      CREATE INDEX IF NOT EXISTS narration_publication_lookup ON narration_receipts(run_id,json_extract(payload_json,'$.publication.publicationId'));
+      CREATE INDEX IF NOT EXISTS narration_publication_page ON narration_receipts(run_id,accepted_at,json_extract(payload_json,'$.publication.publicationId'));
+      INSERT INTO schema_version VALUES(28);COMMIT;PRAGMA foreign_keys=ON;`); }
+    catch(error){try{database.exec('ROLLBACK;PRAGMA foreign_keys=ON;');}catch{/* Atomic migration. */}database.close();throw error;}
   }
 
   function transact<T>(operation: () => T): T {
@@ -2691,14 +2726,14 @@ export function openJournal(input: { path: string }) {
   }
 
   const AdministrativeJobDbSchema=z.strictObject({job_id:JobIdSchema,generation:counter,run_id:RunIdSchema,pulse_id:PulseIdSchema,
-    role:z.enum(['director','narrator','configurator']),lifecycle_revision:counter,world_revision:counter,through_world_seq:counter,
+    role:z.enum(['director','narrator','configurator','narration-reviewer']),lifecycle_revision:counter,world_revision:counter,through_world_seq:counter,
     context_json:z.string(),context_hash:HashSchema,state:z.enum(['running','accepted','blocked']),owner_token:z.string().uuid(),claim_token:z.string().uuid(),
     failure_code:AdministrativeJobFailureSchema.nullable(),created_at:counter,updated_at:counter});
   function administrativeJobRow(input:z.infer<typeof AdministrativeJobLookupSchema>) {
     const row=AdministrativeJobDbSchema.parse(database.prepare('SELECT * FROM administrative_jobs WHERE job_id=? AND generation=?').get(input.jobId,input.generation));
-    const parsedContext=z.discriminatedUnion('role',[DirectorContextSchema,NarratorContextSchema]).parse(parseStoredJson(row.context_json));
-    const context=parsedContext.role==='director'?validateDirectorContext(parsedContext):validateNarratorContext(parsedContext);
-    const contextHash=context.role==='director'?directorContextHash(context):narratorContextHash(context);
+    const parsedContext=z.discriminatedUnion('role',[DirectorContextSchema,NarratorContextSchema,NarrationReviewContextSchema]).parse(parseStoredJson(row.context_json));
+    const context=parsedContext.role==='director'?validateDirectorContext(parsedContext):parsedContext.role==='narrator'?validateNarratorContext(parsedContext):validateNarrationReviewContext(parsedContext);
+    const contextHash=context.role==='director'?directorContextHash(context):context.role==='narrator'?narratorContextHash(context):narrationReviewContextHash(context);
     if(row.role!==context.role||canonicalJson(context)!==row.context_json||contextHash!==row.context_hash
       ||context.scope.jobId!==row.job_id||context.scope.generation!==row.generation||context.scope.runId!==row.run_id||context.scope.pulseId!==row.pulse_id
       ||context.scope.lifecycleRevision!==row.lifecycle_revision||context.scope.worldRevision!==row.world_revision||context.scope.throughWorldSeq!==row.through_world_seq)
@@ -2710,7 +2745,7 @@ export function openJournal(input: { path: string }) {
       lifecycleRevision:row.lifecycle_revision,worldRevision:row.world_revision,throughWorldSeq:row.through_world_seq,contextHash:row.context_hash,
       state:row.state,failureCode:row.failure_code,createdAt:row.created_at,updatedAt:row.updated_at});
   }
-  function administrativeExecution(row:z.infer<typeof AdministrativeJobDbSchema>,context:z.infer<typeof DirectorContextSchema>|z.infer<typeof NarratorContextSchema>) {
+  function administrativeExecution(row:z.infer<typeof AdministrativeJobDbSchema>,context:z.infer<typeof DirectorContextSchema>|z.infer<typeof NarratorContextSchema>|z.infer<typeof NarrationReviewContextSchema>) {
     return AdministrativeJobExecutionSchema.parse({role:row.role,scope:context.scope,contextHash:row.context_hash,
       lease:{ownerToken:row.owner_token,claimToken:row.claim_token}});
   }
@@ -2739,6 +2774,11 @@ export function openJournal(input: { path: string }) {
     if(run.row.config_revision!==job.context.scope.configurationRevision||run.row.world_revision!==job.row.world_revision||run.row.last_seq!==job.row.through_world_seq
       ||run.snapshot.clock.instant!==job.context.scope.fictitiousAt)return {kind:'inactive',reason:'world-cut-stale'};
     if(canonicalJson(runInferenceProfile(run))!==canonicalJson(job.context.scope.profile))return {kind:'inactive',reason:'profile-changed'};
+    if(job.context.role==='narration-reviewer'){
+      const parent=administrativeJobRow(job.context.parent.scope);
+      if(parent.context.role!=='narrator'||parent.row.state!=='running'||parent.row.context_hash!==job.context.parent.contextHash
+        ||administrativeEligibility(administrativeExecution(parent.row,parent.context)).kind!=='active')return {kind:'inactive',reason:'parent-inactive'};
+    }
     const session=administrativeSession(execution.scope);
     if(session!==undefined&&(session.contextHash!==job.row.context_hash||session.role!==job.row.role||canonicalJson(session.profile)!==canonicalJson(job.context.scope.profile)))return {kind:'inactive',reason:'session-context-mismatch'};
     return {kind:'active'};
@@ -2771,6 +2811,16 @@ export function openJournal(input: { path: string }) {
     const checkpoint=AdministrativeCheckpointSchema.parse(parseStoredJson(value.payload_json));
     if(sha256(value.payload_json)!==value.checkpoint_hash||canonicalJson(checkpoint)!==value.payload_json||canonicalJson(checkpoint.execution)!==canonicalJson(execution)
       ||checkpoint.snapshot.sessionId!==session.sessionId||checkpoint.snapshot.sessionPath!==session.sessionPath)throw new Error('Input administrativo alterado o de otra sesión');
+    if(job.context.role==='narrator'||job.context.role==='narration-reviewer'){
+      const inputProof=z.strictObject({prefix_hash:HashSchema}).parse(database.prepare('SELECT prefix_hash FROM administrative_checkpoint_integrity WHERE checkpoint_hash=?').get(value.checkpoint_hash));
+      const terminalPayload=hashJson(terminal);const terminalProof=z.strictObject({prefix_hash:HashSchema}).parse(database.prepare('SELECT prefix_hash FROM administrative_checkpoint_integrity WHERE checkpoint_hash=?').get(terminalPayload.hash));
+      if(checkpoint.snapshot.candidateLeafId===null)throw new Error('Input administrativo sin leaf durable');
+      const integrity=verifyPiSessionCheckpointChain({privateDataRoot:journalPrivateDataRoot,runId:job.row.run_id,
+        role:job.context.role==='narrator'?'narrador':'continuista',sessionId:session.sessionId,sessionPath:session.sessionPath,
+        baseLeafId:session.baseLeafId,inputLeafId:checkpoint.snapshot.candidateLeafId,terminalLeafId:terminal.snapshot.candidateLeafId,
+        expectedInputPrefixHash:inputProof.prefix_hash,expectedTerminalPrefixHash:terminalProof.prefix_hash});
+      if(integrity.kind!=='verified')throw new Error('Cadena JSONL administrativa no acredita input/terminal registrados');
+    }
     return job;
   }
   function narrationCandidate(execution:z.infer<typeof AdministrativeJobExecutionSchema>,candidateHash:string) {
@@ -2780,10 +2830,49 @@ export function openJournal(input: { path: string }) {
       ||canonicalJson(candidate)!==row.payload_json||canonicalJson(candidate.execution)!==canonicalJson(execution))throw new Error('Candidato Narrador alterado o de otro claim');
     return candidate;
   }
+  function narrationReviewCandidate(execution:z.infer<typeof AdministrativeJobExecutionSchema>,candidateHash:string) {
+    const row=z.strictObject({candidate_hash:HashSchema,payload_json:z.string()}).parse(database.prepare('SELECT candidate_hash,payload_json FROM narration_review_candidates WHERE job_id=? AND generation=?').get(execution.scope.jobId,execution.scope.generation));
+    const candidate=NarrationReviewJournalCandidateSchema.parse(parseStoredJson(row.payload_json));
+    if(row.candidate_hash!==candidateHash||candidate.candidateHash!==candidateHash
+      ||hashJson({execution:candidate.execution,decision:candidate.decision}).hash!==candidateHash
+      ||canonicalJson(candidate)!==row.payload_json||canonicalJson(candidate.execution)!==canonicalJson(execution))throw new Error('Candidato review Narrador alterado/de otro claim');
+    return candidate;
+  }
+  function stampedNarrationReview(context:z.infer<typeof NarrationReviewContextSchema>,decision: z.infer<typeof NarrationReviewJournalCandidateSchema>['decision']) {
+    return NarrationReviewSchema.parse(decision.kind==='accepted'?{kind:'accepted',contextHash:context.parent.contextHash,
+      proposalHash:context.parent.proposalHash,reviewedTextHash:sha256(context.proposal.text),confirmedSourcesOnly:true,
+      privateReasoningExcluded:true,uncertaintyExplicit:true,reviewEvidenceId:context.scope.jobId}:{kind:'rejected',
+      contextHash:context.parent.contextHash,proposalHash:context.parent.proposalHash,safeCode:decision.safeCode});
+  }
+  function narrationReviewReceipt(lookup:z.infer<typeof AdministrativeJobLookupSchema>) {
+    const value=database.prepare('SELECT payload_json,payload_hash,accepted_at,parent_job_id,parent_generation FROM narration_review_receipts WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation);
+    if(value===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,accepted_at:counter,parent_job_id:JobIdSchema,parent_generation:counter}).parse(value);
+    const receipt=NarrationReviewJobReceiptSchema.parse(parseStoredJson(row.payload_json));const job=administrativeJobRow(lookup);
+    if(job.context.role!=='narration-reviewer'||job.row.state!=='accepted'||job.context.parent.scope.jobId!==row.parent_job_id
+      ||job.context.parent.scope.generation!==row.parent_generation||sha256(row.payload_json)!==row.payload_hash||canonicalJson(receipt)!==row.payload_json
+      ||canonicalJson(receipt.execution)!==canonicalJson(administrativeExecution(job.row,job.context))||receipt.contextHash!==job.row.context_hash||receipt.acceptedAt!==row.accepted_at)throw new Error('Receipt review Narrador alterado');
+    const candidateRow=z.strictObject({candidate_hash:HashSchema}).parse(database.prepare('SELECT candidate_hash FROM narration_review_candidates WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation));
+    const candidate=narrationReviewCandidate(receipt.execution,candidateRow.candidate_hash);
+    validateNarrationReviewDecision({context:job.context,decision:candidate.decision});
+    if(receipt.decisionHash!==narrationValueHash(candidate.decision)||canonicalJson(receipt.decision)!==canonicalJson(candidate.decision)
+      ||canonicalJson(receipt.review)!==canonicalJson(stampedNarrationReview(job.context,candidate.decision)))throw new Error('Receipt review Narrador no coincide con decisión exacta');
+    return receipt;
+  }
+  function narrationParentReview(parentExecution:z.infer<typeof AdministrativeJobExecutionSchema>,proposal:z.infer<typeof NarratorJournalCandidateSchema>['proposal']) {
+    const lookupValue=database.prepare('SELECT job_id,generation FROM narration_review_receipts WHERE parent_job_id=? AND parent_generation=?').get(parentExecution.scope.jobId,parentExecution.scope.generation);
+    if(lookupValue===undefined)throw new Error('Publicación Narrador sin receipt de review independiente');
+    const lookup=AdministrativeJobLookupSchema.parse({jobId:Reflect.get(lookupValue,'job_id'),generation:Reflect.get(lookupValue,'generation')});
+    const receipt=narrationReviewReceipt(lookup);const child=administrativeJobRow(lookup);
+    if(receipt===undefined||child.context.role!=='narration-reviewer'||canonicalJson(child.context.parent.scope)!==canonicalJson(parentExecution.scope)
+      ||child.context.parent.contextHash!==parentExecution.contextHash||child.context.parent.proposalHash!==narrationValueHash(proposal)
+      ||canonicalJson(child.context.proposal)!==canonicalJson(proposal)||receipt.review.kind!=='accepted')throw new Error('Review Narrador no autoriza candidato/parent exacto');
+    return receipt;
+  }
   function narrationReceipt(lookup:z.infer<typeof AdministrativeJobLookupSchema>) {
-    const value=database.prepare('SELECT payload_json,payload_hash,accepted_at FROM narration_receipts WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation);if(value===undefined)return undefined;
-    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,accepted_at:counter}).parse(value);const receipt=NarratorJobReceiptSchema.parse(parseStoredJson(row.payload_json));
-    const job=administrativeJobRow(lookup);if(job.context.role!=='narrator'||job.row.state!=='accepted')throw new Error('Receipt Narrador de otro contexto/estado');
+    const value=database.prepare('SELECT payload_json,payload_hash,accepted_at,run_id,pulse_id,through_world_seq FROM narration_receipts WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation);if(value===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,accepted_at:counter,run_id:RunIdSchema,pulse_id:PulseIdSchema,through_world_seq:counter}).parse(value);const receipt=NarratorJobReceiptSchema.parse(parseStoredJson(row.payload_json));
+    const job=administrativeJobRow(lookup);if(job.context.role!=='narrator'||job.row.state!=='accepted'||row.run_id!==job.row.run_id||row.pulse_id!==job.row.pulse_id||row.through_world_seq!==job.row.through_world_seq)throw new Error('Receipt Narrador de otro contexto/estado');
     const candidateRow=z.strictObject({candidate_hash:HashSchema}).parse(database.prepare('SELECT candidate_hash FROM narration_candidates WHERE job_id=? AND generation=?').get(lookup.jobId,lookup.generation));
     const candidate=narrationCandidate(administrativeExecution(job.row,job.context),candidateRow.candidate_hash);
     if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(receipt)!==row.payload_json)throw new Error('Receipt Narrador alterado');
@@ -2797,6 +2886,10 @@ export function openJournal(input: { path: string }) {
         ||publication.sourceWorldRevision!==candidate.proposal.sourceWorldRevision
         ||canonicalJson(publication.uncertainty)!==canonicalJson(candidate.proposal.uncertainty)
         ||publication.publishedAt!==row.accepted_at)throw new Error('Publicación Narrador no coincide con candidato exacto');
+      const legacy=database.prepare('SELECT payload_hash FROM legacy_narration_publications WHERE job_id=? AND generation=?').get(job.row.job_id,job.row.generation);
+      if(legacy===undefined){const independent=narrationParentReview(candidate.execution,candidate.proposal);
+        if(canonicalJson(independent.review)!==canonicalJson(publication.review))throw new Error('Publicación Narrador no liga review independiente exacto');}
+      else if(z.strictObject({payload_hash:HashSchema}).parse(legacy).payload_hash!==row.payload_hash)throw new Error('Publicación Narrador legacy alterada');
       validateNarrationReview({context:job.context,proposal:candidate.proposal,review:publication.review});
     }else if(candidate.proposal.kind!=='abstain'||canonicalJson(receipt.scope)!==canonicalJson(job.context.scope)||receipt.contextHash!==job.row.context_hash
       ||receipt.proposalHash!==narrationValueHash(candidate.proposal)||canonicalJson(receipt.proposal)!==canonicalJson(candidate.proposal)||receipt.acceptedAt!==row.accepted_at)throw new Error('Abstención Narrador no coincide con candidato');
@@ -4238,7 +4331,7 @@ export function openJournal(input: { path: string }) {
       SELECT * FROM k WHERE (? IS NULL OR page_key>?) ORDER BY page_key LIMIT ?`)
         .all(request.runId,request.runId,request.runId,request.runId,request.runId,request.runId,request.afterKey,request.afterKey,request.limit)
         .map((value) => {
-          const row = z.strictObject({kind:z.enum(['actor','continuista','pulse','step','preflight','director','narrator','configurator']),job_id:JobIdSchema,generation:counter,
+          const row = z.strictObject({kind:z.enum(['actor','continuista','pulse','step','preflight','director','narrator','configurator','narration-reviewer']),job_id:JobIdSchema,generation:counter,
             pulse_id:PulseIdSchema.nullable(),state:z.enum(['queued','running','accepted','blocked','completed','succeeded','failed','canceled','interrupted','cancel-requested']),
             actor_id:CharacterIdSchema.nullable(),created_at:counter,updated_at:counter,safe_code:z.string().nullable(),page_key:z.string()}).parse(value);
           const usage = z.strictObject({calls:counter,measured:counter,reserved:counter}).parse(database.prepare(`SELECT
@@ -5053,7 +5146,8 @@ export function openJournal(input: { path: string }) {
           if(last.last!==request.purpose.lastRequestSeq)throw new Error('Terminal Continuista no corresponde a la última request');
         }
         database.prepare('INSERT INTO continuista_checkpoints VALUES(?,?,?,?,?,?,?)').run(payload.hash,request.execution.jobId,request.execution.generation,request.purpose.kind,
-          request.purpose.kind==='request-input'?request.purpose.requestSeq:null,payload.json,Date.now());return 'stored';
+          request.purpose.kind==='request-input'?request.purpose.requestSeq:null,payload.json,Date.now());
+      return 'stored';
       });
     },
     stageContinuistaReview(input:unknown){
@@ -5168,6 +5262,38 @@ export function openJournal(input: { path: string }) {
       });
     },
     readNarrationReceipt(input:unknown){return narrationReceipt(AdministrativeJobLookupSchema.parse(input));},
+    readNarrationPublication(input:unknown){
+      const request=z.strictObject({runId:RunIdSchema,publicationId:z.string().uuid()}).parse(input);
+      const rows=database.prepare(`SELECT r.job_id,r.generation FROM narration_receipts r JOIN administrative_jobs j ON j.job_id=r.job_id AND j.generation=r.generation
+        WHERE r.run_id=? AND j.run_id=r.run_id AND json_extract(r.payload_json,'$.kind')='published'
+        AND json_extract(r.payload_json,'$.publication.publicationId')=? LIMIT 2`).all(request.runId,request.publicationId);
+      if(rows.length===0)return undefined;if(rows.length!==1)throw new Error('Publicación Narrador no es única');
+      const row=rows[0];if(row===undefined)throw new Error('Publicación Narrador perdida');const lookup=AdministrativeJobLookupSchema.parse({jobId:Reflect.get(row,'job_id'),generation:Reflect.get(row,'generation')});
+      const receipt=narrationReceipt(lookup);if(receipt?.kind!=='published'||receipt.publication.scope.runId!==request.runId||receipt.publication.publicationId!==request.publicationId)throw new Error('Publicación Narrador de otro scope');
+      return receipt.publication;
+    },
+    readNarrationPublicationPage(input:unknown){
+      const request=z.strictObject({runId:RunIdSchema,throughWorldSeq:WorldSeqSchema,throughWorldRevision:RevisionSchema,
+        afterPublishedAt:counter.optional(),afterPublicationId:z.string().uuid().optional(),limit:counter.min(1).max(100).default(50)}).superRefine((value,ctx)=>{
+          if((value.afterPublishedAt===undefined)!==(value.afterPublicationId===undefined))ctx.addIssue({code:'custom',message:'Cursor Narrador requiere timestamp e ID juntos'});
+        }).parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(value===undefined)return undefined;
+      const run=parseWorldRun(value);if(snapshotAndCommitAtCut(run,request.throughWorldRevision,request.throughWorldSeq)===undefined)throw new Error('Corte Narrador no confirmado');
+      const rows=database.prepare(`SELECT r.job_id,r.generation FROM narration_receipts r JOIN administrative_jobs j ON j.job_id=r.job_id AND j.generation=r.generation
+        WHERE r.run_id=? AND j.run_id=r.run_id AND r.through_world_seq<=? AND j.world_revision<=?
+          AND json_extract(r.payload_json,'$.kind')='published'
+          AND (? IS NULL OR r.accepted_at>? OR (r.accepted_at=? AND json_extract(r.payload_json,'$.publication.publicationId')>?))
+        ORDER BY r.accepted_at,json_extract(r.payload_json,'$.publication.publicationId') LIMIT ?`)
+        .all(request.runId,request.throughWorldSeq,request.throughWorldRevision,request.afterPublishedAt??null,request.afterPublishedAt??null,
+          request.afterPublishedAt??null,request.afterPublicationId??null,request.limit+1)
+        .map(row=>AdministrativeJobLookupSchema.parse({jobId:Reflect.get(row,'job_id'),generation:Reflect.get(row,'generation')}));
+      const items=rows.slice(0,request.limit).map(lookup=>{const receipt=narrationReceipt(lookup);
+        if(receipt?.kind!=='published'||receipt.publication.scope.runId!==request.runId||receipt.publication.scope.throughWorldSeq>request.throughWorldSeq
+          ||receipt.publication.scope.worldRevision>request.throughWorldRevision)throw new Error('Publicación fuera de corte');
+        const context=administrativeJobRow(lookup).context;if(context.role!=='narrator')throw new Error('Publicación de otro rol');
+        return {publication:receipt.publication,sceneId:context.snapshot.activeSceneId};});
+      return {items,hasMore:rows.length>request.limit};
+    },
     readNarrationPublications(input:unknown){const request=z.strictObject({runId:RunIdSchema,throughWorldSeq:WorldSeqSchema}).parse(input);return narrationPublicationsAt(request.runId,request.throughWorldSeq);},
     stageNarration(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,proposal:NarratorJournalCandidateSchema.shape.proposal}).parse(input);return transact(()=>{
       const job=claimedAdministrativeJob(request.execution);if(job.context.role!=='narrator'||administrativeEligibility(request.execution).kind!=='active')throw new Error('Narrador inactivo/de otro rol');
@@ -5182,7 +5308,9 @@ export function openJournal(input: { path: string }) {
         if(existing.kind!=='published'||candidate.proposal.kind!=='narrate'||canonicalJson(existing.publication.review)!==canonicalJson(request.review))throw new Error('Replay Narrador de otro resultado/review');return existing;}
       const job=assertAdministrativeTerminal(request.execution);if(job.context.role!=='narrator')throw new Error('Publicación de otro rol');
       const candidate=narrationCandidate(request.execution,request.candidateHash);if(candidate.proposal.kind!=='narrate')throw new Error('Abstención no es publicación');
-      const review=validateNarrationReview({context:job.context,proposal:candidate.proposal,review:request.review});if(review.kind!=='accepted')throw new Error('Publicación Narrador sin review aceptado');
+      const childReceipt=narrationParentReview(request.execution,candidate.proposal);
+      if(canonicalJson(childReceipt.review)!==canonicalJson(request.review))throw new Error('Review Narrador libre no coincide con receipt durable');
+      const review=validateNarrationReview({context:job.context,proposal:candidate.proposal,review:childReceipt.review});if(review.kind!=='accepted')throw new Error('Publicación Narrador sin review aceptado');
       const now=Date.now();const proposal=candidate.proposal;
       const receipt=NarratorJobReceiptSchema.parse({kind:'published',publication:{kind:'narration-publication',publicationId:randomUUID(),scope:job.context.scope,
         contextHash:job.row.context_hash,proposalHash:narrationValueHash(proposal),text:proposal.text,textHash:sha256(proposal.text),sourceEventIds:proposal.sourceEventIds,sourceRecordedFactIds:proposal.sourceRecordedFactIds,
@@ -5199,6 +5327,50 @@ export function openJournal(input: { path: string }) {
       const payload=hashJson(receipt);database.prepare('INSERT INTO narration_receipts VALUES(?,?,?,?,?,?,?,?)').run(job.row.job_id,job.row.generation,job.row.run_id,job.row.pulse_id,job.row.through_world_seq,payload.json,payload.hash,now);
       const changed=database.prepare("UPDATE administrative_jobs SET state='accepted',updated_at=? WHERE job_id=? AND generation=? AND state='running' AND owner_token=? AND claim_token=?")
         .run(now,job.row.job_id,job.row.generation,request.execution.lease.ownerToken,request.execution.lease.claimToken);if(changed.changes!==1)throw new Error('CAS abstención Narrador cambió');return receipt;
+    });},
+
+    beginNarrationReviewJob(input:unknown){const request=NarrationReviewJobBeginSchema.parse(input);return transact(()=>{
+      if(request.parentExecution.role!=='narrator'||administrativeEligibility(request.parentExecution).kind!=='active')return NarrationReviewJobBeginResultSchema.parse({kind:'inactive'});
+      const parent=assertAdministrativeTerminal(request.parentExecution);if(parent.context.role!=='narrator')throw new Error('Review de parent no Narrador');
+      const candidateRow=z.strictObject({candidate_hash:HashSchema}).parse(database.prepare('SELECT candidate_hash FROM narration_candidates WHERE job_id=? AND generation=?').get(parent.row.job_id,parent.row.generation));
+      const candidate=narrationCandidate(request.parentExecution,candidateRow.candidate_hash);
+      if(candidate.proposal.kind!=='narrate'||canonicalJson(candidate.proposal)!==canonicalJson(request.proposal))throw new Error('Review exige propuesta Narrador durable exacta');
+      const prior=database.prepare("SELECT job_id,generation FROM administrative_jobs WHERE run_id=? AND pulse_id=? AND role='narration-reviewer' ORDER BY generation DESC LIMIT 1").get(parent.row.run_id,parent.row.pulse_id);
+      if(prior!==undefined){const lookup=AdministrativeJobLookupSchema.parse({jobId:Reflect.get(prior,'job_id'),generation:Reflect.get(prior,'generation')});
+        const {row,context}=administrativeJobRow(lookup);const job=administrativeJobView(row);
+        if(context.role!=='narration-reviewer'||canonicalJson(context.parent.scope)!==canonicalJson(parent.context.scope)
+          ||context.parent.contextHash!==parent.row.context_hash||context.parent.proposalHash!==narrationValueHash(request.proposal))throw new Error('Job review de otro parent/candidato');
+        if(row.state==='blocked')return NarrationReviewJobBeginResultSchema.parse({kind:'blocked',job});
+        if(row.state==='running'&&(row.owner_token!==request.ownerToken||row.claim_token!==request.claimToken))return NarrationReviewJobBeginResultSchema.parse({kind:'busy',job});
+        return NarrationReviewJobBeginResultSchema.parse({kind:'existing',job,execution:administrativeExecution(row,context),context});}
+      const jobId=JobIdSchema.parse(randomUUID());const generation=parent.context.scope.generation;
+      const context=validateNarrationReviewContext({kind:'narration-review-context',schemaVersion:1,role:'narration-reviewer',
+        scope:{...parent.context.scope,jobId,generation},parent:{scope:parent.context.scope,contextHash:parent.row.context_hash,proposalHash:narrationValueHash(candidate.proposal)},
+        narratorContext:parent.context,proposal:candidate.proposal});
+      const payload=hashJson(context);const now=Date.now();database.prepare(`INSERT INTO administrative_jobs VALUES(?,?,?,?,'narration-reviewer',?,?,?,?,?,'running',?,?,NULL,?,?)`)
+        .run(jobId,generation,parent.row.run_id,parent.row.pulse_id,parent.row.lifecycle_revision,parent.row.world_revision,parent.row.through_world_seq,
+          payload.json,payload.hash,request.ownerToken,request.claimToken,now,now);
+      const {row}=administrativeJobRow({jobId,generation});return NarrationReviewJobBeginResultSchema.parse({kind:'created',job:administrativeJobView(row),execution:administrativeExecution(row,context),context});
+    });},
+    readNarrationReviewReceipt(input:unknown){return narrationReviewReceipt(AdministrativeJobLookupSchema.parse(input));},
+    stageNarrationReview(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,decision:NarrationReviewJournalCandidateSchema.shape.decision}).parse(input);return transact(()=>{
+      const job=claimedAdministrativeJob(request.execution);if(job.context.role!=='narration-reviewer'||administrativeEligibility(request.execution).kind!=='active')throw new Error('Review Narrador inactivo/de otro rol');
+      const decision=validateNarrationReviewDecision({context:job.context,decision:request.decision});const payload=hashJson({execution:request.execution,decision});
+      const candidate=NarrationReviewJournalCandidateSchema.parse({candidateHash:payload.hash,execution:request.execution,decision});
+      const prior=database.prepare('SELECT candidate_hash FROM narration_review_candidates WHERE job_id=? AND generation=?').get(job.row.job_id,job.row.generation);
+      if(prior!==undefined)return narrationReviewCandidate(request.execution,payload.hash);
+      database.prepare('INSERT INTO narration_review_candidates VALUES(?,?,?,?)').run(payload.hash,job.row.job_id,job.row.generation,canonicalJson(candidate));return candidate;
+    });},
+    acceptNarrationReview(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,candidateHash:HashSchema}).parse(input);return transact(()=>{
+      const existing=narrationReviewReceipt(request.execution.scope);if(existing!==undefined){narrationReviewCandidate(request.execution,request.candidateHash);return existing;}
+      const job=assertAdministrativeTerminal(request.execution);if(job.context.role!=='narration-reviewer')throw new Error('Review aceptación de otro rol');
+      const candidate=narrationReviewCandidate(request.execution,request.candidateHash);const decision=validateNarrationReviewDecision({context:job.context,decision:candidate.decision});
+      const now=Date.now();const receipt=NarrationReviewJobReceiptSchema.parse({execution:request.execution,contextHash:job.row.context_hash,
+        decisionHash:narrationValueHash(decision),decision,review:stampedNarrationReview(job.context,decision),acceptedAt:now});
+      const payload=hashJson(receipt);database.prepare('INSERT INTO narration_review_receipts VALUES(?,?,?,?,?,?,?)')
+        .run(job.row.job_id,job.row.generation,job.context.parent.scope.jobId,job.context.parent.scope.generation,payload.json,payload.hash,now);
+      const changed=database.prepare("UPDATE administrative_jobs SET state='accepted',updated_at=? WHERE job_id=? AND generation=? AND state='running' AND owner_token=? AND claim_token=?")
+        .run(now,job.row.job_id,job.row.generation,request.execution.lease.ownerToken,request.execution.lease.claimToken);if(changed.changes!==1)throw new Error('CAS review Narrador cambió');return receipt;
     });},
 
     readAdministrativeJob(input:unknown){return administrativeJobView(administrativeJobRow(AdministrativeJobLookupSchema.parse(input)).row);},
@@ -5269,7 +5441,15 @@ export function openJournal(input: { path: string }) {
         if(last.last!==request.purpose.lastRequestSeq)throw new Error('Terminal administrativo no liga última request');
       }
       database.prepare('INSERT INTO administrative_checkpoints VALUES(?,?,?,?,?,?,?)').run(payload.hash,request.execution.scope.jobId,request.execution.scope.generation,request.purpose.kind,
-        request.purpose.kind==='request-input'?request.purpose.requestSeq:null,payload.json,Date.now());return 'stored';
+        request.purpose.kind==='request-input'?request.purpose.requestSeq:null,payload.json,Date.now());
+      if((request.execution.role==='narrator'||request.execution.role==='narration-reviewer')&&request.snapshot.candidateLeafId!==null&&request.purpose.kind!=='job-base'){
+        const prefix=readPiSessionCheckpointPrefix({privateDataRoot:journalPrivateDataRoot,runId:request.execution.scope.runId,
+          role:request.execution.role==='narrator'?'narrador':'continuista',sessionId:session.sessionId,sessionPath:session.sessionPath,
+          leafId:request.snapshot.candidateLeafId});
+        if(prefix.kind!=='verified')throw new Error('Checkpoint JSONL administrativo no verificable');
+        database.prepare('INSERT INTO administrative_checkpoint_integrity VALUES(?,?,?,?)').run(payload.hash,prefix.prefixHash,prefix.fileHash,prefix.byteLength);
+      }
+      return 'stored';
     });},
     stageDirectorObservation(input:unknown){const request=z.strictObject({execution:AdministrativeJobExecutionSchema,observation:DirectorCandidateSchema.shape.observation}).parse(input);return transact(()=>{
       const job=claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active')throw new Error('Director inactivo');

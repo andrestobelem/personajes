@@ -26,7 +26,7 @@ export function controlledNarratorSessionFactory(input: {
   physicalSessions?: boolean;
   stats?: { requests: number; disposed: number };
   beforeTerminal?: () => void;
-  omitNarration?: boolean;
+  omitNarration?: boolean; textOverride?:string;
   citeRecordedSubjectivity?: boolean;
 }) {
   return async (sessionInput: CreatePiSessionInput) => {
@@ -124,9 +124,9 @@ export function controlledNarratorSessionFactory(input: {
             const event = context.confirmedEvents.at(-1);
             const observation = {
               kind: "narrate" as const,
-              text: input.citeRecordedSubjectivity
+              text: input.textOverride??(input.citeRecordedSubjectivity
                 ? "El personaje deseaba comprender la situación de prueba."
-                : "Narración sintética de un estado confirmado.",
+                : "Narración sintética de un estado confirmado."),
               sourceRecordedFactIds: input.citeRecordedSubjectivity
                 ? context.recordedWorldFacts
                     .filter((fact) => fact.kind === "subjective-state-recorded")

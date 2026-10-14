@@ -2,6 +2,14 @@
 
 El objetivo completo sigue activo. PRD y S01–S07 tienen cierre documental; la implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 33: Narrador con revisión independiente y canal público
+
+Journal v28 exige un recibo de revisión independiente ligado a propuesta/contexto/corte exactos y a pruebas JSONL congeladas. Narrador y revisor tienen sesión, generación y cuota propias dentro del presupuesto agregado del pulso. Las pruebas distinguen emisión de verdad física y subjetividad registrada; cancelación, manipulación y ausencia de decisión bloquean publicar. La migración conserva sólo publicaciones históricas verificadas.
+
+La composición productiva conecta Narrador después del Director. API autenticada y panel de voz en off muestran publicaciones por corte confirmado sin contexto ni revisión privados. El puente de voz usa texto/configuración/fecha originales y sólo notifica nuevas publicaciones; leer o recuperar no genera audio. **546 pruebas aprobadas, cero fallidas y omitidas**, tipos aprobados. Build aprobado: 426 módulos, bundle principal 765,14 kB y voces 47,67 kB, con aviso de tamaño pendiente. Launcher v28 respondió health y assets actuales. Chromium verificó seis aspectos de voz en off, aislamiento, error/recuperación e historia sin reinferencia; SDK controlado, cero proveedores reales. [Evidencia y límites](continuacion-cloud.md).
+
+No hubo login, inferencia ni síntesis de proveedor real. El objetivo integral y los 77 criterios continúan abiertos; restore, iniciativa/rutinas y Configurador siguen parciales.
+
 ## Corte 32: integración local verificada y servidor operativo
 
 Journal v27 compone Director con sesión/contexto/ledger propio y presupuesto común. Voces e intercambio usan datos privados, cuotas separadas, integridad y rutas de operador; Chromium verificó los flujos positivos con REST fixture, sin proveedores reales. Inspector opt-in distingue secuencia/revisión/commit y no importa reconocimiento actual en cortes históricos. SSE invalida lecturas públicas con fallback; backup detiene admisión y drena escritores reales. Restore y revisor productivo del Narrador siguen pendientes.

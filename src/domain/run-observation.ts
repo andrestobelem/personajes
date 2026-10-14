@@ -50,7 +50,7 @@ const pageBase = {runId:RunIdSchema,fromWorldSeq:WorldSeqSchema,toWorldSeq:World
   nextCursor:z.string().min(1).max(2048).nullable()};
 export const ConfirmedEventPageSchema = z.strictObject({...pageBase,kind:z.literal('confirmed-event-page'),items:z.array(ConfirmedEventViewSchema).max(100)});
 export const ConversationPageSchema = z.strictObject({...pageBase,kind:z.literal('conversation-page'),items:z.array(ConversationViewSchema).max(100)});
-export const TechnicalJobViewSchema = z.strictObject({jobId:JobIdSchema,runId:RunIdSchema,kind:z.enum(['actor','continuista','pulse','step','preflight','director','narrator','configurator']),
+export const TechnicalJobViewSchema = z.strictObject({jobId:JobIdSchema,runId:RunIdSchema,kind:z.enum(['actor','continuista','pulse','step','preflight','director','narrator','configurator','narration-reviewer']),
   generation:RevisionSchema,pulseId:PulseIdSchema.nullable(),state:z.enum(['queued','running','accepted','blocked','completed','succeeded','failed','canceled','interrupted','cancel-requested']),
   actor:PublicCharacterReferenceSchema.nullable(),createdAt:z.number().int().nonnegative(),updatedAt:z.number().int().nonnegative(),
   elapsedMs:z.number().int().nonnegative(),modelCalls:z.number().int().nonnegative(),modelWallTimeMs:z.number().int().nonnegative(),

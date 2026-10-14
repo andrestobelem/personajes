@@ -92,6 +92,8 @@ Director recibe eventos confirmados y contexto de línea autorizado. Propone int
 
 Narrador opcional usa perfil requerido y contexto autorizado de hechos/estados, salida tipada con refs. Revisión exacta/publicación idempotente, canal público separado. No crea eventos/recuerdos del reparto ni expone thinking. Si falla no deshace un hecho confirmado ni impide verlo.
 
+El revisor de narración tiene job, generación, sesión y contexto propios, ligados a hashes exactos del contexto y propuesta del Narrador. Su perfil es Continuista y comparte la cuota agregada del pulso. Cada comprobación identifica offsets del fragmento exacto y fuentes autorizadas; cubre todo texto no vacío. Una palabra registrada prueba que fue pronunciada, no su verdad física. La subjetividad registrada permanece etiquetada. El journal exige recibo durable independiente y verifica los prefijos JSONL de entrada y terminal antes de publicar. Cancelación, época obsoleta, texto modificado o ausencia de decisión bloquean la publicación; no modifican el Escenario.
+
 Configurador usa fuentes globales sólo para preparar/versionar contexto; sus propuestas no se llaman canon hallado. El observador es humano; proyecciones/resolución/coordinación mecánica no necesitan modelo. Todo componente que efectivamente infiera pasa por factory de perfil fijo.
 
 ## Pruebas

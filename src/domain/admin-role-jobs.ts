@@ -41,3 +41,16 @@ export const NarratorJobReceiptSchema=z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('published'),publication:NarrationPublicationSchema}),
   z.strictObject({kind:z.literal('abstained'),scope:AdministrativeRunScopeSchema,contextHash:HashSchema,proposalHash:HashSchema,proposal:NarrationProposalSchema.options[1],acceptedAt:RevisionSchema}),
 ]);
+
+import { NarrationReviewContextSchema, NarrationReviewDecisionSchema } from './narration-review.ts';
+import { NarrationReviewSchema } from './narration.ts';
+export const NarrationReviewJobBeginSchema=z.strictObject({parentExecution:AdministrativeJobExecutionSchema,
+  proposal:NarrationProposalSchema.options[0],ownerToken:z.string().uuid(),claimToken:z.string().uuid()});
+export const NarrationReviewJobBeginResultSchema=z.discriminatedUnion('kind',[
+  z.strictObject({kind:z.literal('inactive')}),z.strictObject({kind:z.literal('busy'),job:AdministrativeJobViewSchema}),
+  z.strictObject({kind:z.literal('blocked'),job:AdministrativeJobViewSchema}),
+  z.strictObject({kind:z.enum(['created','existing']),job:AdministrativeJobViewSchema,execution:AdministrativeJobExecutionSchema,context:NarrationReviewContextSchema}),
+]);
+export const NarrationReviewJournalCandidateSchema=z.strictObject({candidateHash:HashSchema,execution:AdministrativeJobExecutionSchema,decision:NarrationReviewDecisionSchema});
+export const NarrationReviewJobReceiptSchema=z.strictObject({execution:AdministrativeJobExecutionSchema,contextHash:HashSchema,
+  decisionHash:HashSchema,decision:NarrationReviewDecisionSchema,review:NarrationReviewSchema,acceptedAt:RevisionSchema});

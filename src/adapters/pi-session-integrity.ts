@@ -1,4 +1,5 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { constants,openSync,closeSync,fstatSync,readFileSync,realpathSync,statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { CURRENT_SESSION_VERSION } from '@earendil-works/pi-coding-agent';
 import { z } from 'zod';
@@ -44,6 +45,70 @@ export type PiSessionIntegrityResult =
   | { kind: 'verified'; sessionPath: string; sessionId: string; terminalLeafId: string }
   | { kind: 'invalid'; code: 'session-path' | 'session-unavailable' | 'session-encoding' | 'session-jsonl' | 'session-header' | 'session-chain' };
 
+const CheckpointChainSchema=RequestSchema.omit({actorId:true}).extend({
+  role:z.enum(['director','narrator','narrador','continuista','configurator','configurador']),
+  expectedInputPrefixHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  expectedTerminalPrefixHash:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+});
+export type PiCheckpointChainResult=
+  | {kind:'verified';sessionPath:string;sessionId:string;terminalLeafId:string;inputPrefixHash:string;terminalPrefixHash:string;fileHash:string;byteLength:number}
+  | {kind:'invalid';code:Exclude<PiSessionIntegrityResult,{kind:'verified'}>['code']|'session-size'|'session-content-hash'};
+const PrefixRequestSchema=CheckpointChainSchema.omit({baseLeafId:true,inputLeafId:true,terminalLeafId:true,expectedInputPrefixHash:true,expectedTerminalPrefixHash:true}).extend({leafId:z.string().min(1).max(200)});
+export type PiCheckpointPrefixResult=
+  | {kind:'verified';sessionPath:string;sessionId:string;leafId:string;prefixHash:string;fileHash:string;byteLength:number}
+  | Exclude<PiCheckpointChainResult,{kind:'verified'}>;
+
+/** Freeze a persisted checkpoint before dispatch. The registered physical role
+ * and session are checked independently from model-selected tool arguments. */
+export function readPiSessionCheckpointPrefix(rawInput:unknown):PiCheckpointPrefixResult {
+  const input=PrefixRequestSchema.parse(rawInput);
+  if(!isAbsolute(input.privateDataRoot)||!isAbsolute(input.sessionPath))return {kind:'invalid',code:'session-path'};
+  let sessionPath:string;let expectedCwd:string;let bytes:Buffer;let fd:number|undefined;
+  try {
+    const root=realpathSync(input.privateDataRoot);const identityDir=join(root,'runs',input.runId,'roles',input.role);const sessionsDir=join(identityDir,'sessions');expectedCwd=join(identityDir,'cwd');
+    if(realpathSync(sessionsDir)!==resolve(sessionsDir)||realpathSync(expectedCwd)!==resolve(expectedCwd))return {kind:'invalid',code:'session-path'};
+    sessionPath=realpathSync(input.sessionPath);if(sessionPath!==resolve(input.sessionPath)||!isInside(sessionsDir,sessionPath))return {kind:'invalid',code:'session-path'};
+    fd=openSync(sessionPath,constants.O_RDONLY|constants.O_NOFOLLOW);const stat=fstatSync(fd);if(!stat.isFile())return {kind:'invalid',code:'session-path'};
+    if(stat.size===0||stat.size>32*1024*1024)return {kind:'invalid',code:'session-size'};
+    bytes=readFileSync(fd);if(bytes.byteLength!==stat.size)return {kind:'invalid',code:'session-content-hash'};
+  } catch {return {kind:'invalid',code:'session-unavailable'};}finally{if(fd!==undefined)closeSync(fd);}
+  let text:string;try{text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}catch{return {kind:'invalid',code:'session-encoding'};}
+  const lines=text.split('\n');if(!text.endsWith('\n')||lines.length>100002||lines.some(line=>Buffer.byteLength(line,'utf8')>2*1024*1024))return {kind:'invalid',code:'session-size'};
+  const proof=verifyCheckpointBytes({sessionId:input.sessionId,baseLeafId:null,inputLeafId:input.leafId,terminalLeafId:input.leafId},expectedCwd,sessionPath,bytes,input.leafId);
+  if(proof.kind!=='verified')return proof;
+  const index=lines.findIndex((line,index)=>index>0&&line!==''&&(JSON.parse(line) as {id?:unknown}).id===input.leafId);if(index<1)return {kind:'invalid',code:'session-chain'};
+  const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
+  return {kind:'verified',sessionPath,sessionId:input.sessionId,leafId:input.leafId,prefixHash:hash(lines.slice(0,index+1).join('\n')+'\n'),fileHash:hash(bytes),byteLength:bytes.byteLength};
+}
+
+/** Bounded read-only administrative JSONL proof. Prefix hashes bind bytes frozen
+ * by the host; appending valid later records does not invalidate a prior terminal.
+ * Hashes computed for the first time prove structure, not original authorship. */
+export function verifyPiSessionCheckpointChain(rawInput:unknown):PiCheckpointChainResult {
+  const input=CheckpointChainSchema.parse(rawInput);
+  if(!isAbsolute(input.privateDataRoot)||!isAbsolute(input.sessionPath))return {kind:'invalid',code:'session-path'};
+  let sessionPath:string;let expectedCwd:string;let bytes:Buffer;let fd:number|undefined;
+  try {
+    const root=realpathSync(input.privateDataRoot);const identityDir=join(root,'runs',input.runId,'roles',input.role);
+    const sessionsDir=join(identityDir,'sessions');expectedCwd=join(identityDir,'cwd');
+    if(realpathSync(sessionsDir)!==resolve(sessionsDir)||realpathSync(expectedCwd)!==resolve(expectedCwd))return {kind:'invalid',code:'session-path'};
+    sessionPath=realpathSync(input.sessionPath);
+    if(sessionPath!==resolve(input.sessionPath)||!isInside(sessionsDir,sessionPath))return {kind:'invalid',code:'session-path'};
+    fd=openSync(sessionPath,constants.O_RDONLY|constants.O_NOFOLLOW);const stat=fstatSync(fd);
+    if(!stat.isFile())return {kind:'invalid',code:'session-path'};
+    if(stat.size===0||stat.size>32*1024*1024)return {kind:'invalid',code:'session-size'};
+    bytes=readFileSync(fd);if(bytes.byteLength!==stat.size)return {kind:'invalid',code:'session-content-hash'};
+  } catch {return {kind:'invalid',code:'session-unavailable'};} finally {if(fd!==undefined)closeSync(fd);}
+  let text:string;try{text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}catch{return {kind:'invalid',code:'session-encoding'};}
+  const lines=text.split('\n');if(!text.endsWith('\n')||lines.length>100002||lines.some(line=>Buffer.byteLength(line,'utf8')>2*1024*1024))return {kind:'invalid',code:'session-size'};
+  const proof=verifyCheckpointBytes(input,expectedCwd,sessionPath,bytes);if(proof.kind!=='verified')return proof;
+  const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
+  function prefixHash(leaf:string){const index=lines.findIndex((line,index)=>index>0&&line!==''&&(JSON.parse(line) as {id?:unknown}).id===leaf);if(index<1)throw new Error('Verified leaf disappeared');return hash(lines.slice(0,index+1).join('\n')+'\n');}
+  const inputPrefixHash=prefixHash(input.inputLeafId);const terminalPrefixHash=prefixHash(input.terminalLeafId);
+  if((input.expectedInputPrefixHash!==undefined&&input.expectedInputPrefixHash!==inputPrefixHash)||(input.expectedTerminalPrefixHash!==undefined&&input.expectedTerminalPrefixHash!==terminalPrefixHash))return {kind:'invalid',code:'session-content-hash'};
+  return {...proof,inputPrefixHash,terminalPrefixHash,fileHash:hash(bytes),byteLength:bytes.byteLength};
+}
+
 /**
  * Read-only structural proof before recovering a turn. Never calls SessionManager.open,
  * OAuth or a model. Existing IDs/ancestry are checked; content tampering with valid IDs
@@ -65,6 +130,10 @@ export function verifyPiActorSessionIntegrity(rawInput: unknown): PiSessionInteg
     if (!isInside(sessionsDir, sessionPath) || !statSync(sessionPath).isFile()) return { kind: 'invalid', code: 'session-path' };
     bytes = readFileSync(sessionPath);
   } catch { return { kind: 'invalid', code: 'session-unavailable' }; }
+  return verifyCheckpointBytes(input,expectedCwd,sessionPath,bytes);
+}
+
+function verifyCheckpointBytes(input:{sessionId:string;baseLeafId:string|null;inputLeafId:string;terminalLeafId:string},expectedCwd:string,sessionPath:string,bytes:Buffer,prefixOnlyLeaf?:string):PiSessionIntegrityResult {
   if (bytes.length === 0) return { kind: 'invalid', code: 'session-jsonl' };
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
@@ -98,6 +167,7 @@ export function verifyPiActorSessionIntegrity(rawInput: unknown): PiSessionInteg
     }
     for (const id of seen) verifiedEntries.add(id);
   }
+  if(prefixOnlyLeaf!==undefined)return byId.has(prefixOnlyLeaf)?{kind:'verified',sessionPath,sessionId:input.sessionId,terminalLeafId:prefixOnlyLeaf}:{kind:'invalid',code:'session-chain'};
   const inputEntry = byId.get(input.inputLeafId);
   const terminalEntry = byId.get(input.terminalLeafId);
   if (inputEntry === undefined || terminalEntry === undefined || inputEntry.type !== 'message'

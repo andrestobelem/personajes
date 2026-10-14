@@ -56,3 +56,22 @@ Se verificaron en Chromium 21 comprobaciones de controles/Escenario/intervenció
 El servidor anterior dejó ownership asociado a un proceso zombie de Linux. La recuperación explícita verifica dos lecturas concordantes de PID/estado/startTicks dentro de los gates y conserva nonce/inode/contenido; no mata ni libera procesos vivos o ambiguos. Diez pruebas de ownership pasaron, incluida una con zombie real. Se recuperó exclusivamente ese registro y se conservaron los datos. El launcher arrancó, respondió health/HTML/bundle con HTTP 200 y cerró/reabrió limpiamente para servir el build actual. Health indica composición local `degraded`, sin acreditar proveedores.
 
 La ampliación v28 del reviewer del Narrador quedó aislada y preservada en `/workspace/personajes-cloud/drafts`, fuera del checkout ejecutable. El journal sigue en v27. Planner de iniciativa/rutinas y Configurador son componentes parciales; no se presentan como ejecución terminada. El objetivo integral y los 77 criterios permanecen abiertos, con alcance vigente en [PENDIENTES](../PENDIENTES.md).
+
+
+## Continuación autorizada y push
+
+El usuario autorizó push el 14 de octubre de 2026. Se verificó que `main` y `origin/main` no divergían y se publicó el checkpoint de 522 pruebas como `cd4873344677c853fb8e89a05594406c9aa90973`. No se creó rama ni worktree. La configuración guardada pasó a referenciar ese commit; su guardado conserva el estado de draft pendiente de publicación, no acredita una configuración aplicada.
+
+## Narrador y revisor independiente: corte 33
+
+Journal v28 conserva un job hijo de revisión de narración separado del Narrador, con sesión, generación, contexto, checkpoints y reservas propios. La publicación exige recibo exacto y pruebas de integridad de los prefijos JSONL de entrada y terminal. Se verifican propuesta/contexto/corte/perfil/época; una decisión libre sin recibo no publica. La migración conserva publicaciones históricas v27 por hashes congelados, sin habilitar aprobaciones nuevas por esa vía.
+
+Las comprobaciones del revisor identifican offsets exactos y cubren todo texto no vacío. Palabras registradas sólo acreditan una emisión; no se tratan como verdad física. Subjetividad registrada permanece etiquetada. El Narrador no crea eventos, recuerdos ni percepciones del reparto. Producción compone sesiones independientes de Narrador y Continuista de narración después del Director y dentro del presupuesto agregado del pulso.
+
+La API autenticada de publicaciones públicas y el panel de voz en off usan cortes confirmados y paginación acotada. DTO excluye hashes, sesiones, propuestas, revisión y hechos privados. Cambiar de corrida/corte descarta respuestas tardías. Sólo una publicación recién confirmada notifica al servicio de voz con texto/hash/fecha/configuración originales; una lectura, replay o recuperación no pide TTS. Audio apagado o cuota cero conserva texto sin solicitudes a proveedor.
+
+El launcher actual migró a v28 y respondió health/HTML/assets del último build. Health permanece `degraded`: HTTP y catálogo `ok`, runtime `degraded`; no acredita acceso al proveedor. Las pruebas usan SDK Pi, SQLite e ICM reales con transporte controlado. No se hizo login ni inferencia o síntesis real. La aceptación de DIR-03 y de los restantes requisitos sigue pendiente a nivel integral.
+
+Gate final del corte 33: `PERSONAJES_ICM_TEST_BINARY=/workspace/personajes-tools/icm-0.11.4/icm npm run verify` aprobó tipos y **546 pruebas, cero fallidas y cero omitidas**. Build: 426 módulos, 765,14 kB principal y 47,67 kB voces; permanece aviso de tamaño. La base viva confirma schema v28; HTTP/catalog `ok`, runtime `degraded`, HTML/assets actuales con 200.
+
+Chromium verificó seis aspectos del panel con publicación aceptada real en SQLite y sesiones SDK controladas: estado vacío, texto separado del transcript, aislamiento de respuesta tardía al cambiar corrida, error 503 y recuperación por lectura, consulta histórica y regreso al presente, y ausencia de reinferencia. Las solicitudes controladas permanecieron Narrador 2/revisor 2; proveedores reales 0. Los dos cortes navegados conservaban una fuente elegible; la exclusión de publicaciones posteriores está probada en la suite, no se atribuye a ese recorrido visual. Captura y script de apoyo en `/workspace/personajes-cloud/narration-browser.png` y `narration-browser.mjs`.

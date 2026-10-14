@@ -120,7 +120,20 @@ export function createVoiceRuntime(input: {
       runId,
       eventId: publicationId,
     });
-    if (confirmed === undefined) return null;
+    if (confirmed === undefined) {
+      const narration = input.host.journal.readNarrationPublication({runId,publicationId});
+      if(narration === undefined) return null;
+      const snapshot=config.readAt(runId,narration.publishedAt);
+      return {
+        publicationId:narration.publicationId,runId:narration.scope.runId,
+        text:narration.text,textHash:narration.textHash,textRevision:1,
+        configRevision:snapshot?.config.revision ?? config.read(runId).config.revision,
+        owner:{kind:"narrator" as const},
+        committedAt:new Date(narration.publishedAt).toISOString(),
+        // A source cut, never a new world event or invented sequence.
+        sequence:narration.scope.throughWorldSeq,
+      };
+    }
     const event = confirmed.event;
     if (
       event.kind !== "communicated" ||
@@ -265,8 +278,13 @@ export function createVoiceRuntime(input: {
     config,
     service,
     credentials,
+    /** Host-only source resolver; never accepts caller text or provider paths. */
+    readPublication,
     wakeWorker,
     onWorldCommitted,
+    onNarrationPublished(event:{runId:string;publicationId:string}) {
+      onWorldCommitted({runId:event.runId,eventIds:[event.publicationId]});
+    },
     async close() {
       if (closed) return;
       closed = true;

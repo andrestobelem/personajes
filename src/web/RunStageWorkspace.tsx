@@ -13,6 +13,7 @@ import {
   type StageMapEntity,
 } from "./StageMap.tsx";
 import { StageConversation, StageJobs } from "./StageConversation.tsx";
+import { NarrationPanel } from './NarrationPanel.tsx';
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { HumanInteractionPanel } from "./HumanInteractionPanel.tsx";
 import {
@@ -386,6 +387,13 @@ export function RunStageWorkspace({
               onSelectEvent={viewCut}
             />
           </div>
+          <NarrationPanel
+            key={`${runId}:${observation.stage.worldSeq}:${observation.stage.worldRevision}`}
+            runId={runId}
+            worldSeq={observation.stage.worldSeq}
+            worldRevision={observation.stage.worldRevision}
+            active={active}
+          />
           <InspectorPanel
             runId={runId}
             atWorldSeq={observation.stage.worldSeq}

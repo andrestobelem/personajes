@@ -274,7 +274,7 @@ const jobLabels = {
   "cancel-requested": "Cancelación solicitada",
 };
 const roleLabels = {
-  director: "Director", narrator: "Narrador", configurator: "Configurador",
+  director: "Director", narrator: "Narrador", configurator: "Configurador", "narration-reviewer": "Continuista de narración",
   actor: "Actor",
   continuista: "Continuista",
   pulse: "Pulso",
