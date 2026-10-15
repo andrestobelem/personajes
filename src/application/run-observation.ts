@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dayNightAt } from '../domain/routine-calendar.ts';
 import type { openJournal } from '../adapters/journal.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
 import { WorldSnapshotSchema, characterCanReceiveAt } from '../domain/world.ts';
@@ -37,10 +38,12 @@ function decodeCursor(raw:string):z.infer<typeof CursorSchema>|undefined {
 export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unknown;lifecycle:unknown;commitIndex?:number}):RunStageView {
   const world=WorldSnapshotSchema.parse(input.snapshot);
   const configuration=ReadyRunConfigurationSchema.parse(input.configuration);
+  const phase=dayNightAt({clock:world.clock});
+  const cycle=phase===undefined?{}:{dayNightPhase:phase};
   const scene=world.activeSceneId===null?undefined:world.scenes.find((item)=>item.id===world.activeSceneId);
   if (scene===undefined) return RunStageViewSchema.parse({kind:'run-stage',runId:world.runId,
     configRevision:configuration.configRevision,worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,
-    fictionalAt:world.clock.instant,clock:world.clock,lifecycle:input.lifecycle,lifecycleAsOf:'current',activeSceneId:null,scenes:[],
+    fictionalAt:world.clock.instant,clock:world.clock,...cycle,lifecycle:input.lifecycle,lifecycleAsOf:'current',activeSceneId:null,scenes:[],
     places:[],entities:[],connections:[],doors:[],channels:[],humanParticipants:[]});
   const places=world.places.filter((place)=>scene.placeIds.includes(place.id));
   const visiblePlaces=new Set(places.map((place)=>place.id));
@@ -79,7 +82,7 @@ export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unkn
     return [{participantId:profile.identity.participantId,label:profile.identity.displayName,presence:'inScene',placeId:presence.placeId,position:presence.position}];
   });
   return RunStageViewSchema.parse({kind:'run-stage',runId:world.runId,configRevision:configuration.configRevision,
-    worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,fictionalAt:world.clock.instant,clock:world.clock,lifecycle:input.lifecycle,lifecycleAsOf:'current',
+    worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,fictionalAt:world.clock.instant,clock:world.clock,...cycle,lifecycle:input.lifecycle,lifecycleAsOf:'current',
     activeSceneId:scene.id,scenes:[{id:scene.id,label:scene.label,lifecycle:scene.lifecycle.kind,participantIds:scene.participantIds,placeIds:scene.placeIds}],
     places:places.map(({id,name,width,height,lighting})=>{
       const environment=(world.environment??[]).flatMap(current=>{

@@ -17,7 +17,7 @@ import { RevisionSchema, RunIdSchema, WorldSeqSchema } from '../src/domain/value
 import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import type { RunId } from '../src/domain/values.ts';
 import { controlledDirectorSessionFactory } from './fixtures/director-session.ts';
-import { WorldActorActionSchema } from '../src/domain/world-schema.ts';
+import { WorldActorActionSchema, type WorldClock } from '../src/domain/world-schema.ts';
 import { createCircumstanceApplication } from '../src/application/direction-circumstances.ts';
 import { createRunObservationApplication } from '../src/application/run-observation.ts';
 import { canonical, responseFor, setup, actorId, type Fixture } from './fixtures/continuista.ts';
@@ -85,20 +85,23 @@ function hostFromFixture(fixture: Fixture) {
 }
 
 function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true, withInitialGoal = false,
-  routineWindows?: readonly (readonly [number,number])[], broadcast=false) {
+  routineWindows?: readonly (readonly [number,number])[], broadcast=false,
+  dailySchedule?: { routine: unknown; maxAdvanceMs: number; dayNight?: NonNullable<WorldClock['dayNight']> }) {
   const freshRunId = RunIdSchema.parse(randomUUID());
   const configuration = ReadyRunConfigurationSchema.parse({
     ...fixture.configuration,
     budget:{...fixture.configuration.budget,maxPiCallsPerPulse:8},
-    circadianPolicy:routineWindows===undefined?fixture.configuration.circadianPolicy:{kind:'advance-while-running',maxAdvanceMs:1_000},
+    circadianPolicy:dailySchedule!==undefined?{kind:'advance-while-running',maxAdvanceMs:dailySchedule.maxAdvanceMs}:
+      routineWindows===undefined?fixture.configuration.circadianPolicy:{kind:'advance-while-running',maxAdvanceMs:1_000},
     runId: freshRunId,
     worldSnapshot: {
       ...fixture.configuration.worldSnapshot,
       runId: freshRunId,
+      ...(dailySchedule?.dayNight === undefined ? {} : { clock: { ...fixture.configuration.worldSnapshot.clock, dayNight: dailySchedule.dayNight } }),
       channels:fixture.configuration.worldSnapshot.channels.map((channel)=>routineWindows===undefined&&!broadcast?channel:{...channel,scope:'broadcast'}),
       entities: fixture.configuration.worldSnapshot.entities.map((entity) => entity.kind === 'character'
         ? { ...entity,
-          routine:routineWindows===undefined?entity.routine:{kind:'windows',defaultState:'unavailable',
+          routine:dailySchedule!==undefined?dailySchedule.routine:routineWindows===undefined?entity.routine:{kind:'windows',defaultState:'unavailable',
             windows:routineWindows.map(([from,to])=>({from:fixture.configuration.worldSnapshot.clock.instant+from,
               to:fixture.configuration.worldSnapshot.clock.instant+to,state:'available'}))},
           mind: { ...entity.mind,
@@ -737,6 +740,86 @@ for(const scenario of [
   });
 }
 
+
+test('un ciclo editorial sin fronteras actorales termina tras un avance y no abre sesiones ni consume inferencia',async()=>{
+  const fixture=await setup();const host=hostFromFixture(fixture);
+  const runId=registerAdditionalRun(fixture,host,false,false,undefined,false,{
+    routine:{kind:'always'},maxAdvanceMs:86_400_000,
+    dayNight:{dayStartsAtMinute:420,nightStartsAtMinute:1260,disambiguation:'compatible'},
+  });
+  const before=host.journal.loadWorld({runId});assert.ok(before);
+  const opened={actor:0,continuista:0,director:0};let committed=0;
+  const runtime=await createRepresentationRuntime({host,icmBinaryPath:join(fixture.directory,'icm-must-not-run'),
+    onWorldCommitted({runId:committedRunId}){assert.equal(committedRunId,runId);committed+=1;},
+    testTransport:{kind:'controlled-test-transport',name:'No inference for an editorial clock boundary',
+      actorSessionFactory:async()=>{opened.actor+=1;throw new Error('An editorial phase cannot summon an actor');},
+      continuistaSessionFactory:async()=>{opened.continuista+=1;throw new Error('No actor proposal to review');},
+      directorSessionFactory:async()=>{opened.director+=1;throw new Error('No pulse to direct');},
+    }});
+  try{
+    assert.equal(await withTimeout(runtime.scheduleRun({runId}),2_000),true);
+    await withTimeout(runtime.waitForIdle(),2_000);
+    const after=host.journal.loadWorld({runId});assert.ok(after);
+    assert.equal(committed,1,'the scheduler must not spin through infinitely recurring empty days');
+    assert.equal(after.revision,before.revision+1);
+    assert.equal(after.seq,before.seq+1);
+    const events=host.journal.readObservationEvents({runId,fromWorldSeq:before.seq+1,toWorldSeq:after.seq,
+      afterWorldSeq:null,limit:10,communicationsOnly:false});
+    assert.deepEqual(events?.map(row=>row.event.kind),['clockAdvanced']);
+    assert.deepEqual(opened,{actor:0,continuista:0,director:0});
+    const budget=host.journal.readRunModelTimeBudget({runId});assert.ok(budget);
+    assert.equal(budget.runCallsUsed,0);assert.equal(budget.reservedPiCalls,0);
+    assert.equal(budget.wallTimeReservedMs,0);assert.equal(budget.wallTimeMeasuredMs,0);
+  }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});
+
+test('rutina diaria local llega a Pi SDK e ICM reales y publica un parlamento aprobado sin repetir al recuperar',realIcmOptions,async()=>{
+  assert.ok(realIcmBinary);
+  const fixture=await setup();const host=hostFromFixture(fixture);
+  const clock=fixture.configuration.worldSnapshot.clock;
+  assert.equal(clock.convention.kind,'fixedOffset');
+  if(clock.convention.kind!=='fixedOffset')assert.fail('El fixture debe declarar offset explícito');
+  const minuteMs=60_000;
+  const localMinute=((Math.floor(clock.instant/minuteMs)+clock.convention.offsetMinutes)%1440+1440)%1440;
+  const fromMinute=(localMinute+1)%1440;
+  const toMinute=(localMinute+2)%1440;
+  const expectedAt=(Math.floor(clock.instant/minuteMs)+1)*minuteMs;
+  const runId=registerAdditionalRun(fixture,host,false,false,undefined,true,{maxAdvanceMs:minuteMs,
+    routine:{kind:'daily',defaultState:'unavailable',disambiguation:'compatible',windows:[{fromMinute,toMinute,state:'available'}]}});
+  const stats={requests:0,recallResults:0,disposed:0};const actingTimes:number[]=[];const contexts:string[]=[];
+  const runtime=await createRepresentationRuntime({host,icmBinaryPath:realIcmBinary,
+    testTransport:controlledTransport({fixture,host,runId,stats,
+      onActorPrompt({systemPrompt}){contexts.push(systemPrompt);const world=host.journal.loadWorld({runId});assert.ok(world);actingTimes.push(world.clock.instant);},
+      actionForPrompt(){
+        const world=host.journal.loadWorld({runId});assert.ok(world);
+        const knowledge=host.journal.readActorKnowledge({runId,actorId,throughWorldSeq:world.seq});assert.ok(knowledge);
+        const channel=knowledge.knowledge.bindings.find(binding=>binding.kind==='channel');assert.ok(channel);
+        return WorldActorActionSchema.parse({kind:'communicate',channelHandle:channel.handle,audienceHandles:[],
+          content:{kind:'speech',text:'Intervención sintética al comenzar mi horario diario.'}});
+      }})});
+  try{
+    assert.equal(await runtime.scheduleRun({runId}),true);
+    await withTimeout(runtime.waitForIdle(),10_000);
+    assert.deepEqual(actingTimes,[expectedAt]);
+    assert.equal(stats.requests,3,'dos requests de actor y una revisión de Continuista');
+    assert.equal(stats.recallResults,1,'la actuación consulta la memoria ICM real propia');
+    assert.match(contexts[0]??'',/CONVOCATORIA TÉCNICA POR/);
+    assert.ok(contexts.every(context=>!context.includes('SECRET_PRIVATE_OTHER_MEMORY')));
+    const conversation=createRunObservationApplication({journal:host.journal}).readConversations({runId});
+    assert.equal(conversation.kind,'found');
+    if(conversation.kind!=='found')assert.fail('Falta conversación');
+    assert.equal(conversation.value.kind,'conversation-page');
+    if(conversation.value.kind!=='conversation-page')assert.fail('Falta página');
+    const actorLines=conversation.value.items.filter(line=>line.speaker.kind==='character');
+    assert.equal(actorLines.length,1);
+    assert.deepEqual(actorLines[0]?.content,{kind:'speech',text:'Intervención sintética al comenzar mi horario diario.'});
+    assert.equal(host.journal.loadWorld({runId})?.clock.instant,expectedAt+minuteMs);
+    const before=host.journal.loadWorld({runId});
+    await runtime.recover();await withTimeout(runtime.waitForIdle(),10_000);
+    assert.equal(stats.requests,3);
+    assert.deepEqual(host.journal.loadWorld({runId}),before);
+  }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});
 
 test('circunstancia física confirmada llega a memoria y Actor/Continuista publican una conversación',realIcmOptions,async()=>{
   assert.ok(realIcmBinary);

@@ -172,3 +172,7 @@ La verificación del corte estructural v29 comprueba migración sin asignaciones
 ## Evidencia posterior: circunstancias v33
 
 El [corte 39](../auditoria/cambios-de-circunstancia.md) registra cinco familias físicas, migración/rollback/idempotencia, memoria situada y cadena hasta conversación con Pi SDK controlado, además de preparación y operación sintéticas en navegador. El gate pasó 639 pruebas y omitió una exclusiva de Linux, sin fallos. Esta evidencia parcial no cierra DIR-02 ni G3/G4 ni sustituye aceptación con proveedor real.
+
+## Evidencia posterior: rutinas diarias
+
+El [corte 41](../auditoria/rutinas-diarias.md) agrega calendario local fixedOffset/IANA con DST, tres días de journal/replay, disponibilidad común a preflight/percepción, cadena diaria hasta conversación Pi controlada y recorrido gráfico de preparación/fase histórica. El gate pasó 670 pruebas, cero fallidas y una omitida exclusiva de Linux. TIM-01/P16 siguen abiertos a aceptación integral; las zonas de la puesta y reproducibilidad entre versiones de tzdb requieren evidencia propia.

@@ -105,7 +105,7 @@ export function formArray(value: unknown): unknown[] { return value === undefine
 export function formBlank(schema: FormSchema, uuid?: () => string): unknown {
   if (schema.const !== undefined) return schema.const;
   if (schema.type === 'object') return Object.fromEntries(Object.entries(schema.properties ?? {}).flatMap(([name, child]) => {
-    if (child.const !== undefined) return [[name, child.const]];
+    if (child.const !== undefined) return name === 'disambiguation' ? [] : [[name, child.const]];
     if (name === 'revision') return [[name, 0]];
     if (uuid !== undefined && (name === 'id' || (name === 'entityId' && schema.properties?.kind?.const !== 'heldBy'))) return [[name, child.pattern?.includes('[a-z0-9-]') ? `elemento-${uuid()}` : uuid()]];
     if (child.type === 'string' && child.pattern === undefined && child.enum === undefined) return [[name, '']];
@@ -189,4 +189,12 @@ export function placePreparedCharacter(input: { draft: RunConfigurationDraft; pl
     inventory: [...(current.inventory ?? []), ...objects.map((object) => ({ objectEntityId: object.entityId, location: { kind: 'heldBy', entityId: actor.entityId }, revision: 0 }))],
     entities: [...(current.entities ?? []), { ...actor, mind: { ...actor.mind, inventoryKnowledge: physicalInventory.map((entry) => ({ objectEntityId: entry.object.entityId, name: entry.privateName, description: entry.privateDescription })) } }, ...objects], scenes: (current.scenes ?? []).map((candidate) => candidate.id === scene.id
       ? { ...candidate, participantIds: [...new Set([...(candidate.participantIds ?? []), prepared.characterId])] } : candidate) } });
+}
+
+export function matchesWorldFormVariant(variant: FormSchema, value: unknown): boolean {
+  if (variant.type === 'null') return value === null;
+  if (variant.type === 'string') return typeof value === 'string';
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const object = formObject(value);
+  return Object.entries(variant.properties ?? {}).filter(([key, child]) => child.const !== undefined && key !== 'disambiguation').every(([key, child]) => object[key] === child.const);
 }

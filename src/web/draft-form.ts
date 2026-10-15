@@ -71,7 +71,7 @@ export function setDraftMoment(input: { draft: RunConfigurationDraft; dateTime: 
   if (parsed.kind === 'invalid') return parsed;
   const world = input.draft.worldSnapshot.kind === 'empty' ? {} : input.draft.worldSnapshot.value;
   const draft = changeDraftField({ draft: changeDraftField({ draft: input.draft, field: 'fictionalAt', value: parsed.instant }),
-    field: 'worldSnapshot', value: { ...world, clock: { instant: parsed.instant, convention: parsed.convention } } });
+    field: 'worldSnapshot', value: { ...world, clock: { ...world.clock, instant: parsed.instant, convention: parsed.convention } } });
   return { kind: 'applied' as const, draft };
 }
 

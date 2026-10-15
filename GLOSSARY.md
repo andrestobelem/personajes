@@ -113,6 +113,10 @@ _Evitar_: escena como sinónimo obligatorio de diálogo entre dos personajes.
 **Ritmo circadiano del escenario**: Ciclo de día y noche que condiciona rutinas, descanso, disponibilidad y coincidencias de los personajes.
 _Evitar_: ciclo diario como sinónimo de arco dramático completo.
 
+**Rutina diaria**: Patrón de disponibilidad de un personaje que se repite según las horas locales de cada día de la ficción, incluido el descanso que cruza medianoche.
+
+**Fase de día o noche**: Referencia temporal de la representación definida por sus horarios locales. No equivale a la iluminación material del lugar ni a una experiencia ya vivida por el personaje.
+
 **Observador**: Persona que presencia la obra y consulta su evolución, con una perspectiva que puede ser más amplia que la de los personajes.
 
 **Interlocutor humano**: Participante controlado por la persona usuaria que conversa con los personajes dentro de la ficción y puede influir en ellos mediante sus intervenciones. Puede entrar con una identidad ficticia propia, distinta del reparto y configurable por representación.

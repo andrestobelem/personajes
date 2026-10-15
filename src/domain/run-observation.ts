@@ -25,7 +25,7 @@ export const StagePlaceSchema = z.strictObject({id:PlaceIdSchema,name:label,widt
 export const StageChannelSchema = z.strictObject({id:ChannelIdSchema,kind:z.enum(['speech','gesture']),label,enabled:z.boolean(),placeIds:z.array(PlaceIdSchema).max(100)});
 export const StageSceneSchema = z.strictObject({id:SceneIdSchema,label,lifecycle:z.enum(['open','closed']),participantIds:z.array(CharacterIdSchema).max(100),placeIds:z.array(PlaceIdSchema).max(100)});
 export const RunStageViewSchema = z.strictObject({kind:z.literal('run-stage'),runId:RunIdSchema,configRevision:RevisionSchema,
-  worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,commitIndex:RevisionSchema,fictionalAt:FictionalInstantSchema,clock:WorldClockSchema,
+  worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,commitIndex:RevisionSchema,fictionalAt:FictionalInstantSchema,clock:WorldClockSchema,dayNightPhase:z.enum(['day','night']).optional(),
   lifecycle:WorldLifecycleSchema,lifecycleAsOf:z.literal('current'),activeSceneId:SceneIdSchema.nullable(),scenes:z.array(StageSceneSchema).max(1),
   places:z.array(StagePlaceSchema).max(100),entities:z.array(StageEntitySchema).max(100_000),
   doors:z.array(z.strictObject({id:DoorIdSchema,label,state:z.enum(['open','closed','locked'])})).max(10_000),

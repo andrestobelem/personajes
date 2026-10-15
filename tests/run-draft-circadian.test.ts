@@ -42,5 +42,5 @@ test('el editor ofrece automático desde cero, conserva el límite exacto y resp
   const html = renderToStaticMarkup(React.createElement(RunDraftEditor, { ...props, draft: automatic, readOnly: true, lifecycle: 'running' }));
   assert.match(html, /<fieldset[^>]*disabled/);
   assert.match(html, /Máximo avance por salto · milisegundos<input[^>]*value="9007199254740991"/);
-  assert.match(html, /repetición diaria y el ciclo de día y noche todavía no están implementados/);
+  assert.match(html, /rutinas de cada personaje/);
 });

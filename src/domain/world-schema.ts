@@ -44,8 +44,17 @@ export const CharacterCapabilitySchema = z.enum([
   'move', 'observe', 'speak', 'gesture', 'animalSound', 'take', 'offer', 'useDevice', 'wait', 'rest',
 ]);
 
+const LocalMinuteSchema = z.number().int().min(0).max(1439);
+export const DayNightCycleSchema = z.strictObject({
+  dayStartsAtMinute: LocalMinuteSchema,
+  nightStartsAtMinute: LocalMinuteSchema,
+  disambiguation: z.literal('compatible'),
+}).refine(cycle => cycle.dayStartsAtMinute !== cycle.nightStartsAtMinute,
+  { message: 'Día y noche requieren inicios distintos' });
+
 export const WorldClockSchema = z.strictObject({
   instant: FictionalInstantSchema,
+  dayNight: DayNightCycleSchema.optional(),
   convention: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('fixedOffset'), offsetMinutes: z.number().int().min(-840).max(840), label: z.string().min(1).max(120) }),
     z.strictObject({ kind: z.literal('ianaZone'), zone: z.string().min(1).max(120) }),
@@ -125,6 +134,34 @@ export const AvailabilityRoutineSchema = z.discriminatedUnion('kind', [
       if (previous !== undefined && previous.to > window.from) {
         context.addIssue({ code: 'custom', path: ['windows', index], message: 'Las ventanas de rutina no pueden solaparse' });
       }
+    }
+  }),
+  z.strictObject({
+    kind: z.literal('daily'),
+    defaultState: z.enum(['available', 'unavailable']),
+    disambiguation: z.literal('compatible'),
+    windows: z.array(z.strictObject({
+      fromMinute: LocalMinuteSchema,
+      toMinute: z.number().int().min(0).max(1440),
+      state: z.enum(['available', 'unavailable']),
+    })).max(1000),
+  }).superRefine((routine, context) => {
+    const segments: { from: number; to: number; index: number }[] = [];
+    for (const [index, window] of routine.windows.entries()) {
+      if (window.fromMinute === window.toMinute) {
+        context.addIssue({ code: 'custom', path: ['windows', index], message: 'El inicio y el fin deben ser distintos; día completo: 0 a 1440' });
+      } else if (window.fromMinute < window.toMinute) {
+        segments.push({ from: window.fromMinute, to: window.toMinute, index });
+      } else {
+        segments.push({ from: window.fromMinute, to: 1440, index }, { from: 0, to: window.toMinute, index });
+      }
+    }
+    const sorted = segments.filter(segment => segment.from < segment.to).sort((left, right) => left.from - right.from);
+    let previous: typeof sorted[number] | undefined;
+    for (const segment of sorted) {
+      if (previous !== undefined && previous.to > segment.from)
+        context.addIssue({ code: 'custom', path: ['windows', segment.index], message: 'Las ventanas diarias no pueden solaparse, incluso al cruzar medianoche' });
+      if (previous === undefined || segment.to > previous.to) previous = segment;
     }
   }),
 ]);
@@ -896,7 +933,7 @@ const ActorViewPlaceSchema = z.strictObject({
 export const ActorWorldViewSchema = z.strictObject({
   kind: z.literal('actor-world-view'),
   revision: RevisionSchema,
-  now: WorldClockSchema,
+  now: WorldClockSchema.omit({ dayNight: true }),
   sceneLabel: z.string().min(1).max(200),
   currentPlace: z.strictObject({ handle: PlaceHandleSchema, name: z.string().min(1).max(200), description: z.string().max(2_000), lighting: LightingSchema }),
   places: z.array(ActorViewPlaceSchema).max(100),

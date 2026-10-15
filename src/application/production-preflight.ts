@@ -1,3 +1,4 @@
+import { routineIsAvailable, routineCalendarDiagnostics, dayNightCalendarDiagnostics } from '../domain/routine-calendar.ts';
 import { PreflightSnapshotFenceSchema as RunSnapshotFenceSchema, PreflightCheckSchema, PreflightReportSchema, type PreflightCheck, type PreflightReport } from '../domain/preflight-report.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -146,12 +147,8 @@ function asContinuityReference(continuity: ContinuityContext) {
   });
 }
 
-function routineAvailable(actor: WorldCharacter, at: number): boolean {
-  if (actor.availability.kind === 'unavailable') return false;
-  if (actor.routine.kind === 'always') return true;
-  const window = actor.routine.windows.find((item) => item.from <= at && at < item.to);
-  return window?.state === 'available'
-    || (window === undefined && actor.routine.defaultState === 'available');
+function routineAvailable(actor: WorldCharacter, world: WorldSnapshot): boolean {
+  return actor.availability.kind === 'available' && routineIsAvailable({ routine: actor.routine, clock: world.clock });
 }
 
 function preparedCapabilityKinds(prepared: PreparedCharacter): ReadonlySet<string> {
@@ -421,6 +418,12 @@ function validateReadyCandidate(input: {
 
   if (world.runId !== input.runId) add('world-run-mismatch', 'worldSnapshot.runId', 'El snapshot debe pertenecer a la corrida que se está preparando.');
   if (world.clock.instant !== input.fictionalAt) add('fictional-time-mismatch', 'fictionalAt', 'El momento de ficción debe coincidir con el reloj del snapshot; una fecha de emisión o del equipo no lo sustituye.');
+  const calendarDiagnostics = [
+    ...dayNightCalendarDiagnostics({ clock: world.clock }),
+    ...world.entities.flatMap(actor => actor.kind === 'character' ? routineCalendarDiagnostics({ routine: actor.routine, clock: world.clock }) : []),
+  ];
+  for (const detail of new Set(calendarDiagnostics.filter(diagnostic => diagnostic.startsWith('Zona horaria') || diagnostic.includes('fuera del dominio'))))
+    add('draft-schema-invalid', 'worldSnapshot.clock', detail);
   if (world.places.length === 0) add('place-missing', 'worldSnapshot.places', 'La puesta requiere al menos un lugar operativo.');
   if (roster.eligibleCharacterIds.length === 0 || roster.preparedCharacters.length === 0 || roster.activeCharacterIds.length === 0) {
     add('roster-empty', 'roster', 'La puesta requiere identidades elegibles, contexto preparado y al menos un actor activo.');
@@ -595,7 +598,7 @@ function buildParticipantAvailability(world: WorldSnapshot): ParticipantAvailabi
     if (actor.availability.kind === 'unavailable') {
       return ParticipantAvailabilitySchema.parse({ kind: 'unavailable', characterId, reason: 'explicit' });
     }
-    if (!routineAvailable(actor, world.clock.instant)) {
+    if (!routineAvailable(actor, world)) {
       return ParticipantAvailabilitySchema.parse({ kind: 'unavailable', characterId, reason: 'routine' });
     }
     return ParticipantAvailabilitySchema.parse({ kind: 'available', characterId });

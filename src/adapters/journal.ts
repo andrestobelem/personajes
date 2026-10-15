@@ -182,7 +182,7 @@ import {
 } from '../domain/model-time-budget.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { ContinuityReferenceSchema } from '../domain/preparation.ts';
-import { currentRoutineAvailabilityBoundary, nextRoutineAdvance, planActorActivationInvitations } from '../domain/actor-activation.ts';
+import { currentRoutineAvailabilityBoundary, nextRoutineAdvance, nextWorldTimeBoundary, planActorActivationInvitations } from '../domain/actor-activation.ts';
 import {
   ActorActivationIdSchema, ActorActivationInvitationIdSchema, CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
   EventIdSchema, FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
@@ -4150,7 +4150,7 @@ export function openJournal(input: { path: string }) {
     const actor=input.run.snapshot.entities.find((entity)=>entity.kind==='character'&&entity.characterId===row.actor_id);
     const scene=input.run.snapshot.scenes.find((item)=>item.id===input.run.snapshot.activeSceneId);
     const routineBoundary=actor?.kind==='character'
-      ?currentRoutineAvailabilityBoundary({routine:actor.routine,instant:input.run.snapshot.clock.instant}):undefined;
+      ?currentRoutineAvailabilityBoundary({routine:actor.routine,instant:input.run.snapshot.clock.instant,clock:input.run.snapshot.clock}):undefined;
     const triggerMatches=row.trigger_kind===row.cause_trigger_kind&&row.boundary_at===row.cause_boundary_at
       &&(row.trigger_kind==='initial-goal'?row.boundary_at===null:row.boundary_at!==null&&routineBoundary===row.boundary_at);
     if(!triggerMatches||!input.configuration.roster.activeCharacterIds.includes(row.actor_id)
@@ -6841,10 +6841,9 @@ export function openJournal(input: { path: string }) {
           UNION ALL SELECT 1 FROM administrative_jobs WHERE run_id=? AND state='running' LIMIT 1`)
           .get(request.runId,request.runId,request.runId,request.runId);
         if(workPending!==undefined)return notApplicable('work-pending');
-        const boundaryAt=nextRoutineAdvance({snapshot:run.snapshot,policy:configuration.circadianPolicy,lifecycle:run.row.lifecycle});
+        const boundaryAt=nextRoutineAdvance({snapshot:run.snapshot,policy:configuration.circadianPolicy,lifecycle:run.row.lifecycle,activeCharacterIds:configuration.roster.activeCharacterIds});
         if(boundaryAt===undefined){
-          const hasFutureBoundary=run.snapshot.entities.some((actor)=>actor.kind==='character'&&actor.routine.kind==='windows'
-            &&actor.routine.windows.some((window)=>window.from>run.snapshot.clock.instant||window.to>run.snapshot.clock.instant));
+          const hasFutureBoundary=nextWorldTimeBoundary(run.snapshot,configuration.roster.activeCharacterIds)!==undefined;
           return notApplicable(hasFutureBoundary?'boundary-too-far':'no-boundary');
         }
         const fromAt=run.snapshot.clock.instant;

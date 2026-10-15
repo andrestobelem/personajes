@@ -1,0 +1,5 @@
+# Rutinas locales y ciclo editorial de día y noche
+
+Las rutinas diarias se resuelven como intervalos de cada fecha local de la ficción, usando la convención del Escenario, en lugar de repetir duraciones UTC de 24 horas o comprobar sólo la hora de pared. Esto preserva la misma disponibilidad en preflight, acción, percepción y convocatoria durante cambios de hora; la política `compatible` se elige y guarda explícitamente. La decisión técnica se contrastó en el [diálogo delegado](../auditoria/dialogo-rutinas-diarias.md); no fija horarios artísticos ni los atribuye al usuario.
+
+El ciclo día/noche es configuración editorial opcional, separada de luz física y memoria: se proyecta para el observador al corte y se excluye del reloj entregado al actor. Intervalos nulos/invertidos o que colisionan tras resolver un salto horario se omiten con diagnóstico; nunca se prolongan indefinidamente. Los snapshots anteriores no reciben valores predeterminados ni se recalculan sus hashes. Ver [contrato y evidencia](../auditoria/rutinas-diarias.md).

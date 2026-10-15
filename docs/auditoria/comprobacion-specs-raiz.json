@@ -13,13 +13,13 @@
     "docs/specs/README.md": "bac8b6d0a62fe1642124918d1e82ed7dc46211045eae3834001034db6aee2bd9"
   },
   "currentSpecHashes": {
-    "docs/specs/01-dominio-y-catalogo.md": "ed800252a5cc66ac102eea2d79f487fd44edd9621bd9fba3fcb41e57d6560e68",
-    "docs/specs/02-persistencia-e-icm.md": "1e01683e6c8a2284f7d9a58d05a221778219f3877c89c239242cdf100e69a3f2",
-    "docs/specs/03-pi-y-coordinacion.md": "25a213874be6a6ebc99399cd1d36fbb943827d5ab7ceabbc8767644320531476",
+    "docs/specs/01-dominio-y-catalogo.md": "ac9d971db5f6dc607d6e181055f4cea40d5a9cfbf39aea5fd77c0aba2d33d7b6",
+    "docs/specs/02-persistencia-e-icm.md": "3c24445aed65c57ccbc053c05fa3ba08f0d229c0c239883f88b14da9be950989",
+    "docs/specs/03-pi-y-coordinacion.md": "2d04a4d2b7f411b379c66915c373e9b131f6ac877802c8f3f644d813f3294ab1",
     "docs/specs/04-api-y-autoridad.md": "3d476dd61ab087d328f2d472d3af17723a59c0349d2e8168ef494880d9e9591e",
-    "docs/specs/05-interfaz.md": "a96a8d4c1de6e38d83c59324b9d83924b7bc875caa6ab60984623e7c72f9f3f1",
+    "docs/specs/05-interfaz.md": "079fdb51abf10353b002ab54639ba0433ab7bbf0aee4b645545a29d4c1cc6904",
     "docs/specs/06-voces-y-ritmo.md": "1c05faf8ce57d7d17ed95f63843eb75b2eff28885401b3de51424ed6bd31ea08",
-    "docs/specs/07-verificacion.md": "f9a7417a934d920f86d4cf582f9596a886f865486bbd87a1053b26dacd6f777d",
+    "docs/specs/07-verificacion.md": "09b0197baf6af46fb80a9391664dc0c716ebe0aa6c2533c3330987ea0feed6f9",
     "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"
   },
   "requirements": 77,

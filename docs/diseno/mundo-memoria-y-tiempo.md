@@ -41,7 +41,7 @@ Requisito del usuario: el mundo tiene un ritmo circadiano. La primera definició
 
 Hay que distinguir tiempo real, reloj del mundo y tiempo dramático. El primero mide la ejecución; el segundo fecha acontecimientos; el tercero organiza atención y tensión. No están obligados a avanzar a la misma velocidad.
 
-Una pausa de observación debe tener un significado explícito. Pausar una repetición visual no implica pausar el mundo. Cuando se incorpore un runtime se decidirá qué botón detiene la simulación, qué estado conserva y cómo se resuelven acciones en curso. La investigación de plataformas señala diferencias reales entre esas funciones.
+Pausar la representación bloquea nuevas convocatorias y avance ficticio, conserva lo confirmado e invalida la autoridad de commits tardíos. Navegar por la historia es una lectura independiente que no pausa el mundo. Este significado operativo está definido en PRD §4.6 y conectado al runtime; su aceptación integral sigue abierta. Las rutinas diarias locales y el ciclo editorial día/noche se implementan en el [corte 41](../auditoria/rutinas-diarias.md), separados de iluminación física.
 
 Ejemplo de efecto causal: un encuentro ocurre de noche porque uno de los personajes cambia su rutina; el otro detecta la excepción y pregunta. El reloj afecta quién puede encontrar a quién, cuánto puede esperar y cuándo vence una promesa. No se exige que todos duerman a la vez ni que cada día cierre una trama.
 
@@ -51,7 +51,7 @@ La interfaz requerida es completa y principalmente funcional y visual: permite c
 
 El usuario puede intervenir como interlocutor humano. Los demás personajes podrán escuchar o no según la escena; contestar, resistir o aceptar; y recordar la interacción. Negociar un acuerdo no equivale a ejecutarlo: promesa, aceptación y cumplimiento son acontecimientos diferentes.
 
-El rol de director se presenta por otro canal. Esa separación debe resultar comprensible al usuario: «hablar en la escena» e «indicar una condición de la representación» producen efectos distintos. La interfaz gráfica aún no existe; la carpeta obra deja preparados sus contratos en Markdown.
+El rol de director se presenta por otro canal. Esa separación debe resultar comprensible al usuario: «hablar en la escena» e «indicar una condición de la representación» producen efectos distintos. La interfaz gráfica ya tiene ambos canales, controles y recorridos parciales verificados; la aceptación completa sigue abierta. La carpeta obra conserva sus contratos en Markdown.
 
 ## Condiciones de aceptación de una implementación futura
 

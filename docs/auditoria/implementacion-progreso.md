@@ -2,6 +2,14 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 41: rutinas diarias locales y ciclo de día/noche
+
+Se implementó recurrencia diaria con ventanas nocturnas, resolución fixedOffset/IANA y política compatible explícita, compartida por preflight/acción/percepción/convocatoria. El ciclo editorial configurable se muestra al corte observado y se mantiene separado de iluminación y memoria. La agenda no genera infinitos días vacíos si no hay fronteras actorales. Una revisión independiente detectó y permitió corregir la entrega indebida del horario editorial al actor.
+
+La GUI guardó y validó un descanso 22:00→07:00 con ciclo 06:00/18:00; el historial mostró día y noche según el commit con luz material constante. El selector inicial que ocultaba la variante diaria hasta elegir política se corrigió y tiene regresión. Tres días de SQLite, replay/reopen y cadena diaria hasta conversación se probaron con ICM real y Pi SDK de transporte controlado. [Diálogo, contrato, pruebas, capturas y límites](rutinas-diarias.md).
+
+Gate: TypeScript y **671 pruebas: 670 aprobadas, cero fallidas, una omitida por requerir Linux**. Build: 443 módulos. No hubo proveedor live. Permanecen abiertos la aceptación temporal integral, el entorno reproducible IANA entre hosts y los restantes criterios del producto; el objetivo sigue activo.
+
 ## Corte 40: preparación del reloj y bloqueo entre escenas
 
 La GUI permite elegir avance automático desde un borrador manual o vacío, aplicar un máximo por salto explícito y guardar/reabrir/validar. Rechaza vacío, fracciones y enteros inseguros sin habilitar un guardado incompleto. El recorrido visual conservó 86.400.000 ms y promovió Ready en revisión 1 sin iniciar.

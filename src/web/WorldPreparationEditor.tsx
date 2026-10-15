@@ -1,14 +1,18 @@
 import React from 'react';
+import { minuteTime, timeMinute } from './day-night-form.ts';
+import { routineCalendarDiagnostics } from '../domain/routine-calendar.ts';
+import { AvailabilityRoutineSchema, WorldClockSchema } from '../domain/world-schema.ts';
 import { z } from 'zod';
 import type { RunConfigurationDraft } from '../domain/production.ts';
-import { applyWorldSection, chooseActiveScene, confirmNoInitialOffers, formArray, formBlank, formObject, parseWorldNumericInput, parseWorldFormSchema, worldCandidate, worldMapItems, worldPreparationIssues, worldReferences, worldSectionForm, WORLD_SECTIONS, CharacterPlacementSchema, placePreparedCharacter, type FormSchema, type WorldPreparationSection } from './world-preparation.ts';
+import { applyWorldSection, chooseActiveScene, confirmNoInitialOffers, formArray, formBlank, matchesWorldFormVariant, formObject, parseWorldNumericInput, parseWorldFormSchema, worldCandidate, worldMapItems, worldPreparationIssues, worldReferences, worldSectionForm, WORLD_SECTIONS, CharacterPlacementSchema, placePreparedCharacter, type FormSchema, type WorldPreparationSection } from './world-preparation.ts';
 
 const LABELS: Record<string, string> = {
+  daily: 'Repetición diaria', fromMinute: 'Desde (hora local)', toMinute: 'Hasta (hora local)', disambiguation: 'Resolución de cambios horarios', compatible: 'Compatible: primera repetida; desplazar inexistente',
   circumstanceCatalog: 'Catálogo de circunstancias', environmentConditions: 'Condiciones ambientales', states: 'Estados autorizados', objectTemplates: 'Plantillas de objetos', allowedPlaceIds: 'Lugares de aparición autorizados', conditionId: 'Condición ambiental', stateId: 'Estado ambiental', sourceRefs: 'Referencias de procedencia',
   id: 'Identificador', entityId: 'Identificador de entidad', name: 'Nombre', label: 'Nombre visible', description: 'Descripción',
   width: 'Ancho', height: 'Alto', lighting: 'Iluminación', kind: 'Tipo', state: 'Estado', from: 'Desde', to: 'Hasta',
   durationMs: 'Duración (milisegundos)', arrivalPoint: 'Punto de llegada', doorId: 'Puerta', position: 'Posición',
-  materialChoices: 'Materializar inventario preparado', itemId: 'Objeto preparado', visibleLabel: 'Nombre visible elegido', physicalDescription: 'Aspecto visible elegido', quantity: 'Cantidad del lote', condition: 'Condición', sourceItemId: 'Procedencia del objeto', sourceGoalId: 'Objetivo de origen', characterId: 'Personaje preparado', displayName: 'Nombre real del personaje', species: 'Naturaleza del personaje', presentation: 'Presentación ante los demás', additionalCapabilities: 'Acciones adicionales elegidas', recognizedCharacterIds: 'Identidades que reconoce al inicio', routine: 'Rutina', human: 'Humano', animal: 'Animal', robot: 'Robot', always: 'Siempre disponible', windows: 'Intervalos de disponibilidad', defaultState: 'Disponibilidad fuera de los intervalos', available: 'Disponible', unavailable: 'No disponible', ordinary: 'Sin cobertura', cover: 'Identidad de cobertura', observe: 'Observar', take: 'Tomar objetos', offer: 'Ofrecer objetos', wait: 'Esperar', rest: 'Descansar', placeId: 'Lugar', placeIds: 'Lugares', participantIds: 'Personajes participantes', sceneId: 'Escena', lifecycle: 'Apertura y cierre',
+  materialChoices: 'Materializar inventario preparado', itemId: 'Objeto preparado', visibleLabel: 'Nombre visible elegido', physicalDescription: 'Aspecto visible elegido', quantity: 'Cantidad del lote', condition: 'Condición', sourceItemId: 'Procedencia del objeto', sourceGoalId: 'Objetivo de origen', characterId: 'Personaje preparado', displayName: 'Nombre real del personaje', species: 'Naturaleza del personaje', presentation: 'Presentación ante los demás', additionalCapabilities: 'Acciones adicionales elegidas', recognizedCharacterIds: 'Identidades que reconoce al inicio', presence: 'Presencia en escena', present: 'Presente', absent: 'Ausente', routine: 'Rutina', human: 'Humano', animal: 'Animal', robot: 'Robot', always: 'Siempre disponible', windows: 'Intervalos de disponibilidad', defaultState: 'Disponibilidad fuera de los intervalos', available: 'Disponible', unavailable: 'No disponible', ordinary: 'Sin cobertura', cover: 'Identidad de cobertura', observe: 'Observar', take: 'Tomar objetos', offer: 'Ofrecer objetos', wait: 'Esperar', rest: 'Descansar', placeId: 'Lugar', placeIds: 'Lugares', participantIds: 'Personajes participantes', sceneId: 'Escena', lifecycle: 'Apertura y cierre',
   startedAt: 'Inicio ficticio (milisegundos UTC)', closedAt: 'Cierre ficticio (milisegundos UTC)', reason: 'Motivo',
   channelId: 'Canal', enabled: 'Habilitado', maxRange: 'Alcance máximo', scope: 'Audiencia', modality: 'Medio perceptivo',
   transparentWhenClosed: 'Permite ver al estar cerrada', soundPassesWhenClosed: 'Permite oír al estar cerrada',
@@ -28,26 +32,23 @@ function optionLabel(variant: FormSchema, index: number) {
   const discriminator = variant.properties?.kind?.const ?? variant.properties?.state?.const;
   return typeof discriminator === 'string' ? label(discriminator) : `Opción ${index + 1}`;
 }
-function matchesVariant(variant: FormSchema, value: unknown): boolean {
-  if (variant.type === 'null') return value === null;
-  if (variant.type === 'string') return typeof value === 'string';
-  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const object = formObject(value);
-  return Object.entries(variant.properties ?? {}).filter(([, child]) => child.const !== undefined).every(([key, child]) => object[key] === child.const);
-}
 function Field(props: { schema: FormSchema; value: unknown; name: string; draft: RunConfigurationDraft; onChange: (value: unknown) => void; technicalId?: boolean; conditionId?: string | undefined }) {
   const { schema, value, name, draft, onChange } = props;
   const variants = schema.anyOf ?? schema.oneOf;
   if (variants !== undefined && variants.every((variant) => variant.type === 'string')) return <Field {...props} schema={{ type: 'string', pattern: variants[0]?.pattern }} />;
   if (variants !== undefined) {
-    const selected = variants.findIndex((variant) => matchesVariant(variant, value));
+    const selected = variants.findIndex((variant) => matchesWorldFormVariant(variant, value));
     const variant = variants[selected];
     return <div className="world-variant"><label>{label(name)}<select value={selected < 0 ? '' : String(selected)} onChange={(event) => { const next = variants[Number(event.target.value)]; if (next !== undefined) onChange(next.type === 'null' ? null : formBlank(next, () => crypto.randomUUID())); }}><option value="">Elegir tipo</option>{variants.map((entry, index) => (entry.properties?.kind?.const === 'character' || entry.properties?.kind?.const === 'consumed') && selected !== index ? null : <option key={index} value={index}>{entry.type === 'null' ? 'Sin conexión' : optionLabel(entry, index)}</option>)}</select></label>{variant !== undefined && variant.type !== 'null' && <Field {...props} schema={variant} />}</div>;
   }
+  if (schema.const !== undefined && name === 'disambiguation') return <label>Resolución de cambios horarios<select value={value === 'compatible' ? 'compatible' : ''} onChange={event => onChange(event.target.value || undefined)}><option value="">Elegir política</option><option value="compatible">Compatible: primera repetida; desplazar inexistente</option></select></label>;
   if (schema.const !== undefined) return <span>{label(String(schema.const))}</span>;
   if (schema.type === 'object') {
     const object = formObject(value);
-    return <fieldset><legend>{label(name)}</legend>{Object.entries(schema.properties ?? {}).filter(([key, child]) => child.const === undefined && (object.kind !== 'character' || ['placeId', 'position', 'presence', 'availability', 'routine', 'collisionRadius', 'blocksMovement'].includes(key))).map(([key, child]) => <Field key={key} schema={child} value={object[key]} name={key} draft={draft} conditionId={typeof object.conditionId === 'string' ? object.conditionId : undefined} technicalId={key === 'id' || (key === 'entityId' && object.kind !== 'heldBy')} onChange={(next) => onChange({ ...object, [key]: next })} />)}</fieldset>;
+    const routine=AvailabilityRoutineSchema.safeParse(value);
+    const clock=WorldClockSchema.safeParse(worldCandidate(draft).clock);
+    const diagnostics=routine.success && clock.success ? routineCalendarDiagnostics({routine:routine.data,clock:clock.data}) : [];
+    return <fieldset><legend>{label(name)}</legend>{object.kind === 'daily' && <p>Horas locales de la convención del Escenario. Un fin anterior al inicio cruza medianoche. 00:00–24:00 cubre el día completo. Inicio y fin iguales no son válidos. Compatible elige la primera ocurrencia repetida y desplaza la inexistente por el salto horario.</p>}{diagnostics.map((detail,index)=><p key={index} role="status">Advertencia de calendario: {detail}</p>)}{Object.entries(schema.properties ?? {}).filter(([key, child]) => (child.const === undefined || key === 'disambiguation') && (object.kind !== 'character' || ['placeId', 'position', 'presence', 'availability', 'routine', 'collisionRadius', 'blocksMovement'].includes(key))).map(([key, child]) => <Field key={key} schema={child} value={object[key]} name={key} draft={draft} conditionId={typeof object.conditionId === 'string' ? object.conditionId : undefined} technicalId={key === 'id' || (key === 'entityId' && object.kind !== 'heldBy')} onChange={(next) => onChange({ ...object, [key]: next })} />)}</fieldset>;
   }
   if (schema.type === 'array') {
     const array = formArray(value); const itemSchema = schema.items;
@@ -55,6 +56,7 @@ function Field(props: { schema: FormSchema; value: unknown; name: string; draft:
   }
   if (schema.type === 'boolean') return <label>{label(name)}<select value={value === undefined ? '' : String(value)} onChange={(event) => onChange(event.target.value === '' ? undefined : event.target.value === 'true')}><option value="">Pendiente</option><option value="true">Sí</option><option value="false">No</option></select></label>;
   if (schema.enum !== undefined) return <label>{label(name)}<select value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value || undefined)}><option value="">Pendiente</option>{schema.enum.map((entry) => <option key={String(entry)} value={String(entry)}>{label(String(entry))}</option>)}</select></label>;
+  if (name === 'fromMinute' || name === 'toMinute') return <label>{label(name)}<input type="text" inputMode="numeric" placeholder={name === 'toMinute' ? 'HH:mm o 24:00' : 'HH:mm'} value={typeof value === 'number' ? minuteTime(value) : typeof value === 'string' ? value : ''} onChange={event => { const text = event.target.value; try { onChange(timeMinute(text, name === 'toMinute')); } catch { onChange(text); } }} /></label>;
   if (name === 'startedAt' || name === 'closedAt') {
     const date = typeof value === 'number' ? new Date(value) : undefined;
     const formatted = date !== undefined && Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 19) : '';

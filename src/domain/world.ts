@@ -1,3 +1,4 @@
+import { routineIsAvailable } from './routine-calendar.ts';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ExperienceSchema } from './experience.ts';
@@ -21,7 +22,7 @@ import {
 } from './world-schema.ts';
 import type {
   WorldPlace, WorldDoor, WorldConnection, WorldChannel,
-  AvailabilityRoutine, WorldCharacter, WorldObject, DeviceOperation,
+  WorldCharacter, WorldObject, DeviceOperation,
   WorldDevice, WorldEntity, InventoryEntry, WorldScene,
   WorldOffer, WorldSnapshot, ActorHandleBinding, ActorKnowledge,
   CommunicationContent, WorldAttempt, WorldIdSource, WorldEvent,
@@ -585,7 +586,7 @@ export function buildActorWorldView(input: {
     environment.push({ placeHandle: binding.handle, modality: state.modality, detail: state.description });
   }
   const view = CompleteActorWorldViewSchema.parse({
-    kind: 'actor-world-view', revision: snapshot.revision, now: snapshot.clock, sceneLabel: scene.label,
+    kind: 'actor-world-view', revision: snapshot.revision, now: { instant: snapshot.clock.instant, convention: snapshot.clock.convention }, sceneLabel: scene.label,
     currentPlace: { handle: currentPlaceBinding.handle, name: currentPlace.name, description: currentPlace.description, lighting: currentPlace.lighting },
     places,
     self: {
@@ -629,12 +630,6 @@ function offerBindingForHandle(knowledge: ActorKnowledge, handle: z.infer<typeof
   return binding?.kind === 'offer' ? binding.offerId : undefined;
 }
 
-function isRoutineAvailable(routine: AvailabilityRoutine, instant: number): boolean {
-  if (routine.kind === 'always') return true;
-  const activeWindow = routine.windows.find((window) => window.from <= instant && instant < window.to);
-  return activeWindow?.state === 'available' || (activeWindow === undefined && routine.defaultState === 'available');
-}
-
 function hasCapability(actor: WorldCharacter, capability: z.infer<typeof CharacterCapabilitySchema>): boolean {
   return actor.capabilities.includes(capability);
 }
@@ -642,7 +637,7 @@ function hasCapability(actor: WorldCharacter, capability: z.infer<typeof Charact
 function actorCanAct(actor: WorldCharacter, world: WorldSnapshot, scene: WorldScene): boolean {
   return actor.preparation.kind === 'prepared' && actor.presence.kind === 'present' && actor.presence.sceneId === scene.id &&
     scene.lifecycle.kind === 'open' && scene.participantIds.includes(actor.characterId) && scene.placeIds.includes(actor.placeId) &&
-    actor.availability.kind === 'available' && isRoutineAvailable(actor.routine, world.clock.instant);
+    actor.availability.kind === 'available' && routineIsAvailable({routine:actor.routine,clock:world.clock});
 }
 
 function locationOfCharacter(actor: WorldCharacter): { placeId: z.infer<typeof PlaceIdSchema>; position: z.infer<typeof WorldPointSchema> } {
@@ -780,8 +775,8 @@ function makeExperience(input: {
   });
 }
 
-function availabilityForPerception(character: WorldCharacter, at: number): boolean {
-  return character.availability.kind === 'available' && isRoutineAvailable(character.routine, at);
+function availabilityForPerception(character: WorldCharacter, at: number, world: WorldSnapshot): boolean {
+  return character.availability.kind === 'available' && routineIsAvailable({routine:character.routine,clock:world.clock,instant:at});
 }
 
 /** Whether a prepared scene participant can receive a new perception at this fictional instant. */
@@ -794,7 +789,7 @@ export function characterCanReceiveAt(input: { snapshot: unknown; characterId: u
   return character !== undefined && scene !== undefined && scene.lifecycle.kind === 'open'
     && scene.participantIds.includes(characterId) && character.presence.kind === 'present'
     && character.presence.sceneId === scene.id && scene.placeIds.includes(character.placeId)
-    && availabilityForPerception(character, instant);
+    && availabilityForPerception(character, instant, world);
 }
 
 function speechModality(content: CommunicationContent): z.infer<typeof ModalitySchema> {
@@ -846,7 +841,7 @@ function visibleWitnesses(input: {
   for (const characterId of scene.participantIds) {
     if (characterId === input.actor.characterId) continue;
     const recipient = characterById(input.world, characterId);
-    if (recipient === undefined || recipient.presence.kind !== 'present' || recipient.presence.sceneId !== scene.id || !availabilityForPerception(recipient, input.at)) continue;
+    if (recipient === undefined || recipient.presence.kind !== 'present' || recipient.presence.sceneId !== scene.id || !availabilityForPerception(recipient, input.at, input.world)) continue;
     const modality = isVisuallyReachable(input.world, locationOfCharacter(recipient), sourceLocation) ? 'visual' : undefined;
     if (modality !== undefined) output.push(eventPerception({ ...input, recipient, modality, detail: input.detail }));
   }
@@ -881,7 +876,7 @@ function requestedAudience(input: {
   const candidates = potential.flatMap((id) => {
     const recipient = characterById(input.world, id);
     if (recipient === undefined || recipient.presence.kind !== 'present' || recipient.presence.sceneId !== scene.id ||
-        !availabilityForPerception(recipient, input.world.clock.instant)) return [];
+        !availabilityForPerception(recipient, input.world.clock.instant, input.world)) return [];
     const audible = canPerceive(
       input.world, locationOfCharacter(actor), locationOfCharacter(recipient), channelModality, input.channel,
     );
@@ -1083,7 +1078,7 @@ export function resolveWorldAttempt(input: {
       if (recipientEntity.kind !== 'character' || recipientEntity.characterId === actor.characterId) return notApplied(world, attempt, 'audience-invalid');
       const inventoryEntry = world.inventory.find((entry) => entry.objectEntityId === object.entityId);
       if (inventoryEntry?.location.kind !== 'heldBy' || inventoryEntry.location.entityId !== actor.entityId) return notApplied(world, attempt, 'object-not-available');
-      if (!canInteract(world, actor, recipientEntity) || recipientEntity.presence.kind !== 'present' || recipientEntity.presence.sceneId !== scene.id || !availabilityForPerception(recipientEntity, world.clock.instant)) {
+      if (!canInteract(world, actor, recipientEntity) || recipientEntity.presence.kind !== 'present' || recipientEntity.presence.sceneId !== scene.id || !availabilityForPerception(recipientEntity, world.clock.instant, world)) {
         return notApplied(world, attempt, 'target-not-perceptible');
       }
       const endAt = clockAfter(world, world.actionDurations.offerMs);

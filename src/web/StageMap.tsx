@@ -11,6 +11,7 @@ export type StageMapEntity = {
   details: string;
 };
 export type StageMapData = {
+  dayNightPhase?: RunStageView["dayNightPhase"];
   places: RunStageView["places"];
   connections: RunStageView["connections"];
   doors: RunStageView["doors"];
@@ -50,6 +51,7 @@ export function StageMap({ data }: { data: StageMapData }) {
   return (
     <section className="stage-map-panel" aria-label="Escenografía confirmada">
       <h2>Escenario</h2>
+      {data.dayNightPhase !== undefined && <p aria-label="Fase del ciclo editorial">{data.dayNightPhase === "day" ? "Día" : "Noche"} · fase del corte observado; no modifica la iluminación física.</p>}
       <p>
         Ubicaciones y estados confirmados. La cámara y la selección sólo cambian
         esta vista.

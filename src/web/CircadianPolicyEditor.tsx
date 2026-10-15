@@ -22,11 +22,11 @@ export function CircadianPolicyEditor(props: {
     <div className="section-heading"><h3>Reloj del Escenario</h3><span className={`field-state field-state-${state.kind}`} title={state.detail}>{state.label}</span></div>
     <label>Reloj circadiano<select value={form.mode} onChange={(event) => edit({ ...form, mode: event.target.value })}>
       <option value="">Pendiente</option><option value="manual-only">Avance manual</option>
-      <option value="advance-while-running">Avance automático hacia rutinas</option>
+      <option value="advance-while-running">Avance automático hacia rutinas y fases</option>
     </select></label>
     {form.mode === 'advance-while-running' && <label>Máximo avance por salto · milisegundos<input type="number" min="0" max={Number.MAX_SAFE_INTEGER} step="1" value={form.maxAdvanceMs} onChange={(event) => edit({ ...form, maxAdvanceMs: event.target.value })} /></label>}
-    <p className="field-help">El avance automático busca el próximo límite de una rutina preparada, dentro del máximo elegido y sólo durante ejecución sin trabajo en vuelo. No sigue el reloj del equipo ni acumula tiempo fuera de línea. Cero impide saltos automáticos; un límite más lejano que el máximo no se alcanza mediante saltos parciales.</p>
-    <p className="field-help">Las rutinas actuales usan intervalos con fecha y hora concretas. La repetición diaria y el ciclo de día y noche todavía no están implementados. Cambiar esta política no crea rutinas ni inicia la obra.</p>
+    <p className="field-help">El avance automático busca el próximo límite de una rutina preparada o del ciclo de día y noche, dentro del máximo elegido y sólo durante ejecución sin trabajo en vuelo. No sigue el reloj del equipo ni acumula tiempo fuera de línea. Cero impide saltos automáticos; un límite más lejano que el máximo no se alcanza mediante saltos parciales.</p>
+    <p className="field-help">Las rutinas admiten intervalos con fecha concreta o repetición diaria en la convención del reloj ficticio. El ciclo editorial se configura por separado y no cambia luces ni crea percepciones. Cambiar esta política no crea rutinas ni inicia la obra.</p>
     {error && <p role="alert" className="error">{error}</p>}
     <button onClick={apply}>Aplicar política de reloj</button>
   </section>;

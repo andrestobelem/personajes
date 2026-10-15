@@ -1,3 +1,4 @@
+import { nextActorRoutineBoundary } from '../domain/actor-activation.ts';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
@@ -244,6 +245,13 @@ export async function createRepresentationRuntime(input: {
       await yieldToHost();
       if(closed||admissionSuspended||signal?.aborted||!enabledRuns.has(runId))return begin;
       begin=input.host.journal.beginCoordinatorPulse({runId,emptyStepPolicy:'defer'});
+      if (begin.kind === 'idle') {
+        const world = input.host.journal.loadWorld({ runId });
+        const configuration = ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({ runId }));
+        // A configured day/night cycle may move once without an actor boundary. It must
+        // not generate an endless stream of empty days inside one scheduling operation.
+        if (world === undefined || nextActorRoutineBoundary(world, configuration.roster.activeCharacterIds) === undefined) break;
+      }
     }
     if(begin.kind==='idle'&&!signal?.aborted) {
       const step=input.host.journal.readActiveRunStepJob({runId});

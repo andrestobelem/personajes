@@ -88,6 +88,7 @@ export function stageMapData(stage: RunStageView): StageMapData {
     }
   });
   return {
+    ...(stage.dayNightPhase === undefined ? {} : { dayNightPhase: stage.dayNightPhase }),
     places: stage.places,
     doors: stage.doors,
     connections: stage.connections,

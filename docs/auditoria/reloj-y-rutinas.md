@@ -1,6 +1,6 @@
 # Reloj y rutinas: preparación y límite entre escenas
 
-Corte 40, 15 de octubre de 2026. Implementación parcial del ritmo circadiano requerido; no acredita TIM-01 integral ni un calendario diario.
+Corte histórico 40, 15 de octubre de 2026. La recurrencia y el ciclo que aquí figuraban pendientes se implementan posteriormente en el [corte 41](rutinas-diarias.md). Implementación parcial del ritmo circadiano requerido; no acredita TIM-01 integral ni un calendario diario.
 
 ## Brechas verificadas y correcciones
 
