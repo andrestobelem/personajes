@@ -340,3 +340,7 @@ Una preparación nueva puede elegir pendiente, avance manual o avance automátic
 ## Preparación y observación de ciclos diarios
 
 El operador puede configurar o quitar un ciclo editorial con comienzos de día/noche locales y política compatible explícita. No se asignan horarios iniciales. Las rutinas de los personajes ofrecen repetición diaria, estado fuera de intervalos, HH:mm y fin 24:00; muestran la regla nocturna, DST y diagnósticos. La selección de una rutina mantiene editables sus campos antes de elegir la política. Aplicar/guardar/validar y modo de sólo lectura preservan los límites de la preparación. Editar la fecha ficticia conserva un ciclo ya elegido. El Escenario muestra la fase del snapshot del corte, sin cambiar luz ni crear memoria. [Prueba de navegador y límites](../auditoria/rutinas-diarias.md).
+
+## Audio inicial y configuración efectiva (corte 42)
+
+La preparación tiene editor de audio, modelo explícito, comportamiento TTS, formato/subtítulos y slots elegibles, con referencias conservadas opacas y retirada explícita. En Voces y sonido se editan modo, slots y cuotas de la versión sonora independiente. Guardar o conciliar no genera audio. Las ediciones locales se conservan ante error/refresh y se requiere cargar explícitamente una nueva revisión guardada. Una fuente de preparación obsoleta muestra contexto preservado y botón de conciliación; no se importan silenciosamente los cambios del audio inicial. [Recorrido, pruebas y captura](../auditoria/audio-preparacion-y-admision.md).

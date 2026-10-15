@@ -176,3 +176,7 @@ El [corte 39](../auditoria/cambios-de-circunstancia.md) registra cinco familias 
 ## Evidencia posterior: rutinas diarias
 
 El [corte 41](../auditoria/rutinas-diarias.md) agrega calendario local fixedOffset/IANA con DST, tres días de journal/replay, disponibilidad común a preflight/percepción, cadena diaria hasta conversación Pi controlada y recorrido gráfico de preparación/fase histórica. El gate pasó 670 pruebas, cero fallidas y una omitida exclusiva de Linux. TIM-01/P16 siguen abiertos a aceptación integral; las zonas de la puesta y reproducibilidad entre versiones de tzdb requieren evidencia propia.
+
+## Evidencia posterior: preparación sonora y admisión
+
+El [corte 42](../auditoria/audio-preparacion-y-admision.md) verifica editores inicial/efectivo, contexto/reconciliación, lectura local de evidencia de vinculación y revalidación síncrona antes de iniciar. Incluye SQLite real, transportes controlados y navegador, sin proveedor live. Gate: 693 aprobadas, cero fallidas, una omitida exclusiva de Linux. P21/G4 y aceptación integral siguen pendientes.

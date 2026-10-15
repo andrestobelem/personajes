@@ -21,6 +21,7 @@ import {
   type VoiceClient,
   type VoiceSettingsDocument,
 } from "./voice-client.ts";
+import { VoiceSettingsPanel } from "./VoiceSettingsPanel.tsx";
 import { VoiceHostPanel } from "./VoiceHostPanel.tsx";
 import { VoiceSoundPanel } from "./VoiceSoundPanel.tsx";
 import { VoiceMedia } from "./VoiceMedia.tsx";
@@ -92,6 +93,7 @@ export function VoiceWorkspace({
   const [settings, setSettings] = React.useState<VoiceSettingsDocument | null>(
     null,
   );
+  const [baseStale, setBaseStale] = React.useState(false);
   const [owners, setOwners] = React.useState<
     z.infer<typeof VoiceOwnersSchema>["owners"]
   >([]);
@@ -140,6 +142,7 @@ export function VoiceWorkspace({
   const [message, setMessage] = React.useState<string | null>(null);
   const [refresh, setRefresh] = React.useState(0);
   const [operationRefresh, setOperationRefresh] = React.useState(0);
+  const [metadataValid,setMetadataValid] = React.useState(false);
   const [metadataLoading,setMetadataLoading] = React.useState(true);
   const lifetime = React.useRef<AbortController | null>(null);
   const epoch = React.useRef(0);
@@ -153,6 +156,7 @@ export function VoiceWorkspace({
     lock.current = false;
     setBusy(false);
     setSettings(null);
+    setBaseStale(false);
     setOwners([]);
     setSoundOwners([]);
     setCredential(false);
@@ -170,9 +174,13 @@ export function VoiceWorkspace({
   React.useEffect(() => {
     if (!active) return;
     setMetadataLoading(true);
+    setMetadataValid(false);
     const controller = new AbortController();
     void Promise.allSettled([
-      api.settings(runId, controller.signal),
+      api.settings(runId, controller.signal).then((document) => ({document, baseStale:false})).catch(async (error: unknown) => {
+        if (error instanceof VoiceHttpRejection && error.safeCode === "VOICE_BASE_CONFIGURATION_STALE") return api.reconciliationContext(runId, controller.signal);
+        throw error;
+      }),
       api.owners(runId, controller.signal),
       api.library(controller.signal),
       api.history(runId, controller.signal),
@@ -182,15 +190,18 @@ export function VoiceWorkspace({
     ]).then((results) => {
       if (controller.signal.aborted) return;
       setMetadataLoading(false);
+      setMetadataValid(results.every((result) => result.status === "fulfilled"));
       const [config, people, library, operations, bindings, status, sound] =
         results;
-      if (config?.status === "fulfilled")
+      if (config?.status === "fulfilled") {
+        setBaseStale(config.value.baseStale);
         setSettings((prior) =>
           prior &&
-          prior.value.config.revision > config.value.value.config.revision
+          prior.value.config.revision > config.value.document.value.config.revision
             ? prior
-            : config.value,
+            : config.value.document,
         );
+      }
       if (people?.status === "fulfilled") {
         setOwners(people.value.owners);
         setSelectedOwner((prior) =>
@@ -325,7 +336,10 @@ export function VoiceWorkspace({
               ? prior
               : result.document,
           );
-          setMessage("Variedad registrada por el host.");
+          setBaseStale(false);
+          setMessage(intent.kind === "reconcileSettings"
+            ? "Fuente de preparación conciliada. Se conservó el modo de audio anterior; revisá y guardá explícitamente los ajustes deseados."
+            : intent.kind === "settings" ? "Configuración de audio guardada, sin generar audio." : "Variedad registrada por el host.");
           break;
         case "draft":
           setDraft(result.draft);
@@ -414,7 +428,8 @@ export function VoiceWorkspace({
       if (epoch.current === started) setBusy(false);
     }
   }
-  const blocked = busy || metadataLoading || pending !== null || settings === null;
+  const settingsBlocked = busy || metadataLoading || !metadataValid || pending !== null || settings === null;
+  const blocked = settingsBlocked || baseStale;
   const paidBlocked = blocked || !credential;
   const confirmed = settings?.value.config.spanishVariety.kind === "confirmed";
   const configArgs =
@@ -471,6 +486,7 @@ export function VoiceWorkspace({
           </button>
         </p>
       )}
+      <VoiceSettingsPanel key={runId} runId={runId} document={settings} owners={owners} soundOwners={soundOwners} models={models} blocked={settingsBlocked} stale={baseStale} onIntent={(intent) => void act(intent)} onConsultModels={() => void consult("speech")} />
       {settings && (
         <section className="voice-panel">
           <h2>Convención de español</h2>

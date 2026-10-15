@@ -298,6 +298,16 @@ export function openVoiceConfigStore(input: {
   }
   return Object.freeze({
     read,
+    /** Pure local inspection: absence does not import a version or create a receipt. */
+    peek(runId: string) {
+      const row = db.prepare("SELECT run_id,revision,data,data_hash FROM voice_config_versions WHERE run_id=? ORDER BY revision DESC LIMIT 1").get(runId);
+      if (!row) return null;
+      const stored = verifiedSnapshot(row, runId);
+      const current = base(runId);
+      if (stored.baseRunConfigurationRevision !== current.configurationRevision || stored.baseRunConfigurationHash !== current.configurationHash)
+        throw new Error("VOICE_BASE_CONFIGURATION_STALE");
+      return stored;
+    },
     readHistorical(runId: string, revision: number) {
       const row = db
         .prepare(

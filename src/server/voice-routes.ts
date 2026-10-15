@@ -268,6 +268,19 @@ export function createVoiceRoutes(input: {
               .parse(input.readVoiceOwners?.(id) ?? []);
             return operatorJson({ owners });
           }
+          if (first === "runs" && id && action === "voice-settings" && path[3] === "reconciliation" && path.length === 4) {
+            let baseStale = false;
+            let snapshot;
+            try { snapshot = input.config.read(id); }
+            catch (error) {
+              if (!(error instanceof Error) || error.message !== "VOICE_BASE_CONFIGURATION_STALE") throw error;
+              baseStale = true;
+              snapshot = input.config.readUnreconciled(id);
+            }
+            return operatorJson({ kind: "voice-reconciliation-context", snapshot, baseStale }, 200, {
+              ETag: voiceConfigEtag(id, snapshot.config.revision),
+            });
+          }
           if (first === "runs" && id && action === "voice-settings") {
             const snapshot = input.config.read(id);
             return operatorJson(snapshot, 200, {

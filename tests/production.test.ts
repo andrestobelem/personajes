@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { projectRunPreflightReport } from '../src/application/run-preflight-jobs.ts';
 import { test } from 'node:test';
 import { createEmptyRunConfigurationDraft, ProductionAudioSchema, RunBudgetSchema, RunConfigurationDraftSchema } from '../src/domain/production.ts';
 import type { ProductionRoster } from '../src/domain/production.ts';
@@ -775,4 +777,63 @@ test('presupuestos admiten cero y validan techos configurados antes de ready', (
   assert.equal(RunBudgetSchema.safeParse({...zero,maxConcurrentPiRequests:8}).success,true);
   assert.equal(RunBudgetSchema.safeParse({...ceilings,maxPiCallsPerPulse:2,maxConcurrentPiRequests:3}).success,false);
   assert.equal(RunBudgetSchema.safeParse({...ceilings,maxPiCallsPerRun:1,maxPiCallsPerPulse:2}).success,false);
+});
+
+test('preflight evaluates effective audio enabled after disabled Ready, and disabling the last slot clears binding deferral',async()=>{
+ const configuration=readyFixture({variety:SpanishVarietyForActingSchema.parse({kind:'confirmed',label:'Español rioplatense',source:'operator',confirmedBy:'operator',confirmedAt:recordedAt})});
+ const effectiveConfig={revision:2,spanishVariety:configuration.spanishVariety,audioMode:{kind:'enabled',language:'es',ttsMode:'manual-per-publication',ttsModelId:'speech-model',outputFormat:'mp3_44100_128',subtitles:true},speakerSlots:{[actorId]:{kind:'enabled-unbound'}},narratorSlot:{kind:'absent'},soundEffectSlots:{}};
+ let checks=0;
+ const report=await createProductionPreflightPort({host:hostFixture({async readVoiceReadiness(){checks++;return {kind:'ready',credential:'present',effectiveConfig,bindings:[]};}})}).preflight({configuration,observedAt:recordedAt});
+ assert.equal(checks,1);assert.ok(report.checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'&&check.code==='voice-binding-required'));
+ assert.ok(projectRunPreflightReport(report,recordedAt).checks.some(check=>check.checkId==='voice'&&check.code==='voice-binding-required'));
+ const disabled=await createProductionPreflightPort({host:hostFixture({async readVoiceReadiness(){return {kind:'ready',credential:'present',effectiveConfig:{...effectiveConfig,speakerSlots:{[actorId]:{kind:'disabled'}}},bindings:[]};}})}).preflight({configuration,observedAt:recordedAt});
+ assert.ok(disabled.checks.some(check=>check.checkId==='voice'&&check.kind==='passed'));
+ const missing=await createProductionPreflightPort({host:hostFixture({async readVoiceReadiness(){return {kind:'ready',credential:'missing',effectiveConfig,bindings:[]};}})}).preflight({configuration,observedAt:recordedAt});
+ assert.ok(missing.checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'&&check.code==='voice-credential-missing'));
+});
+
+test('effective speech bindings replace frozen unbound slots and must match voice owner/model/variety',async()=>{
+ const variety=SpanishVarietyForActingSchema.parse({kind:'confirmed',label:'Español rioplatense',source:'operator',confirmedBy:'operator',confirmedAt:recordedAt});
+ const mode={kind:'enabled',language:'es',ttsMode:'manual-per-publication',ttsModelId:'speech-model',outputFormat:'mp3_44100_128',subtitles:true};
+ const configuration=readyFixture({variety,audio:ProductionAudioSchema.parse({mode,speakerSlots:[{characterId:actorId,slot:{kind:'enabled-unbound'}}],narratorSlot:{kind:'absent'},soundEffectSlots:[]})});
+ const id=randomUUID();
+ const effectiveConfig={revision:3,spanishVariety:variety,audioMode:mode,speakerSlots:{[actorId]:{kind:'enabled-bound',speechBindingId:id}},narratorSlot:{kind:'absent'},soundEffectSlots:{}};
+ const binding={kind:'speech',owner:{kind:'character',characterId:actorId},speechBindingId:id,provider:'elevenlabs',language:'es',ttsModelId:'speech-model',varietyLabel:variety.label,validationEvidenceId:randomUUID()};
+ const run=async(bindings:unknown[])=>createProductionPreflightPort({host:hostFixture({async readVoiceReadiness(){return {kind:'ready',credential:'present',effectiveConfig,bindings};}})}).preflight({configuration,observedAt:recordedAt});
+ assert.ok((await run([binding])).checks.some(check=>check.checkId==='voice'&&check.kind==='passed'));
+ for (const wrong of [{...binding,ttsModelId:'other-model'},{...binding,varietyLabel:'Otra variedad'},{...binding,owner:{kind:'narrator'}}]) assert.ok((await run([wrong])).checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'));
+});
+
+test('preflight cannot accept corrupt effective settings or unavailable local evidence merely because Ready audio was off',async()=>{
+ const configuration=readyFixture();
+ for(const result of [{kind:'unavailable',code:'voice-local-evidence-unavailable'},{kind:'ready',credential:'missing',effectiveConfig:{revision:'bad'},bindings:[]}]) {
+  const report=await createProductionPreflightPort({host:hostFixture({async readVoiceReadiness(){return result;}})}).preflight({configuration,observedAt:recordedAt});
+  assert.ok(report.checks.some(check=>check.checkId==='voice'&&check.kind==='unavailable'));
+ }
+});
+
+test('initial enabled narrator requires narration and bound effects require active nonverbal owners',()=>{
+ const base=readyFixture();
+ const mode={kind:'enabled',language:'es',ttsMode:'manual-per-publication',ttsModelId:'speech-model',outputFormat:'mp3_44100_128',subtitles:true};
+ const draft=draftFixture();
+ const variety=SpanishVarietyForActingSchema.parse({kind:'confirmed',label:'Español rioplatense',source:'operator',confirmedBy:'operator',confirmedAt:recordedAt});
+ for(const audio of [
+  {mode,speakerSlots:[{characterId:actorId,slot:{kind:'disabled'}}],narratorSlot:{kind:'enabled-unbound'},soundEffectSlots:[]},
+  {...base.audio,soundEffectSlots:[{characterId:actorId,slot:{kind:'enabled-bound',soundBindingId:randomUUID()}}]},
+ ]) {
+   const result=validateRunConfiguration({draft:RunConfigurationDraftSchema.parse({...draft,spanishVariety:configured(variety),audio:configured(ProductionAudioSchema.parse(audio))})});
+   assert.equal(result.kind,'invalid');if(result.kind==='invalid')assert.ok(result.issues.some(issue=>issue.code==='speaker-slot-mismatch'));
+ }
+});
+
+test('bound nonverbal effects require credentials and matching assets independently of speech audio mode',async()=>{
+ const prepared=preparedFixture({nonverbal:true});
+ const configuration=readyFixture({prepared,world:worldFixture({nonverbal:true})});
+ const id=randomUUID();
+ const effectiveConfig={revision:2,spanishVariety:configuration.spanishVariety,audioMode:{kind:'disabled'},speakerSlots:{},narratorSlot:{kind:'absent'},soundEffectSlots:{[prepared.characterId]:{kind:'enabled-bound',soundBindingId:id}}};
+ const binding={kind:'sound-effect',owner:{kind:'character',characterId:prepared.characterId},soundBindingId:id,provider:'elevenlabs',assetState:'ready'};
+ const run=(credential:string,bindings:unknown[])=>createProductionPreflightPort({host:hostFixture({async loadCurrentWorldSnapshot(){return configuration.worldSnapshot;},async loadPreparedActorContexts(){return {kind:'loaded',runId:configuration.runId,actors:configuration.roster.preparedCharacters};},async readVoiceReadiness(){return {kind:'ready',credential,effectiveConfig,bindings};}})}).preflight({configuration,observedAt:recordedAt});
+ const present=await run('present',[binding]);assert.ok(present.checks.some(check=>check.checkId==='voice'&&check.kind==='passed'),JSON.stringify(present));
+ assert.ok((await run('missing',[binding])).checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'&&check.code==='voice-credential-missing'));
+ assert.ok((await run('present',[])).checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'&&check.code==='voice-binding-invalid'));
 });

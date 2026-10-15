@@ -79,6 +79,7 @@ try {
     journal: host.journal, ownerToken: host.ownerToken, signal: oauthController.signal,
     readCredentialFingerprint: authentication.readCredentialFingerprint,
     createHost: () => createProductionPreflightHost({ journal: host.journal, catalog, piRuntime, authentication,
+      readVoiceReadiness: async request => voices?.readPreflightReadiness(request) ?? Promise.resolve({kind:'unavailable',code:'voice-runtime-unavailable'}),
       roleReadiness:()=>representation?.roleReadiness??{actor:false,continuista:false,director:false,narrator:false},
       ...(process.env.PERSONAJES_ICM_BINARY === undefined ? {} : { icmBinaryPath: process.env.PERSONAJES_ICM_BINARY }) }),
   });
@@ -118,7 +119,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
     journal: host.journal,
     ...(preflightJobs === undefined ? {} : { preflights: preflightJobs }),
     ...(representation === undefined ? {} : { runtime: representation }),
-    ...(voices===undefined?{}:{readVoiceBudget:(runId:string)=>voices!.service.budget(runId)}),
+    ...(voices===undefined?{}:{readVoiceBudget:(runId:string)=>voices!.service.budget(runId),readVoiceReadiness:(request:{runId:string;configRevision:number})=>voices!.readPreflightReadiness(request)}),
   });
 async function closeWorkersAndHost() {
   oauthController.abort();

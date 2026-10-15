@@ -89,6 +89,7 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 
 - [Preflight durable](auditoria/preflight-durable.md): comprobación explícita del corte guardado, recuperación y obsolescencia, sin inicio ni inferencia implícitos.
 
+- [Audio: preparación, configuración efectiva y admisión](auditoria/audio-preparacion-y-admision.md): editores, conciliación, evidencia local y controles de inicio.
 - [Rutinas diarias y ciclo de día/noche](auditoria/rutinas-diarias.md), [ADR 0009](adr/0009-rutinas-locales-y-ciclo-editorial.md), [entrevista](auditoria/dialogo-rutinas-diarias.md) y [respuestas](auditoria/rutinas-diarias-respuestas.md).
 - [Reloj y rutinas: preparación, evidencia y límite entre escenas](auditoria/reloj-y-rutinas.md).
 - [Cambios de circunstancia: contrato, implementación y evidencia](auditoria/cambios-de-circunstancia.md): cinco familias físicas, entrega situada y límites de aceptación.

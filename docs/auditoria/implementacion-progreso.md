@@ -2,6 +2,14 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 42: preparación sonora, configuración efectiva y admisión
+
+El editor inicial reemplaza la sección de audio sin controles; el panel de voces ahora edita modo, slots y cuotas, y ofrece conciliación explícita cuando cambia la preparación base. Referencias opacas se conservan sin presumir vigencia y guardar no genera audio. El navegador verificó Ready r1, configuración sonora r1, edición de base r2, conciliación sonora r2 y reapertura/apagado en r3 conservando cuota 2.
+
+Se corrigieron el puerto de readiness siempre no disponible, la comparación contra audio inicial congelado y el uso de un preflight anterior tras cambiar voces. La comprobación efectiva local valida credencial/evidencia/artefactos sin proveedor y se repite síncronamente antes del CAS de start/resume/step. Replay y pausa conservan su semántica. [Contrato, límites, pruebas y captura](audio-preparacion-y-admision.md).
+
+Gate: TypeScript y **694 pruebas: 693 aprobadas, cero fallidas y una omitida por requerir Linux**. Build: 446 módulos. No se hicieron llamadas a servicios reales ni se acreditó P21 live. El objetivo y la aceptación de los 77 requisitos siguen abiertos.
+
 ## Corte 41: rutinas diarias locales y ciclo de día/noche
 
 Se implementó recurrencia diaria con ventanas nocturnas, resolución fixedOffset/IANA y política compatible explícita, compartida por preflight/acción/percepción/convocatoria. El ciclo editorial configurable se muestra al corte observado y se mantiene separado de iluminación y memoria. La agenda no genera infinitos días vacíos si no hay fronteras actorales. Una revisión independiente detectó y permitió corregir la entrega indebida del horario editorial al actor.

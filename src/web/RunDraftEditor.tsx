@@ -1,4 +1,5 @@
 import React from 'react';
+import { AudioPreparationEditor } from './AudioPreparationEditor.tsx';
 import { DayNightCycleEditor } from './DayNightCycleEditor.tsx';
 import { CircadianPolicyEditor } from './CircadianPolicyEditor.tsx';
 import { InferenceProfileEditor } from './InferenceProfileEditor.tsx';
@@ -8,9 +9,9 @@ import { CharacterPreparationEditor } from './CharacterPreparationEditor.tsx';
 import { HumanPreparationEditor } from './HumanPreparationEditor.tsx';
 import type { CatalogPage } from '../domain/http.ts';
 import { effectiveRequestTimeoutMs, RunBudgetSchema, type RunConfigurationDraft } from '../domain/production.ts';
-import { changeDraftField, confirmDraftField, DRAFT_SECTIONS, describeDraftSection, draftFieldState, draftMomentInputs, setDraftMoment } from './draft-form.ts';
+import { changeDraftField, confirmDraftField, DRAFT_SECTIONS, draftFieldState, draftMomentInputs, setDraftMoment } from './draft-form.ts';
 
-type Pending = 'moment' | 'place' | 'line' | 'budget' | 'continuity' | 'humanParticipants' | 'world' | 'character' | 'circadian' | 'dayNight';
+type Pending = 'moment' | 'place' | 'line' | 'budget' | 'continuity' | 'humanParticipants' | 'world' | 'character' | 'circadian' | 'dayNight' | 'audio';
 export function RunDraftEditor(props: {
   draft: RunConfigurationDraft; initialDirty?: boolean; catalog: CatalogPage['items']; saving: boolean; lifecycle?: string; readOnly?: boolean; message?: string;
   onSave: (draft: RunConfigurationDraft) => void; onValidate: () => void; onDirty: (dirty: boolean) => void;
@@ -62,7 +63,7 @@ export function RunDraftEditor(props: {
       <CircadianPolicyEditor draft={draft} onChange={update} onPendingChange={(value) => pendingChange('circadian', value)} />
       <ContinuityPreparationEditor draft={draft} onChange={update} onPendingChange={(value) => pendingChange('continuity', value)} />
       <HumanPreparationEditor draft={draft} onChange={update} onPendingChange={(value) => pendingChange('humanParticipants', value)} />
-      {(['audio'] as const).map((field) => <section className="draft-section" id={`draft-${field}`} key={field}><div className="section-heading"><h3>{DRAFT_SECTIONS.find(([key]) => key === field)?.[1]}</h3>{status(field)}</div><p>{describeDraftSection(draft, field)}</p><p className="field-help">Esta sección se conserva al guardar. Su editor específico todavía no está conectado.</p></section>)}
+      <AudioPreparationEditor draft={draft} catalog={props.catalog} onChange={update} onPendingChange={(value) => pendingChange('audio', value)} />
       <section className="draft-section draft-checklist" aria-label="Estado de las secciones"><h3>Preparación disponible</h3><ul>{DRAFT_SECTIONS.map(([field, label]) => { const value = draftFieldState(draft[field]); return <li key={field}><a href={`#draft-${field}`}>{label}</a>{status(field)}{draft[field]?.kind === 'proposed' && <button onClick={() => update(confirmDraftField({ draft, field }))}>Aceptar propuesta</button>}<small>{value.detail}</small></li>; })}</ul><p className="field-help">Las secciones en edición se conservan localmente hasta aplicarlas. Guardar conserva el candidato; validar verifica su coherencia antes de dejar la puesta lista.</p></section>
     </fieldset>
   </div>;

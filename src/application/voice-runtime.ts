@@ -4,7 +4,7 @@ import {
   createElevenLabsClient,
   type ElevenLabsClient,
 } from "../adapters/elevenlabs.ts";
-import { ReadyRunConfigurationSchema } from "./production-preflight.ts";
+import { VoiceReadinessSchema, ReadyRunConfigurationSchema } from "./production-preflight.ts";
 import type { openLocalHost } from "./local-host.ts";
 import { openVoiceCredentialStore } from "./voice-credentials.ts";
 import { openVoiceConfigStore } from "./voice-config-store.ts";
@@ -278,6 +278,38 @@ export function createVoiceRuntime(input: {
     config,
     service,
     credentials,
+    /** Read-only local readiness: no import of defaults, provider discovery or paid request. */
+    readPreflightReadiness(request: {runId:string;configRevision:number}) {
+      try {
+        const configuration = ready(request.runId);
+        if (configuration.runId !== request.runId || configuration.configRevision !== request.configRevision) return {kind:"unavailable",code:"voice-configuration-stale"};
+        const stored = config.peek(request.runId);
+        const effectiveConfig = stored?.config ?? VoiceConfigSchema.parse({
+          revision:0,spanishVariety:configuration.spanishVariety,audioMode:configuration.audio.mode,
+          speakerSlots:Object.fromEntries(configuration.audio.speakerSlots.map(entry=>[entry.characterId,entry.slot])),
+          narratorSlot:configuration.audio.narratorSlot,soundEffectSlots:Object.fromEntries(configuration.audio.soundEffectSlots.map(entry=>[entry.characterId,entry.slot])),
+        });
+        const bindings: unknown[] = [];
+        for (const [characterId, slot] of Object.entries(effectiveConfig.speakerSlots)) {
+          if (effectiveConfig.audioMode.kind !== "enabled" || slot.kind !== "enabled-bound") continue;
+          const binding = service.readBindingProof({runId:request.runId,kind:"speech",bindingId:slot.speechBindingId});
+          if (binding.kind !== "speech" || binding.owner.kind !== "character" || binding.owner.id !== characterId) throw new Error("VOICE_BINDING_OWNER_INVALID");
+          bindings.push({kind:"speech",owner:{kind:"character",characterId},speechBindingId:binding.speechBindingId,provider:binding.provider,language:binding.language,ttsModelId:binding.ttsModelId,varietyLabel:binding.varietyLabel,validationEvidenceId:binding.validationEvidenceId});
+        }
+        if (effectiveConfig.audioMode.kind === "enabled" && configuration.narrationMode.kind === "enabled" && effectiveConfig.narratorSlot.kind === "enabled-bound") {
+          const binding = service.readBindingProof({runId:request.runId,kind:"speech",bindingId:effectiveConfig.narratorSlot.speechBindingId});
+          if (binding.kind !== "speech" || binding.owner.kind !== "narrator") throw new Error("VOICE_BINDING_OWNER_INVALID");
+          bindings.push({kind:"speech",owner:{kind:"narrator"},speechBindingId:binding.speechBindingId,provider:binding.provider,language:binding.language,ttsModelId:binding.ttsModelId,varietyLabel:binding.varietyLabel,validationEvidenceId:binding.validationEvidenceId});
+        }
+        for (const [characterId,slot] of Object.entries(effectiveConfig.soundEffectSlots)) {
+          if (slot.kind !== "enabled-bound") continue;
+          const binding = service.readBindingProof({runId:request.runId,kind:"sound-effect",bindingId:slot.soundBindingId});
+          if (binding.kind !== "nonverbal-effect") throw new Error("VOICE_BINDING_OWNER_INVALID");
+          bindings.push({kind:"sound-effect",owner:{kind:"character",characterId},soundBindingId:binding.soundBindingId,provider:"elevenlabs",assetState:"ready"});
+        }
+        return VoiceReadinessSchema.parse({kind:"ready",effectiveConfig,credential:credentials.status().credentialConfigured?"present":"missing",bindings});
+      } catch { return {kind:"unavailable",code:"voice-local-evidence-unavailable"}; }
+    },
     /** Host-only source resolver; never accepts caller text or provider paths. */
     readPublication,
     wakeWorker,

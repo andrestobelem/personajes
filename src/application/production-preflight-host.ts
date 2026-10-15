@@ -37,7 +37,7 @@ function icmRead(binary: string, args: readonly string[], env: NodeJS.ProcessEnv
   return new Promise((resolve, reject) => execFile(binary, [...args], { timeout: 2_000, maxBuffer: 1_000_000, encoding: 'utf8', env }, (error, stdout) => error ? reject(new Error('ICM readonly check is unavailable.')) : resolve(stdout.trim())));
 }
 /** Reads actual host resources. It never creates sessions/ICM databases, refreshes auth or probes paid providers. */
-export function createProductionPreflightHost(input: { journal: Journal; catalog: LoadedCatalog; piRuntime: PiRuntime; authentication: ReturnType<typeof createPiAuthFingerprint>; icmBinaryPath?: string; roleReadiness?: () => {actor:boolean;continuista:boolean;director:boolean;narrator:boolean} }): ProductionPreflightHostPort & { readPrivateEvidence(input: { configuration: ReadyRunConfiguration }): RunPreflightPrivateEvidence } {
+export function createProductionPreflightHost(input: { journal: Journal; catalog: LoadedCatalog; piRuntime: PiRuntime; authentication: ReturnType<typeof createPiAuthFingerprint>; icmBinaryPath?: string; readVoiceReadiness?: ProductionPreflightHostPort['readVoiceReadiness']; roleReadiness?: () => {actor:boolean;continuista:boolean;director:boolean;narrator:boolean} }): ProductionPreflightHostPort & { readPrivateEvidence(input: { configuration: ReadyRunConfiguration }): RunPreflightPrivateEvidence } {
   const journal = input.journal;
   const captured = new Map<InferenceProvider, RunPreflightPrivateEvidence>();
   function evidence(provider: InferenceProvider) {
@@ -179,6 +179,6 @@ export function createProductionPreflightHost(input: { journal: Journal; catalog
           activePiRequests: actual.activePiRequests, wallTimeUsedMs: actual.wallTimeMeasuredMs };
       } catch { return { kind: 'unavailable', code: 'run-budget-unavailable' }; }
     },
-    async readVoiceReadiness() { return { kind: 'unavailable', code: 'voice-runtime-unavailable' }; },
+    async readVoiceReadiness(request) { return input.readVoiceReadiness?.(request) ?? { kind: 'unavailable', code: 'voice-runtime-unavailable' }; },
   };
 }

@@ -182,3 +182,9 @@ La documentación API marca header `xi-api-key` como opcional en algunos schemas
 - Decisión reversible del integrador registrada en esta spec: audio apagado en puesta nueva; al habilitar, TTS automático sólo para publicaciones futuras, con modo manual disponible, reproducción siempre bajo gesto y sin backfill. No es una preferencia atribuida a la persona usuaria.
 - VOZ-03 exige receta de Fang como efectos. La creación live de SFX queda como complemento opcional y explícito; sólo se incluye en gate live si se configura/selecciona, sin convertirla en bloqueo del producto cuando no se usa.
 - La calibración acústica está pendiente de acceso y escucha de YouTube; recetas y fixtures no la sustituyen. No se autoriza en este borrador ningún request a ElevenLabs ni se incurre en gasto.
+
+## Readiness efectiva y admisión local
+
+El preflight consulta `VoiceRuntime.readPreflightReadiness` local, sin importar configuraciones, generar artefactos ni llamar al proveedor. La configuración sonora efectiva tiene precedencia sobre el audio inicial congelado para esta comprobación. La evidencia de habla enlaza aceptación, prueba congelada, escucha, procedencia y bytes; una referencia histórica sin ese enlace requiere validación nueva. SFX exige su asset/aceptación exactos. Credencial presente significa sólo disponibilidad local, no acceso live probado.
+
+La admisión de start/resume/step vuelve a evaluar esa evidencia de manera síncrona justo antes del CAS de lifecycle, sin intercalar awaits. Así, cambiar configuración sonora, credencial o prueba después de un preflight no habilita un inicio con datos anteriores. Replays conservan el recibo; pausa/stop/close no dependen de este gate. El panel permite modo/slots/cuotas y conciliación explícita de base sin sintetizar; [evidencia del corte 42](../auditoria/audio-preparacion-y-admision.md).

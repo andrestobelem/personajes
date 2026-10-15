@@ -2,6 +2,7 @@ import { routineIsAvailable, routineCalendarDiagnostics, dayNightCalendarDiagnos
 import { PreflightSnapshotFenceSchema as RunSnapshotFenceSchema, PreflightCheckSchema, PreflightReportSchema, type PreflightCheck, type PreflightReport } from '../domain/preflight-report.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { VoiceConfigSchema } from '../domain/voice.ts';
 import { SessionModeSchema } from '../domain/http.ts';
 import {
   isInferenceAuthenticationMethodAllowed, LEGACY_INFERENCE_PROFILE, PersistedInferenceProfileSchema,
@@ -198,6 +199,7 @@ function validateAudioConfiguration(input: {
   audio: ProductionAudio;
   roster: ProductionRoster;
   variety: SpanishVarietyForActing;
+  narrationMode: NarrationMode;
   issues: RunConfigurationValidationIssue[];
 }): void {
   const preparedById = new Map(input.roster.preparedCharacters.map((character) => [character.characterId, character]));
@@ -226,6 +228,16 @@ function validateAudioConfiguration(input: {
         detail: 'El binding de voz debe identificar una validación persistida.',
       });
     }
+  }
+
+  for (const entry of input.audio.soundEffectSlots) {
+    const prepared = preparedById.get(entry.characterId);
+    if (!active.has(entry.characterId) || prepared?.voice.value.kind !== 'nonverbal') {
+      addIssue(input.issues,{code:'speaker-slot-mismatch',field:`audio.soundEffectSlots.${entry.characterId}`,detail:'Cada slot de efecto no verbal debe pertenecer a un personaje activo cuya ficha declara voz no verbal.'});
+    }
+  }
+  if (input.audio.mode.kind === 'enabled' && input.narrationMode.kind !== 'enabled' && (input.audio.narratorSlot.kind === 'enabled-bound' || input.audio.narratorSlot.kind === 'enabled-unbound')) {
+    addIssue(input.issues,{code:'speaker-slot-mismatch',field:'audio.narratorSlot',detail:'El slot del narrador requiere narración habilitada cuando el audio está activado.'});
   }
 
   if (input.audio.mode.kind === 'enabled') {
@@ -320,7 +332,7 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
     return RunConfigurationValidationResultSchema.parse({ kind: 'invalid', runId: draft.runId, issues: worldIssues });
   }
   const world = worldResult.data;
-  validateReadyCandidate({ runId: draft.runId, world, fictionalAt, continuity, roster, humanParticipants, audio, dramaticLine, spanishVariety, budget, issues });
+  validateReadyCandidate({ runId: draft.runId, world, fictionalAt, continuity, roster, humanParticipants, audio, dramaticLine, spanishVariety, narrationMode, budget, issues });
   if (issues.length > 0) {
     return RunConfigurationValidationResultSchema.parse({ kind: 'invalid', runId: draft.runId, issues });
   }
@@ -408,12 +420,13 @@ function validateReadyCandidate(input: {
   roster: ProductionRoster;
   humanParticipants: HumanParticipantProfiles;
   audio: ProductionAudio;
+  narrationMode: NarrationMode;
   dramaticLine: DramaticLine;
   spanishVariety: SpanishVarietyForActing;
   budget: RunBudget;
   issues: RunConfigurationValidationIssue[];
 }): void {
-  const { world, continuity, roster, humanParticipants, audio, spanishVariety, issues } = input;
+  const { world, continuity, roster, humanParticipants, audio, spanishVariety, narrationMode, issues } = input;
   const add = (code: RunConfigurationValidationIssue['code'], field: string, detail: string) => addIssue(issues, { code, field, detail });
 
   if (world.runId !== input.runId) add('world-run-mismatch', 'worldSnapshot.runId', 'El snapshot debe pertenecer a la corrida que se está preparando.');
@@ -494,7 +507,7 @@ function validateReadyCandidate(input: {
   if (roster.activeCharacterIds.length > 0 && spanishVariety.label.trim().length === 0) {
     add('variety-required', 'spanishVariety', 'La actuación textual requiere una variedad española declarada, aunque siga siendo propuesta.');
   }
-  validateAudioConfiguration({ audio, roster, variety: spanishVariety, issues });
+  validateAudioConfiguration({ audio, roster, variety: spanishVariety, narrationMode, issues });
 }
 
 function validateHumanParticipants(input: {
@@ -559,6 +572,7 @@ function validateReadyConfiguration(configuration: ReadyRunConfiguration): RunCo
     roster: configuration.roster,
     humanParticipants: configuration.humanParticipants,
     audio: configuration.audio,
+    narrationMode: configuration.narrationMode,
     dramaticLine: configuration.dramaticLine,
     spanishVariety: configuration.spanishVariety,
     budget: configuration.budget,
@@ -790,10 +804,11 @@ const VoiceReadinessBindingSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
-const VoiceReadinessSchema = z.discriminatedUnion('kind', [
+export const VoiceReadinessSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('ready'),
     credential: z.enum(['present', 'missing']),
+    effectiveConfig: VoiceConfigSchema.optional(),
     bindings: z.array(VoiceReadinessBindingSchema).max(1_000),
   }),
   z.strictObject({ kind: z.literal('unavailable'), code: z.string().min(1).max(100) }),
@@ -835,7 +850,7 @@ export type ProductionPreflightHostPort = {
     runId: z.infer<typeof RunIdSchema>;
     budget: RunBudget;
   }): Promise<unknown>;
-  /** Called only if audio or a bound nonverbal effect is selected. Never submits generation requests. */
+  /** Reads effective presentation settings even when the frozen Ready audio was disabled. Never submits generation requests. */
   readVoiceReadiness(input: {
     runId: z.infer<typeof RunIdSchema>;
     configRevision: z.infer<typeof RevisionSchema>;
@@ -1024,51 +1039,83 @@ function validateVoice(input: {
     input.checks.push(check({ kind: 'unavailable', checkId: 'voice', code: input.result.code, detail: 'No se pudo leer el estado registrado de credencial, binding y asset de voz.' }));
     return;
   }
-  if (input.expected.audio.mode.kind === 'enabled' && input.result.credential !== 'present') {
+  const effective = input.result.effectiveConfig;
+  const effectiveAudio = effective === undefined ? undefined : ProductionAudioSchema.safeParse({
+    mode:effective.audioMode,
+    speakerSlots:Object.entries(effective.speakerSlots).map(([characterId,slot])=>({characterId,slot})),
+    narratorSlot:effective.narratorSlot,
+    soundEffectSlots:Object.entries(effective.soundEffectSlots).map(([characterId,slot])=>({characterId,slot})),
+  });
+  if (effectiveAudio !== undefined && !effectiveAudio.success) {
+    input.checks.push(check({kind:'blocked',checkId:'voice',code:'voice-binding-invalid',detail:'Las identidades de los slots efectivos no cumplen el contrato del reparto.'})); return;
+  }
+  const expected = effective === undefined || effectiveAudio === undefined ? input.expected : {
+    ...input.expected, spanishVariety: effective.spanishVariety, audio:effectiveAudio.data,
+  };
+  const audioIssues: RunConfigurationValidationIssue[] = [];
+  validateAudioConfiguration({audio:expected.audio, roster:expected.roster,variety:expected.spanishVariety,narrationMode:expected.narrationMode,issues:audioIssues});
+  if (audioIssues.length > 0) {
+    input.checks.push(check({kind:'blocked',checkId:'voice',code:'voice-binding-invalid',detail:audioIssues[0]?.detail ?? 'Configuración de audio incompatible.'})); return;
+  }
+  const needsAudio = expected.audio.mode.kind === 'enabled' || expected.audio.soundEffectSlots.some(entry=>entry.slot.kind==='enabled-bound');
+  if (!needsAudio) { input.checks.push(check({kind:'passed',checkId:'voice',detail:'El audio efectivo está desactivado y no hay efectos vinculados; no se contacta al proveedor.'})); return; }
+  if (input.result.credential !== 'present') {
     input.checks.push(check({ kind: 'blocked', checkId: 'voice', code: 'voice-credential-missing', detail: 'El audio está activado y la credencial de host no está disponible.' }));
     return;
   }
   const expectedSpeech: Array<{ owner: z.infer<typeof VoiceOwnerSchema>; bindingId: string }> = [];
-  if (input.expected.audio.mode.kind === 'enabled') {
-    for (const entry of input.expected.audio.speakerSlots) {
+  if (expected.audio.mode.kind === 'enabled') {
+    for (const entry of expected.audio.speakerSlots) {
       if (entry.slot.kind === 'enabled-bound') {
         expectedSpeech.push({ owner: { kind: 'character', characterId: entry.characterId }, bindingId: entry.slot.speechBindingId });
       }
     }
-    if (input.expected.narrationMode.kind === 'enabled' && input.expected.audio.narratorSlot.kind === 'enabled-bound') {
-      expectedSpeech.push({ owner: { kind: 'narrator' }, bindingId: input.expected.audio.narratorSlot.speechBindingId });
+    if (expected.narrationMode.kind === 'enabled' && expected.audio.narratorSlot.kind === 'enabled-bound') {
+      expectedSpeech.push({ owner: { kind: 'narrator' }, bindingId: expected.audio.narratorSlot.speechBindingId });
     }
   }
   const actualSpeech = input.result.bindings.filter((binding) => binding.kind === 'speech');
-  const allSpeechMatch = expectedSpeech.every((expected) => actualSpeech.some((actual) =>
-    actual.speechBindingId === expected.bindingId
-    && isDeepStrictEqual(actual.owner, expected.owner)
+  const allSpeechMatch = expectedSpeech.every((selection) => actualSpeech.some((actual) =>
+    actual.speechBindingId === selection.bindingId
+    && isDeepStrictEqual(actual.owner, selection.owner)
     && actual.language === 'es'
-    && actual.ttsModelId === (input.expected.audio.mode.kind === 'enabled' ? input.expected.audio.mode.ttsModelId : actual.ttsModelId)
-    && input.expected.spanishVariety.kind === 'confirmed'
-    && actual.varietyLabel === input.expected.spanishVariety.label));
-  const expectedEffects = input.expected.audio.soundEffectSlots.flatMap((entry) => entry.slot.kind === 'enabled-bound'
+    && actual.ttsModelId === (expected.audio.mode.kind === 'enabled' ? expected.audio.mode.ttsModelId : actual.ttsModelId)
+    && expected.spanishVariety.kind === 'confirmed'
+    && actual.varietyLabel === expected.spanishVariety.label));
+  const expectedEffects = expected.audio.soundEffectSlots.flatMap((entry) => entry.slot.kind === 'enabled-bound'
     ? [{ characterId: entry.characterId, bindingId: entry.slot.soundBindingId }]
     : []);
   const actualEffects = input.result.bindings.filter((binding) => binding.kind === 'sound-effect');
   const allEffectsMatch = expectedEffects.every((expected) => actualEffects.some((actual) =>
     actual.owner.characterId === expected.characterId && actual.soundBindingId === expected.bindingId));
-  const pendingSpeakers = input.expected.audio.mode.kind === 'enabled'
-    ? input.expected.audio.speakerSlots.filter((entry) => entry.slot.kind === 'enabled-unbound')
+  const pendingSpeakers = expected.audio.mode.kind === 'enabled'
+    ? expected.audio.speakerSlots.filter((entry) => entry.slot.kind === 'enabled-unbound')
     : [];
-  const pendingNarrator = input.expected.audio.mode.kind === 'enabled'
-    && input.expected.narrationMode.kind === 'enabled'
-    && input.expected.audio.narratorSlot.kind === 'enabled-unbound';
+  const pendingNarrator = expected.audio.mode.kind === 'enabled'
+    && expected.narrationMode.kind === 'enabled'
+    && expected.audio.narratorSlot.kind === 'enabled-unbound';
   if (!allSpeechMatch || !allEffectsMatch) {
     input.checks.push(check({ kind: 'blocked', checkId: 'voice', code: 'voice-binding-invalid', detail: 'Un binding seleccionado no coincide con el registro validado y la variedad española vigente.' }));
     return;
   }
   if (pendingSpeakers.length > 0 || pendingNarrator) {
     const pendingCount = pendingSpeakers.length + (pendingNarrator ? 1 : 0);
-    input.checks.push(check({ kind: 'deferred', checkId: 'voice', detail: `${pendingCount} slot(s) siguen sin binding; esas salidas conservan texto y no sintetizan audio.` }));
+    const detail = `${pendingCount} slot(s) siguen sin binding; esas salidas conservan texto y no sintetizan audio.`;
+    input.checks.push(check(effective === undefined ? {kind:'deferred',checkId:'voice',detail} : {kind:'blocked',checkId:'voice',code:'voice-binding-required',detail}));
     return;
   }
   input.checks.push(check({ kind: 'passed', checkId: 'voice', detail: 'Credencial, bindings y assets seleccionados coinciden con la configuración de esta puesta.' }));
+}
+
+/** Same voice gate for the final local start fence; never invokes a host or provider. */
+export function evaluateVoiceReadiness(input: {expected:ReadyRunConfiguration;result:unknown}):PreflightCheck {
+  const parsed = VoiceReadinessSchema.safeParse(input.result);
+  if (!parsed.success) return check({kind:'unavailable',checkId:'voice',code:'host-state-invalid',detail:'El estado efectivo de voz no cumple su contrato.'});
+  const checks:PreflightCheck[]=[];
+  validateVoice({expected:input.expected,result:parsed.data,checks});
+  const result=checks[0];
+  if (result === undefined) throw new Error('Voice readiness gate produced no result');
+  return result;
 }
 
 /**
@@ -1241,16 +1288,17 @@ export function createProductionPreflightPort(input: { host: ProductionPreflight
 
       const needsVoiceCheck = configuration.audio.mode.kind === 'enabled'
         || configuration.audio.soundEffectSlots.some((entry) => entry.slot.kind === 'enabled-bound');
-      if (needsVoiceCheck) {
-        const voice = await readPort({
-          read: () => input.host.readVoiceReadiness({ runId: configuration.runId, configRevision: configuration.configRevision }),
-          schema: VoiceReadinessSchema,
-        });
-        if (voice.kind === 'unavailable') addPortFailure(checks, 'voice', voice);
-        else validateVoice({ expected: configuration, result: voice.value, checks });
-      } else {
-        checks.push(check({ kind: 'passed', checkId: 'voice', detail: 'El audio de esta puesta está desactivado; no se consulta ni llama al proveedor de voz.' }));
-      }
+      const voice = await readPort({
+        read: () => input.host.readVoiceReadiness({runId:configuration.runId,configRevision:configuration.configRevision}), schema:VoiceReadinessSchema,
+      });
+      if (voice.kind === 'unavailable') {
+        addPortFailure(checks,'voice',voice);
+      } else if (voice.value.kind === 'unavailable' && !needsVoiceCheck) {
+        // A missing runtime cannot certify enabled audio, but preserves text-only legacy hosts.
+        // An explicitly stale or invalid effective config remains a failure regardless of baseline.
+        if (voice.value.code === 'voice-runtime-unavailable') checks.push(check({kind:'passed',checkId:'voice',detail:'El audio guardado está desactivado y el host no tiene runtime de voz.'}));
+        else validateVoice({expected:configuration,result:voice.value,checks});
+      } else validateVoice({expected:configuration,result:voice.value,checks});
 
       for (const availability of configuration.participantAvailability) {
         if (availability.kind === 'unavailable') {

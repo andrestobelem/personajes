@@ -1582,6 +1582,11 @@ export function openVoiceService(input: {
             provenance: draft.provenance,
           });
           put("binding", binding.speechBindingId, binding);
+          put("validation-evidence", binding.validationEvidenceId, {
+            speechBindingId: binding.speechBindingId, bindingDraftId: draft.bindingDraftId,
+            artifactId: artifact.artifactId, runId: click.runId, principal: click.principal,
+            receiptId: click.operationId,
+          });
           return { kind: "accepted" as const, binding };
         },
         z.discriminatedUnion("kind", [
@@ -1810,6 +1815,36 @@ export function openVoiceService(input: {
     },
     getSoundBinding(id: string) {
       return entity("sound-binding", id, SoundBindingSchema);
+    },
+    /** Host-only proof inspection; no synthesis, repair, receipt or provider call. */
+    readBindingProof(request: {runId: string; kind: "speech" | "sound-effect"; bindingId: string}) {
+      if (request.kind === "sound-effect") {
+        const binding = entity("sound-binding", request.bindingId, SoundBindingSchema);
+        const receiptRow = z.object({id:z.string(),request_hash:z.string(),result:z.string(),result_hash:z.string()}).parse(db.prepare("SELECT id,request_hash,result,result_hash FROM voice_receipts WHERE scope='save-sound' AND json_extract(result,'$.soundBindingId')=? LIMIT 1").get(binding.soundBindingId));
+        if (receiptRow.result_hash !== voiceHash(JSON.stringify({scope:"save-sound",id:receiptRow.id,requestHash:receiptRow.request_hash,result:receiptRow.result})) || JSON.stringify(SoundBindingSchema.parse(JSON.parse(receiptRow.result))) !== JSON.stringify(binding)) throw new Error("VOICE_BINDING_PROOF_INVALID");
+        const artifact = media(binding.artifactId, binding.provenance.acceptedBy).artifact;
+        const op = operation(artifact.operationId);
+        if (op.runId !== request.runId || op.state !== "ready" || artifact.kind !== "sound-effect") throw new Error("VOICE_BINDING_PROOF_INVALID");
+        entity("listen", `${artifact.artifactId}:${binding.provenance.acceptedBy}`, z.object({artifactId:z.uuid(),principal:z.string(),listenedAt:z.iso.datetime()}).strict());
+        return binding;
+      }
+      const binding = entity("binding", request.bindingId, SpeechBindingSchema);
+      const evidence = entity("validation-evidence", binding.validationEvidenceId, z.strictObject({speechBindingId:z.uuid(),bindingDraftId:z.uuid(),artifactId:z.uuid(),runId:z.string(),principal:z.string(),receiptId:z.uuid()}));
+      if (evidence.speechBindingId !== binding.speechBindingId || evidence.runId !== request.runId) throw new Error("VOICE_BINDING_PROOF_INVALID");
+      const receiptRow = z.object({request_hash:z.string(),result:z.string(),result_hash:z.string()}).parse(db.prepare("SELECT request_hash,result,result_hash FROM voice_receipts WHERE scope='accept-binding' AND id=?").get(evidence.receiptId));
+      if (receiptRow.result_hash !== voiceHash(JSON.stringify({scope:"accept-binding",id:evidence.receiptId,requestHash:receiptRow.request_hash,result:receiptRow.result}))) throw new Error("VOICE_RECEIPT_INTEGRITY_FAILED");
+      const receiptResult = z.strictObject({kind:z.literal("accepted"),binding:SpeechBindingSchema}).parse(JSON.parse(receiptRow.result));
+      if (JSON.stringify(receiptResult.binding) !== JSON.stringify(binding)) throw new Error("VOICE_BINDING_PROOF_INVALID");
+      const artifact = media(evidence.artifactId,evidence.principal).artifact;
+      const op = operation(artifact.operationId);
+      const work = frozenWork(op.operationId);
+      if (op.runId !== request.runId || op.state !== "ready" || work.kind !== "binding-test" || artifact.kind !== "binding-test" || artifact.sourceId !== evidence.bindingDraftId || artifact.modelId !== binding.ttsModelId || artifact.configRevision !== binding.configRevision || work.draft.bindingDraftId !== evidence.bindingDraftId || voiceOwnerKey(work.draft.owner) !== voiceOwnerKey(binding.owner) || work.draft.providerVoiceId !== binding.voiceId || work.draft.varietyLabel !== binding.varietyLabel || JSON.stringify(work.draft.provenance) !== JSON.stringify(binding.provenance)) throw new Error("VOICE_BINDING_PROOF_INVALID");
+      entity("listen", `${artifact.artifactId}:${evidence.principal}`, z.object({artifactId:z.uuid(),principal:z.string(),listenedAt:z.iso.datetime()}).strict());
+      if (binding.provenance.kind === "created-by-this-app") {
+        const saved = entity("saved", binding.provenance.savedVoiceId, savedSchema);
+        if (saved.providerVoiceId !== binding.voiceId || saved.designModelId !== binding.provenance.designModelId || work.draft.source.kind !== "savedVoice" || work.draft.source.savedVoiceId !== saved.savedVoiceId) throw new Error("VOICE_BINDING_PROVENANCE_INVALID");
+      } else if (work.draft.source.kind !== "providerVoice" || work.draft.source.providerVoiceId !== binding.voiceId || binding.provenance.providerCatalogRef !== work.draft.voiceSnapshot.catalogHash) throw new Error("VOICE_BINDING_PROVENANCE_INVALID");
+      return binding;
     },
     readArtifact(id: string, principal: string) {
       const artifact = entity("artifact", id, VoiceArtifactSchema);

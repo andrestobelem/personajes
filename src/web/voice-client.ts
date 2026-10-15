@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ApiProblemSchema } from "../domain/http.ts";
 import {
   VoiceConfigSnapshotSchema,
+  AudioModeSchema, SpeakerSlotSchema, NarratorSlotSchema, SoundEffectSlotSchema, VoiceQuotaLimitsSchema,
   VoiceOperationSchema,
   VoiceDesignRequestSchema,
   VoicePreviewSchema,
@@ -22,7 +23,16 @@ const revision = z.number().int().nonnegative().safe();
 const label = z.string().trim().min(1).max(300);
 const config = { runId: key, configRevision: revision, key };
 const operation = { operationId: key, operationRevision: revision, key };
+export const VoiceSettingsInputSchema = z.strictObject({
+  audioMode: AudioModeSchema,
+  speakerSlots: z.record(z.string(), SpeakerSlotSchema),
+  narratorSlot: NarratorSlotSchema,
+  soundEffectSlots: z.record(z.string(), SoundEffectSlotSchema),
+  quotaLimits: VoiceQuotaLimitsSchema,
+});
 export const VoiceIntentSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("settings"), ...config, settings: VoiceSettingsInputSchema }),
+  z.strictObject({ kind: z.literal("reconcileSettings"), ...config }),
   z.strictObject({ kind: z.literal("confirmVariety"), ...config, label }),
   z.strictObject({ kind: z.literal("proposeVariety"), ...config, label }),
   z.strictObject({
@@ -110,6 +120,15 @@ export function buildVoiceRequest(input: {
   if ("operationRevision" in intent)
     etag = `"voice-operation:${intent.operationId}:r${intent.operationRevision}"`;
   switch (intent.kind) {
+    case "settings":
+      path = `/api/v1/runs/${intent.runId}/voice-settings`;
+      method = "PUT";
+      body = intent.settings;
+      break;
+    case "reconcileSettings":
+      path = `/api/v1/runs/${intent.runId}/voice-settings/reconcile`;
+      body = { kind: "reconcileBase" };
+      break;
     case "confirmVariety":
       path = `/api/v1/runs/${intent.runId}/spanish-variety/confirm`;
       body = { label: intent.label };
@@ -196,6 +215,7 @@ export class VoiceHttpRejection extends Error {
     readonly status: number,
     readonly requestId: string,
     message: string,
+    readonly safeCode?: string,
   ) {
     super(message);
   }
@@ -214,6 +234,7 @@ async function json(response: Response): Promise<unknown> {
         response.status,
         problem.data.requestId,
         `${problem.data.error.message} Referencia: ${problem.data.requestId}.`,
+        problem.data.error.code,
       );
     throw new Error("No se confirmó la operación de voz.");
   }
@@ -285,6 +306,14 @@ export function createVoiceClient(
       if (response.headers.get("etag") !== etag)
         throw new Error("La revisión de voz no coincide.");
       return { value, etag };
+    },
+    async reconciliationContext(runId: string, signal: AbortSignal) {
+      await bootstrap();
+      const response = await request(`/api/v1/runs/${key.parse(runId)}/voice-settings/reconciliation`, { credentials: "same-origin", signal });
+      const result = checked(await json(response), z.strictObject({ kind: z.literal("voice-reconciliation-context"), snapshot: VoiceConfigSnapshotSchema, baseStale: z.boolean() }));
+      const etag = voiceConfigEtag(runId, result.snapshot.config.revision);
+      if (response.headers.get("etag") !== etag) throw new Error("La revisión para conciliación no coincide.");
+      return { document: { value: result.snapshot, etag }, baseStale: result.baseStale };
     },
     drafts(runId: string, signal: AbortSignal) {
       return read(
@@ -398,6 +427,8 @@ export function createVoiceClient(
       const response = await request(built.path, { ...built.init, signal });
       const value = await json(response);
       switch (intent.kind) {
+        case "settings":
+        case "reconcileSettings":
         case "confirmVariety":
         case "proposeVariety": {
           const settings = checked(value, VoiceConfigSnapshotSchema);

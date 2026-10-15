@@ -8,7 +8,7 @@ import {
 import { WorldSnapshotSchema } from '../domain/world-schema.ts';
 import { RunModelTimeBudgetSchema } from '../domain/model-time-budget.ts';
 import { RunLifecycleControlRequestSchema } from '../domain/run-lifecycle.ts';
-import { ReadyRunConfigurationSchema } from './production-preflight.ts';
+import { evaluateVoiceReadiness, ReadyRunConfigurationSchema } from './production-preflight.ts';
 import {
   DramaticStructureViewSchema, RunLifecycleCommandLookupResultSchema, RunLifecycleCommandResultSchema,
 } from '../domain/world-journal.ts';
@@ -41,6 +41,8 @@ export function createRunLifecycleApplication(input: {
   preflights?: PreflightReader;
   runtime?: Runtime;
   readVoiceBudget?: (runId: string) => unknown;
+  /** Final local admission check. Must be synchronous: no operation may interleave before the durable lifecycle CAS. */
+  readVoiceReadiness?: (request: { runId: string; configRevision: number }) => unknown;
 }) {
   function readRunView(rawRunId: string) {
     const runId = RunIdSchema.parse(rawRunId);
@@ -229,6 +231,17 @@ export function createRunLifecycleApplication(input: {
       const current = readRunView(request.runId);
       if (current?.budget.status === 'exhausted' || current?.budget.status === 'uncertain' || current?.budget.status === 'unknown') {
         return RunControlApplicationResultSchema.parse({ kind: 'budgetExhausted' });
+      }
+      if (input.readVoiceReadiness !== undefined) {
+        try {
+          const configuration = ReadyRunConfigurationSchema.parse(input.journal.readWorldConfiguration({ runId: request.runId }));
+          const readiness = input.readVoiceReadiness({ runId: request.runId, configRevision: configuration.configRevision });
+          if (evaluateVoiceReadiness({ expected: configuration, result: readiness }).kind !== 'passed') {
+            return RunControlApplicationResultSchema.parse({ kind: 'preflightBlocked' });
+          }
+        } catch {
+          return RunControlApplicationResultSchema.parse({ kind: 'preflightBlocked' });
+        }
       }
     }
 

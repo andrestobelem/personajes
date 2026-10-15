@@ -18,6 +18,7 @@ const KnownPreflightCheckCodes = new Set([
   'human-participant-invalid', 'invalid-world-snapshot', 'legacy-inference-profile', 'memory-scope-invalid',
   'model-profile-incompatible', 'nonverbal-actor-has-speech', 'pi-runtime-incompatible', 'prepared-capability-mismatch',
   'prepared-context-mismatch', 'proposal-not-confirmed', 'provider-authentication-mismatch', 'snapshot-fence-stale',
+  'voice-binding-required', 'voice-local-evidence-unavailable', 'voice-configuration-stale',
   'speaker-slot-mismatch', 'voice-binding-invalid', 'voice-credential-missing', 'configuration-not-ready',
   'prepared-context-missing', 'prepared-context-unavailable', 'pi-sdk-installation-unavailable', 'selected-model-unavailable',
   'provider-credential-unavailable', 'access-receipt-proof-invalid', 'access-receipt-unavailable', 'actor-runtime-context-missing',
