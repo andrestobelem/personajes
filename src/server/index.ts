@@ -1,4 +1,6 @@
 import { createRunObservationApplication } from '../application/run-observation.ts';
+import { createDramaticStructureApplication } from '../application/dramatic-structure.ts';
+import { createDirectionApplication } from '../application/direction-indications.ts';
 import { createNarrationObservation } from '../application/narration-observation.ts';
 import { createNarrationRoutes } from './narration-routes.ts';
 import { readFile, readdir } from 'node:fs/promises';
@@ -150,6 +152,8 @@ try {
     ...(preflightJobs === undefined ? {} : { runPreflightJobs: preflightJobs }),
     runLifecycle,
     runObservation:createRunObservationApplication({journal:host.journal}),
+    runDramaticStructure:createDramaticStructureApplication({journal:host.journal}),
+    runDirections:createDirectionApplication({journal:host.journal}),
     runInspector:createRunInspectorApplication({journal:host.journal}),
     authorizeObserverView:(runId)=>host.journal.readWorldLifecycle({runId})!==undefined,
     onInspectorRead:metadata=>process.stderr.write(JSON.stringify({kind:'inspectorRead',...metadata})+'\n'),

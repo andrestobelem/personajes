@@ -16,6 +16,9 @@ import { StageConversation, StageJobs } from "./StageConversation.tsx";
 import { NarrationPanel } from './NarrationPanel.tsx';
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { HumanInteractionPanel } from "./HumanInteractionPanel.tsx";
+import { DramaticStructurePanel } from './DramaticStructurePanel.tsx';
+import { DirectorObservationsPanel } from './DirectorObservationsPanel.tsx';
+import { DirectorMetaIndicationsPanel } from './DirectorMetaIndicationsPanel.tsx';
 import {
   createRunObservationClient,
   type RunObservationClient,
@@ -23,6 +26,7 @@ import {
 import { formatFictionalClock } from "./stage-format.ts";
 const client = createRunObservationClient();
 type ConfirmedEvent = z.infer<typeof ConfirmedEventPageSchema>["items"][number];
+type HistoryCut = { commitIndex: number };
 type Observation = {
   stage: RunStageView;
   conversations: ConversationView[];
@@ -31,6 +35,7 @@ type Observation = {
   moreConversations: boolean;
   moreEvents: boolean;
   moreJobs: boolean;
+  directorObservations: Awaited<ReturnType<RunObservationClient['directorObservations']>>;
 };
 export function stageMapData(stage: RunStageView): StageMapData {
   const entities = stage.entities.map((entity) => {
@@ -114,6 +119,15 @@ export function effectiveInterventionLifecycle(
     ? knownLifecycle
     : stageLifecycle;
 }
+
+const lifecycleLabels: Record<RunStageView["lifecycle"], string> = {
+  draft: "borrador", ready: "preparada", running: "en curso", paused: "en pausa",
+  stopped: "detenida", closed: "cerrada",
+};
+
+export function HistoricalLifecycleNotice({ lifecycle }: { lifecycle: RunStageView["lifecycle"] }) {
+  return <p className="muted" role="status">Estado operativo actual: {lifecycleLabels[lifecycle]}. No se reconstruye al corte histórico.</p>;
+}
 export function RunStageWorkspace({
   runId,
   active = true,
@@ -133,7 +147,7 @@ export function RunStageWorkspace({
   );
   const [message, setMessage] = React.useState<string | null>(null);
   const [refresh, setRefresh] = React.useState(0);
-  const [cut, setCut] = React.useState<number | undefined>();
+  const [cut, setCut] = React.useState<HistoryCut | undefined>();
   const [fromSeq, setFromSeq] = React.useState<number | undefined>();
   const [pageCount, setPageCount] = React.useState(1);
   const [olderFrom, setOlderFrom] = React.useState("0");
@@ -221,21 +235,25 @@ export function RunStageWorkspace({
           }
           return { items: [...items.values()], nextCursor };
         }
+        const readDirectorObservations = api.directorObservations(runId, controller.signal, stage.commitIndex);
         const results = await Promise.allSettled([
           readConversations(),
           readEvents(),
           readJobs(),
+          readDirectorObservations,
         ]);
         const conversations = results[0];
         const events = results[1];
         const jobs = results[2];
+        const directorObservations = results[3];
         if (
           conversations === undefined ||
           events === undefined ||
           jobs === undefined ||
           conversations.status !== "fulfilled" ||
           events.status !== "fulfilled" ||
-          jobs.status !== "fulfilled"
+          jobs.status !== "fulfilled" ||
+          directorObservations.status !== "fulfilled"
         ) {
           throw new Error(
             "No se pudo confirmar una lectura completa del Escenario, conversación y diagnósticos. Se conserva el último corte confirmado.",
@@ -261,6 +279,7 @@ export function RunStageWorkspace({
           moreConversations: conversations.value.nextCursor !== null,
           moreEvents: events.value.nextCursor !== null,
           moreJobs: jobs.value.nextCursor !== null,
+          directorObservations: directorObservations.value,
         });
         setMessage(null);
       } catch (error) {
@@ -310,11 +329,18 @@ export function RunStageWorkspace({
       source.close();
     };
   }, [runId, active, cut]);
-  function viewCut(seq: number) {
-    setCut(seq);
+  function viewCommit(commitIndex: number) {
+    setCut({ commitIndex });
     setObservation(null);
     setMessage(null);
     requestAnimationFrame(() => heading.current?.focus());
+  }
+  function viewEvidence(reference: { worldSeq: number; commitIndex: number }) {
+    const from = reference.worldSeq;
+    setFromSeq(from);
+    setOlderFrom(String(from));
+    setPageCount(1);
+    viewCommit(reference.commitIndex);
   }
   function present() {
     setCut(undefined);
@@ -338,7 +364,7 @@ export function RunStageWorkspace({
         <h1 tabIndex={-1} ref={heading}>
           {cut === undefined
             ? "Representación · Presente"
-            : `Historia · Corte confirmado ${cut}`}
+            : `Historia · commit ${cut.commitIndex}`}
         </h1>
         <p>
           {cut === undefined
@@ -369,22 +395,51 @@ export function RunStageWorkspace({
             Representación {runId} · configuración{" "}
             {observation.stage.configRevision} · Escenario{" "}
             {observation.stage.worldRevision} · secuencia{" "}
-            {observation.stage.worldSeq} ·{" "}
+            {observation.stage.worldSeq} · commit{" "}
+            {observation.stage.commitIndex} ·{" "}
             {formatFictionalClock(observation.stage.clock)}
           </p>
           <p>
-            Escena:{" "}
-            {observation.stage.scenes.find(
-              (scene) => scene.id === observation.stage.activeSceneId,
-            )?.label ?? "Sin etiqueta disponible"}
-            .
+            {observation.stage.activeSceneId === null
+              ? "Sin escena activa; la representación está entre escenas."
+              : `Escena: ${observation.stage.scenes.find((scene) => scene.id === observation.stage.activeSceneId)?.label ?? "Sin etiqueta disponible"}.`}
           </p>
+          {cut !== undefined && observation.stage.lifecycleAsOf === "current" && <HistoricalLifecycleNotice lifecycle={observation.stage.lifecycle} />}
+          {cut === undefined ? (
+            <DramaticStructurePanel
+              runId={runId}
+              lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)}
+              active={active}
+              refreshToken={`${refresh}:${observation.stage.worldRevision}:${observation.stage.worldSeq}:present`}
+              confirmedEvents={observation.events.map((event) => ({ eventId: event.eventId, summary: event.summary }))}
+              onSelectCommit={viewCommit}
+            />
+          ) : (
+            <DramaticStructurePanel
+              runId={runId}
+              lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)}
+              active={active}
+              refreshToken={`${refresh}:${observation.stage.worldRevision}:${observation.stage.worldSeq}:history`}
+              confirmedEvents={observation.events.map((event) => ({ eventId: event.eventId, summary: event.summary }))}
+              historicalCut={{ worldRevision: observation.stage.worldRevision, worldSeq: observation.stage.worldSeq }}
+              onSelectCommit={viewCommit}
+            />
+          )}
+          <DirectorObservationsPanel progress={observation.directorObservations} historical={cut !== undefined} onSelectEvidence={viewEvidence} />
+          {cut === undefined && <DirectorMetaIndicationsPanel
+            runId={runId}
+            lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)}
+            activeSceneId={observation.stage.activeSceneId}
+            activeSceneLabel={observation.stage.scenes[0]?.label ?? null}
+            sceneParticipantIds={observation.stage.scenes[0]?.participantIds ?? []}
+            active={active}
+          />}
           <div className="stage-layout">
             <StageMap data={stageMapData(observation.stage)} />
             <StageConversation
               items={observation.conversations}
               stage={observation.stage}
-              onSelectEvent={viewCut}
+              onSelectEvent={viewCommit}
             />
           </div>
           <NarrationPanel
@@ -466,8 +521,8 @@ export function RunStageWorkspace({
                       instant: event.fictionalAt,
                     })}
                     <p>{event.summary}</p>
-                    <button onClick={() => viewCut(event.worldSeq)}>
-                      Ver corte {event.worldSeq}
+                    <button onClick={() => viewCommit(event.commitIndex)}>
+                      Ver commit {event.commitIndex} del evento {event.worldSeq}
                     </button>
                   </li>
                 ))}

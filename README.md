@@ -13,7 +13,7 @@ Una obra de ficción en la que actores agénticos encarnan personajes con identi
 
 ## Objetivo activo
 
-El encargo actual es revisar todos los materiales uno por uno, corregirlos, escribir y revisar un [PRD exhaustivo](docs/PRD.md), escribir y revisar las [specs](docs/specs/README.md), e implementar y revisar el producto completo. El PRD y las specs 1.0 tienen cierre documental; la implementación comenzó por la base TypeScript. El [registro de progreso](docs/auditoria/objetivo-y-progreso.md) conserva evidencia por fase. El cierre documental anterior no constituye la terminación del producto.
+El encargo actual es revisar todos los materiales uno por uno, corregirlos, escribir y revisar un [PRD exhaustivo](docs/PRD.md), escribir y revisar las [specs](docs/specs/README.md), e implementar y revisar el producto completo. Los cierres documentales previos del PRD y las specs 1.0 fueron reabiertos para reconciliar cambios posteriores y corregir inconsistencias; la implementación comenzó por la base TypeScript. El [registro de progreso](docs/auditoria/objetivo-y-progreso.md) conserva evidencia por fase.
 
 ## Estado al 14 de octubre de 2026
 

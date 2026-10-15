@@ -3,11 +3,12 @@ import type { AvatarPage, CatalogPage, DossierResponse, LibraryPage, TextDocumen
 import { unreachable } from '../domain/values.ts';
 import { bootstrapSession, readAvatars, readCatalog, readDocument, readDossier, readLibrary, searchCharacters, resolveReference } from './client.ts';
 import type { CatalogReferenceQuery } from '../domain/catalog-links.ts';
-import { RunDraftWorkspace } from './RunDraftWorkspace.tsx';
-import { PiAccessPanel } from './PiAccessPanel.tsx';
-import { PiAccessCheckPanel } from './PiAccessCheckPanel.tsx';
 import { DocumentBody } from './DocumentBody.tsx';
-import { DossierExchangePanel } from './DossierExchangePanel.tsx';
+
+const RunDraftWorkspace = React.lazy(async () => ({ default: (await import('./RunDraftWorkspace.tsx')).RunDraftWorkspace }));
+const PiAccessPanel = React.lazy(async () => ({ default: (await import('./PiAccessPanel.tsx')).PiAccessPanel }));
+const PiAccessCheckPanel = React.lazy(async () => ({ default: (await import('./PiAccessCheckPanel.tsx')).PiAccessCheckPanel }));
+const DossierExchangePanel = React.lazy(async () => ({ default: (await import('./DossierExchangePanel.tsx')).DossierExchangePanel }));
 
 type LibraryState = { kind: 'loading' } | { kind: 'error'; message: string } |
   { kind: 'ready'; catalog: CatalogPage; library: LibraryPage; avatars: AvatarPage };
@@ -25,6 +26,7 @@ function readableError(error: unknown) {
 export function App() {
   const [state, setState] = React.useState<LibraryState>({ kind: 'loading' });
   const [tab, setTab] = React.useState<Tab>('characters');
+  const [openedTabs, setOpenedTabs] = React.useState<ReadonlySet<Tab>>(() => new Set(['characters']));
   const [query, setQuery] = React.useState('');
   const [characterSearch, setCharacterSearch] = React.useState<CharacterSearch>({ kind: 'idle' });
   const [selection, setSelection] = React.useState<Selection>({ kind: 'none' });
@@ -51,6 +53,7 @@ export function App() {
     setQuery('');
     setCharacterSearch({ kind: 'idle' });
     setTab(next);
+    setOpenedTabs((current) => current.has(next) ? current : new Set([...current, next]));
     requestAnimationFrame(() => catalogHeading.current?.focus());
   }
 
@@ -135,9 +138,9 @@ export function App() {
       </nav><div className="nav-label">CONFIGURACIÓN</div><nav aria-label="Acceso"><button aria-current={tab === 'access' ? 'page' : undefined} onClick={() => changeTab('access')}>◎ Acceso a Pi</button></nav><div className="sidebar-note">Identidad · Historia · Memoria<br />Deseo · Acción · Consecuencia</div>
     </aside>
     <main><header className="topbar"><span>{tab === 'runs' ? 'Representaciones / Preparación' : tab === 'access' ? 'Configuración / Acceso a Pi' : tab === 'exchange' ? 'Biblioteca / Importar y exportar' : <>Biblioteca / {tab === 'characters' ? 'Reparto' : tab === 'research' ? 'Investigaciones' : 'Fuentes'}</>}</span>{reading && <button className="back-button" onClick={() => { ++selectionEpoch.current; setSelection({ kind: 'none' }); requestAnimationFrame(() => catalogHeading.current?.focus()); }}>← Volver al catálogo</button>}<span className="status-chip">{tab === 'access' ? 'Administración del host' : tab === 'runs' ? 'Estado consultado desde el host' : 'Biblioteca de preparación'}</span></header>
-      {state.kind === 'ready' && <div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} /></div>}
-      {tab === 'access' && <div><PiAccessPanel /><PiAccessCheckPanel /></div>}
-      {state.kind==='ready'&&<div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items}/></div>}
+      {state.kind === 'ready' && openedTabs.has('runs') && <React.Suspense fallback={<p role="status">Abriendo la preparación…</p>}><div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} /></div></React.Suspense>}
+      {openedTabs.has('access') && <React.Suspense fallback={<p role="status">Abriendo el acceso…</p>}><div hidden={tab !== 'access'}><PiAccessPanel /><PiAccessCheckPanel /></div></React.Suspense>}
+      {state.kind==='ready'&&openedTabs.has('exchange')&&<React.Suspense fallback={<p role="status">Abriendo el intercambio…</p>}><div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items}/></div></React.Suspense>}
       <div hidden={tab === 'runs' || tab === 'access' || tab === 'exchange'}><div className="workspace" data-reading={reading}><section className="catalog-panel" aria-label="Catálogo">
         <span className="eyebrow">EL MUNDO EMPIEZA CON SUS PERSONAJES</span><h1 tabIndex={-1} ref={catalogHeading}>{tab === 'characters' ? 'El reparto' : tab === 'research' ? 'Ideas para la obra' : 'Las fuentes'}</h1>
         <p className="intro">{tab === 'characters' ? 'Cada ficha conserva una voz, una historia y un punto de vista.' : 'Investigación, evidencia y propuestas de interpretación.'}</p>

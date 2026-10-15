@@ -19,7 +19,7 @@ export type RunControlIntent = {
   key: string;
 };
 export function runEtag(view: RunView) {
-  return `"run:${view.runId}:c${view.configRevision}:w${view.worldRevision}:l${view.lifecycleRevision}"`;
+  return `"run:${view.runId}:c${view.configRevision}:w${view.worldRevision}:s${view.structureRevision}:l${view.lifecycleRevision}"`;
 }
 export function captureRunControl(input: RunControlIntent): RunControlIntent {
   const view = RunViewSchema.parse(input.document.view);

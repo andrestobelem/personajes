@@ -11,20 +11,20 @@
 7. Implementar hasta terminar.
 8. Revisar y volver a implementar hasta terminar.
 
-El objetivo está activo. Al retomar no existían aplicación ni specs. Actualmente PRD y S01–S07 tienen cierre documental y existe una aplicación parcial: biblioteca gráfica local y componentes TypeScript de dominio, preparación, HTTP, Pi y persistencia. El producto completo continúa en implementación y revisión.
+El objetivo está activo. Al retomar no existían aplicación ni specs. Los cierres documentales previos del PRD y S01–S07 se reabrieron el 15 de octubre para reconciliar cambios de dramaturgia y evidencia. Existe una aplicación parcial: biblioteca gráfica local y componentes TypeScript de dominio, preparación, HTTP, Pi y persistencia. El producto completo continúa en implementación y revisión.
 
-## Estado al retomar, 14 de octubre de 2026
+## Estado al retomar, 15 de octubre de 2026
 
 | Paso | Estado actual | Evidencia o siguiente criterio |
 |---|---|---|
 | 1 | Corpus base leído individualmente; nuevos artefactos revisados por fase | 420 archivos inventariados, conclusiones individuales y responsables en [lectura de raíz](lectura-prd-raiz.md). Los hashes fijan versión y no sustituyen lectura. |
 | 2 | Correcciones iniciales y del PRD aplicadas; revisión continúa al implementar | Alcance histórico actualizado; hallazgos y cambios documentados por cada pase. |
 | 3 | PRD integral escrito | [PRD](../PRD.md), versión 1.0: 77 requisitos y 25 ensayos. |
-| 4 | Revisión documental cerrada | [Cierre del PRD](cierre-prd.md), diálogo y tres revisiones con loops. No certifica producto. |
+| 4 | Revisión reabierta el 15 de octubre | [Cierre del PRD](cierre-prd.md) conserva los informes previos y registra la edición posterior de Episodio, ESC-10 y P04/P13/P14/P15/P19; requiere reconciliar 77 criterios y trazabilidad antes del nuevo cierre. |
 | 5 | S01–S07 escritas | [Índice](../specs/README.md): dominio/datos, persistencia/ICM, Pi, API/autoridad, UI, sonido y pruebas; matriz de los 77 IDs y sus ensayos. |
-| 6 | Revisión documental cerrada | [Cierre de specs](cierre-specs.md): producto R2, concepto R4 y técnica R3, 77 IDs. No acredita producto ejecutado. |
+| 6 | Revisión reabierta el 15 de octubre | [Cierre de specs](cierre-specs.md): producto R2, concepto R4 y técnica R3 son cortes históricos. Corrijo contradicciones de rutas, evidencia P08/P21, cobertura ESC-10 y afirmaciones de pruebas; G0 debe volver a revisarse. |
 | 7 | Implementación en curso | Biblioteca, Escenario, journal/ICM, actores/Continuista/coordinador y composición del launcher; API y GUI de borradores, validación/promoción Ready durables. Se verificó guardar/reabrir un borrador en navegador tras reiniciar, sin iniciar representación. También existen editores de curación, continuidad, Escenario y perfiles humanos, acceso Pi administrativo y selección de Sol bajo u Opus medio por representación y sondeos administrativos durables desde GUI. El preflight durable ya se consulta y ejecuta explícitamente desde una preparación guardada; conserva informes obsoletos al editar. Falta verificar el recorrido completo de preparación y actuación. |
-| 8 | Revisión de componentes en curso | Último gate local previo al handoff: **391 pruebas con ICM real, cero fallos y cero omisiones**, y build aprobado (corte 29). La evidencia nueva de Cloud se registra por separado en [continuación Cloud](continuacion-cloud.md). Revisión independiente y recorrido de navegador corrigieron autoridad de preparación, replay y guardado. Existe HTTP/GUI administrativo OAuth sin autenticación real acreditada. Faltan validación live, acceso comprobado al modelo, interfaz completa, dirección/audio/replay/backups y aceptación de los 77 criterios; pruebas de componentes no sustituyen esa auditoría. |
+| 8 | Revisión de componentes en curso | El corte previo pasó TypeScript, build y **554 pruebas aprobadas, cero fallidas y una omitida por ser exclusiva de Linux**. HTTP→SQLite comprueba replay durable con la misma clave y ETag obsoleto; lugar inexistente produce 422 sin commit parcial, y cerrar escena libera presencias. Stage, conversación, estructura y observaciones Director pueden navegar al `commitIndex` exacto; el replay reconstruye episodios/actos y filtra lecturas posteriores al corte. El Director publica interpretaciones aceptadas en un panel seguro, con cobertura de aplicación/SSR; falta aceptación de navegador. Faltan acceso live, recomendaciones, comparación visual, voz/replay integral/fork/backups y aceptación de los 77 criterios. |
 
 ## Reglas de evidencia
 

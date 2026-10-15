@@ -6,12 +6,12 @@ import type { WorldEvent, WorldSnapshot } from '../domain/world.ts';
 import {
   RunStageViewSchema, StageEntitySchema, PublicSpeakerSchema, ConfirmedEventViewSchema,
   ConversationViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobViewSchema, TechnicalJobPageSchema,
-  ObservationPageRequestSchema, ObservationStageRequestSchema,
+  DirectorObservationListSchema, ObservationPageRequestSchema, ObservationStageRequestSchema,
 } from '../domain/run-observation.ts';
 import type { RunStageView } from '../domain/run-observation.ts';
 import { RunIdSchema, WorldSeqSchema } from '../domain/values.ts';
 
-type Journal = Pick<ReturnType<typeof openJournal>,'readWorldLifecycle'|'readWorldConfiguration'|'loadWorld'|'readObservationEvents'|'readObservationDeliveries'|'readObservationJobs'>;
+type Journal = Pick<ReturnType<typeof openJournal>,'readWorldLifecycle'|'readWorldConfiguration'|'readInspectorWorldCut'|'loadWorld'|'readObservationEvents'|'readObservationDeliveries'|'readObservationJobs'|'readDirectorObservationHistory'>;
 const missing = {kind:'missing'} satisfies {kind:'missing'};
 const invalidCut = {kind:'invalidRequest',code:'invalid-cut'} satisfies {kind:'invalidRequest';code:'invalid-cut'};
 const invalidCursor = {kind:'invalidRequest',code:'invalid-cursor'} satisfies {kind:'invalidRequest';code:'invalid-cursor'};
@@ -34,11 +34,14 @@ function decodeCursor(raw:string):z.infer<typeof CursorSchema>|undefined {
 /** Public stage shows only the active scene, presentation labels and ground objects.
  * Held inventory, absent characters, private places/minds and identity metadata
  * belong to separate, explicitly authorized inspection surfaces. */
-export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unknown;lifecycle:unknown}):RunStageView {
+export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unknown;lifecycle:unknown;commitIndex?:number}):RunStageView {
   const world=WorldSnapshotSchema.parse(input.snapshot);
   const configuration=ReadyRunConfigurationSchema.parse(input.configuration);
-  const scene=world.scenes.find((item)=>item.id===world.activeSceneId);
-  if (scene===undefined) throw new Error('Escena activa sin estado confirmado');
+  const scene=world.activeSceneId===null?undefined:world.scenes.find((item)=>item.id===world.activeSceneId);
+  if (scene===undefined) return RunStageViewSchema.parse({kind:'run-stage',runId:world.runId,
+    configRevision:configuration.configRevision,worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,
+    fictionalAt:world.clock.instant,clock:world.clock,lifecycle:input.lifecycle,lifecycleAsOf:'current',activeSceneId:null,scenes:[],
+    places:[],entities:[],connections:[],doors:[],channels:[],humanParticipants:[]});
   const places=world.places.filter((place)=>scene.placeIds.includes(place.id));
   const visiblePlaces=new Set(places.map((place)=>place.id));
   const entities:z.infer<typeof StageEntitySchema>[]=[];
@@ -76,8 +79,8 @@ export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unkn
     return [{participantId:profile.identity.participantId,label:profile.identity.displayName,presence:'inScene',placeId:presence.placeId,position:presence.position}];
   });
   return RunStageViewSchema.parse({kind:'run-stage',runId:world.runId,configRevision:configuration.configRevision,
-    worldRevision:world.revision,worldSeq:world.seq,fictionalAt:world.clock.instant,clock:world.clock,lifecycle:input.lifecycle,
-    activeSceneId:scene.id,scenes:[{id:scene.id,label:scene.label,lifecycle:scene.lifecycle.kind,placeIds:scene.placeIds}],
+    worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,fictionalAt:world.clock.instant,clock:world.clock,lifecycle:input.lifecycle,lifecycleAsOf:'current',
+    activeSceneId:scene.id,scenes:[{id:scene.id,label:scene.label,lifecycle:scene.lifecycle.kind,participantIds:scene.participantIds,placeIds:scene.placeIds}],
     places:places.map(({id,name,width,height,lighting})=>({id,name,width,height,lighting})),entities,
     connections:connections.map(({from,to,durationMs,arrivalPoint,doorId})=>({from,to,durationMs,arrivalPoint,doorId})),
     doors:world.doors.filter((door)=>doorIds.has(door.id)).map(({id,label,state})=>({id,label,state})),
@@ -128,10 +131,12 @@ export function createRunObservationApplication(input:{journal:Journal}) {
     const request=parsed.data;
     const state=input.journal.readWorldLifecycle({runId:request.runId});if(state===undefined)return missing;
     if(request.atWorldSeq!==undefined&&request.atWorldSeq>state.lastWorldSeq)return invalidCut;
-    const snapshot=input.journal.loadWorld({runId:request.runId,...(request.atWorldSeq===undefined?{}:{throughWorldSeq:request.atWorldSeq})});
-    if(snapshot===undefined)return invalidCut;
+    const cut=input.journal.readInspectorWorldCut({runId:request.runId,
+      ...(request.atWorldSeq===undefined?{}:{atWorldSeq:request.atWorldSeq}),
+      ...(request.atCommitIndex===undefined?{}:{atCommitIndex:request.atCommitIndex})});
+    if(cut===undefined)return invalidCut;
     const configuration=input.journal.readWorldConfiguration({runId:request.runId});if(configuration===undefined)return missing;
-    return {kind:'found',value:projectRunStage({snapshot,configuration,lifecycle:state.lifecycle})} satisfies {kind:'found';value:RunStageView};
+    return {kind:'found',value:projectRunStage({snapshot:cut.snapshot,commitIndex:cut.commitIndex,configuration,lifecycle:state.lifecycle})} satisfies {kind:'found';value:RunStageView};
   }
 
   function readPage(rawInput:unknown,surface:'events'|'conversations') {
@@ -150,12 +155,12 @@ export function createRunObservationApplication(input:{journal:Journal}) {
     if(rows===undefined)return missing;
     const events:z.infer<typeof ConfirmedEventViewSchema>[]=[];
     const conversations:z.infer<typeof ConversationViewSchema>[]=[];
-    for(const {event,snapshot} of rows) {
+    for(const {event,snapshot,commitIndex} of rows) {
       const stage=projectRunStage({snapshot,configuration,lifecycle:state.lifecycle});
       const speaker=speakerFor(event,snapshot,stage);if(speaker===undefined)continue;
       const summary=eventSummary(event,stage,speaker);if(summary===undefined)continue;
       events.push(ConfirmedEventViewSchema.parse({kind:'confirmed-event',eventId:event.id,runId:request.runId,
-        worldSeq:event.seq,fictionalAt:event.fictitiousAt,durationMs:event.durationMs,sceneId:stage.activeSceneId,eventType:event.kind,speaker,summary}));
+        worldSeq:event.seq,commitIndex,fictionalAt:event.fictitiousAt,durationMs:event.durationMs,sceneId:stage.activeSceneId,eventType:event.kind,speaker,summary}));
       if((event.kind!=='communicated'&&event.kind!=='humanIntervention')||speaker===null)continue;
       const channel=stage.channels.find((item)=>item.id===event.channelId);if(channel===undefined)continue;
       const refs=(ids:readonly string[])=>ids.flatMap((id)=>{const ref=characterReference(snapshot,stage,id);return ref===undefined?[]:[ref];});
@@ -166,7 +171,7 @@ export function createRunObservationApplication(input:{journal:Journal}) {
         return recipient===undefined?[]:[{recipient,state:delivery.state,memoryProjection:delivery.memoryProjection}];
       });
       conversations.push(ConversationViewSchema.parse({kind:'published-communication',eventId:event.id,runId:request.runId,
-        worldSeq:event.seq,fictionalAt:event.fictitiousAt,sceneId:stage.activeSceneId,speaker,channel:{id:channel.id,label:channel.label},
+        worldSeq:event.seq,commitIndex,fictionalAt:event.fictitiousAt,sceneId:stage.activeSceneId,speaker,channel:{id:channel.id,label:channel.label},
         content:event.content,emission:'emitted',requestedRecipients:refs(event.requestedAudience),effectiveAudience:refs(event.effectiveAudience),
         requestedRecipientCount:event.requestedAudience.length,effectiveAudienceCount:event.effectiveAudience.length,deliveries}));
     }
@@ -198,5 +203,18 @@ export function createRunObservationApplication(input:{journal:Journal}) {
       ?encodeCursor({version:1,runId:request.runId,surface:'jobs',from:WorldSeqSchema.parse(0),to:WorldSeqSchema.parse(0),after:null,afterKey:last.row.page_key}):null;
     return {kind:'found',value:TechnicalJobPageSchema.parse({kind:'technical-job-page',runId:request.runId,items,nextCursor})} satisfies {kind:'found';value:z.infer<typeof TechnicalJobPageSchema>};
   }
-  return Object.freeze({readStage,readEvents:(request:unknown)=>readPage(request,'events'),readConversations:(request:unknown)=>readPage(request,'conversations'),readJobs});
+  function readDirectorObservations(rawInput:unknown) {
+    const parsed=z.strictObject({runId:RunIdSchema,atCommitIndex:ObservationStageRequestSchema.shape.atCommitIndex}).safeParse(rawInput);if(!parsed.success)return invalidCut;
+    const request=parsed.data;const state=input.journal.readWorldLifecycle({runId:request.runId});if(state===undefined)return missing;
+    const cut=input.journal.readInspectorWorldCut({runId:request.runId,...(request.atCommitIndex===undefined?{}:{atCommitIndex:request.atCommitIndex})});
+    if(cut===undefined)return invalidCut;
+    const annotations=input.journal.readDirectorObservationHistory({runId:request.runId,throughCommitIndex:cut.commitIndex,
+      worldRevision:cut.snapshot.revision,throughWorldSeq:cut.snapshot.seq});
+    if(annotations===undefined)return missing;
+    const value=DirectorObservationListSchema.parse({kind:'director-observation-list',runId:request.runId,
+      throughWorldSeq:cut.snapshot.seq,throughCommitIndex:cut.commitIndex,items:annotations.map(({annotation,acceptedAt,commitIndex,evidenceEventReferences})=>({annotationId:annotation.annotationId,
+        worldRevision:annotation.scope.worldRevision,worldSeq:annotation.scope.throughWorldSeq,commitIndex,acceptedAt,evidenceEventReferences,observation:annotation.observation}))});
+    return {kind:'found',value} satisfies {kind:'found';value:z.infer<typeof DirectorObservationListSchema>};
+  }
+  return Object.freeze({readStage,readEvents:(request:unknown)=>readPage(request,'events'),readConversations:(request:unknown)=>readPage(request,'conversations'),readJobs,readDirectorObservations});
 }

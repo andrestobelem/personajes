@@ -1,10 +1,10 @@
 # Documentación de la obra
 
-Consolidación de la conversación y de los trabajos de investigación al **14 de octubre de 2026**. Se distingue lo pedido por el usuario, las propuestas del proyecto, la evidencia consultada y lo que falta verificar. La navegación de estos archivos no constituye la interfaz gráfica futura.
+Consolidación de la conversación y de los trabajos de investigación al **15 de octubre de 2026**. Se distingue lo pedido por el usuario, las propuestas del proyecto, la evidencia consultada y lo que falta verificar. La navegación de estos archivos no constituye la interfaz gráfica futura.
 
 ## Producto en desarrollo
 
-El [PRD 1.0](PRD.md) define el alcance completo y tiene [cierre documental](auditoria/cierre-prd.md). Las [especificaciones 1.0](specs/README.md) tienen [cierre documental](auditoria/cierre-specs.md) y la implementación comenzó por la base TypeScript. El [progreso](auditoria/objetivo-y-progreso.md) distingue lectura, correcciones, revisión del PRD, specs e implementación. La [entrevista PRD](auditoria/dialogo-prd.md) registra las preguntas reales a un custodio del concepto. Ninguno de estos cierres documentales acredita un producto funcionando.
+El [PRD](PRD.md) y las [especificaciones 1.0](specs/README.md) conservan los cierres documentales previos, pero ambos volvieron a revisión al detectarse cambios de alcance y discrepancias posteriores. La implementación comenzó por la base TypeScript. El [progreso](auditoria/objetivo-y-progreso.md) distingue lectura, correcciones, revisión del PRD, specs e implementación. La [entrevista PRD](auditoria/dialogo-prd.md) registra las preguntas reales a un custodio del concepto. Ningún cierre documental acredita un producto funcionando.
 
 ## Para empezar
 

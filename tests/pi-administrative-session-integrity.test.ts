@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync,mkdirSync,writeFileSync,rmSync,symlinkSync } from 'node:fs';
+import { mkdtempSync,mkdirSync,writeFileSync,realpathSync,rmSync,symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,7 +8,7 @@ import { CURRENT_SESSION_VERSION } from '@earendil-works/pi-coding-agent';
 import { verifyPiSessionCheckpointChain,readPiSessionCheckpointPrefix } from '../src/adapters/pi-session-integrity.ts';
 
 function fixture(){
-  const root=mkdtempSync(join(tmpdir(),'personajes-admin-chain-'));const runId=randomUUID();const role='continuista' as const;
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'personajes-admin-chain-')));const runId=randomUUID();const role='continuista' as const;
   const identity=join(root,'runs',runId,'roles',role);const cwd=join(identity,'cwd');const sessions=join(identity,'sessions');mkdirSync(cwd,{recursive:true,mode:0o700});mkdirSync(sessions,{mode:0o700});
   const sessionId=randomUUID();const timestamp='2026-10-14T12:00:00.000Z';const baseLeafId='base';const inputLeafId='input';const terminalLeafId='terminal';const sessionPath=join(sessions,'session.jsonl');
   const rows:Array<Record<string,unknown>>=[{type:'session',version:CURRENT_SESSION_VERSION,id:sessionId,timestamp,cwd},

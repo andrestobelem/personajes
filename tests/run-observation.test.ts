@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import { createRunObservationApplication } from '../src/application/run-observation.ts';
+import { createRunObservationApplication, projectRunStage } from '../src/application/run-observation.ts';
 import { createRunLifecycleApplication } from '../src/application/run-lifecycle.ts';
 import { createDeliverWorldWorker } from '../src/application/deliver-world.ts';
 import { createLocalHttpServer } from '../src/server/http.ts';
 import { loadCatalog } from '../src/adapters/catalog.ts';
 import { SessionCreatedSchema } from '../src/domain/http.ts';
 import { RunStageViewSchema, ConversationPageSchema, TechnicalJobPageSchema } from '../src/domain/run-observation.ts';
+import { FictionalInstantSchema } from '../src/domain/values.ts';
 import { setup, actorId } from './fixtures/continuista.ts';
 
 const privateFields=/SECRET_|UNPUBLISHED_SECRET|identityMarkdown|lifeStoryMarkdown|trueDisplayName|recognizedCharacterIds|relationshipDescriptions|preparedCharacters|systemPrompt|claimToken|ownerToken|sessionPath|candidateLeafId|feedback|reasoning(?!Effort)|payload_json/;
@@ -41,7 +42,25 @@ test('stage y RunView públicos sólo muestran presentación/escena y excluyen i
     if(old.kind!=='found')assert.fail(old.kind);
     assert.equal(old.value.worldSeq,fixture.configuration.worldSnapshot.seq);
     assert.equal(old.value.fictionalAt,fixture.configuration.worldSnapshot.clock.instant);
+    assert.equal(old.value.lifecycleAsOf,'current');
+    assert.equal(old.value.lifecycle,fixture.journal.readWorldLifecycle({runId:fixture.claim.runId})?.lifecycle);
     assert.equal(application.readStage({runId:fixture.claim.runId,atWorldSeq:stage.worldSeq+1}).kind,'invalidRequest');
+  } finally {fixture.close();}
+});
+
+test('el stage público representa un intervalo entre escenas sin exponer entidades fuera de escena',async()=>{
+  const fixture=await setup();
+  try {
+    const source=fixture.configuration.worldSnapshot;
+    const snapshot={...source,schemaVersion:2 as const,activeSceneId:null,
+      scenes:source.scenes.map((scene)=>({...scene,lifecycle:{kind:'closed' as const,startedAt:fixture.configuration.fictionalAt,
+        closedAt:FictionalInstantSchema.parse(fixture.configuration.fictionalAt+1),reason:'corte de escena'}}))};
+    const view=projectRunStage({snapshot,configuration:fixture.configuration,lifecycle:'paused'});
+    assert.equal(view.activeSceneId,null);
+    assert.deepEqual(view.scenes,[]);
+    assert.deepEqual(view.places,[]);
+    assert.deepEqual(view.entities,[]);
+    assert.deepEqual(view.humanParticipants,[]);
   } finally {fixture.close();}
 });
 
@@ -138,14 +157,21 @@ test('HTTP observación exige sesión, valida cuts/queries/cursors y devuelve DT
   const fixture=await setup();t.after(()=>fixture.close());
   const host=await authenticatedServer(t,fixture);const base=`${host.origin}/api/v1/runs/${fixture.claim.runId}`;
   assert.equal((await fetch(base+'/stage')).status,401);
-  for(const suffix of ['stage','events','conversations','jobs','']) {
+  for(const suffix of ['stage','events','conversations','jobs','director-observations','']) {
     const response=await fetch(base+(suffix?'/'+suffix:''),{headers:host.headers});
     assert.equal(response.status,200,suffix);
     assert.ok(response.headers.get('etag'));
     assert.match(response.headers.get('cache-control')??'',/no-store/);
     assert.doesNotMatch(JSON.stringify(await response.json()),privateFields);
   }
-  for(const suffix of ['/events?limit=101','/events?limit=1&limit=2','/stage?atWorldSeq=9999','/stage?unknown=1','/conversations?fromWorldSeq=99&toWorldSeq=1','/jobs?cursor=garbage']) {
+  const commitCut=await fetch(base+'/stage?atCommitIndex=0',{headers:host.headers});assert.equal(commitCut.status,200);
+  const historicalStage=await commitCut.json() as {commitIndex:number;lifecycleAsOf:string;lifecycle:string};
+  assert.equal(historicalStage.commitIndex,0);
+  assert.equal(historicalStage.lifecycleAsOf,'current');
+  assert.equal(historicalStage.lifecycle,fixture.journal.readWorldLifecycle({runId:fixture.claim.runId})?.lifecycle);
+  const directorCut=await fetch(base+'/director-observations?atCommitIndex=0',{headers:host.headers});assert.equal(directorCut.status,200);
+  assert.equal((await directorCut.json() as {throughCommitIndex:number}).throughCommitIndex,0);
+  for(const suffix of ['/events?limit=101','/events?limit=1&limit=2','/stage?atWorldSeq=9999','/stage?atCommitIndex=9999','/stage?atWorldSeq=0&atCommitIndex=0','/stage?unknown=1','/conversations?fromWorldSeq=99&toWorldSeq=1','/jobs?cursor=garbage','/director-observations?atWorldSeq=0','/director-observations?atCommitIndex=9999']) {
     const response=await fetch(base+suffix,{headers:host.headers});assert.equal(response.status,422,suffix);
   }
   assert.equal((await fetch(`${host.origin}/api/v1/runs/${randomUUID()}/stage`,{headers:host.headers})).status,404);

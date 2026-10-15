@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import { setup } from './fixtures/continuista.ts';
 import { controlledDirectorSessionFactory } from './fixtures/director-session.ts';
 import { createDirectorPiWorker } from '../src/application/director-pi-worker.ts';
+import { createRunObservationApplication } from '../src/application/run-observation.ts';
+import { DirectorObservationListSchema } from '../src/domain/run-observation.ts';
 
 async function fixtureWithTerminalPulse() {
   const fixture=await setup();
@@ -36,6 +38,25 @@ test('Director independiente usa SDK Pi y ledger real, publica evidencia append-
     assert.ok(budget.wallTimeMeasuredMs!==null&&budget.wallTimeMeasuredMs>0);
     const annotations=fixture.journal.readDirectorAnnotations({runId:fixture.claim.runId,throughWorldSeq:world!.seq});
     assert.equal(annotations.length,1);
+    const cut=fixture.journal.readInspectorWorldCut({runId:fixture.claim.runId});assert.ok(cut);
+    const progress=createRunObservationApplication({journal:fixture.journal}).readDirectorObservations({runId:fixture.claim.runId,atCommitIndex:cut.commitIndex});
+    if(progress.kind!=='found')assert.fail(progress.kind);
+    const publicProgress=DirectorObservationListSchema.parse(progress.value);
+    assert.equal(publicProgress.items.length,1);
+    assert.equal(publicProgress.throughCommitIndex,cut.commitIndex);
+    assert.equal(publicProgress.items[0]?.annotationId,accepted.receipt.annotation.annotationId);
+    assert.equal(publicProgress.items[0]?.worldSeq,world?.seq);
+    assert.equal(publicProgress.items[0]?.commitIndex,cut.commitIndex);
+    assert.equal(publicProgress.items[0]?.acceptedAt,accepted.receipt.acceptedAt);
+    const citedEventId=accepted.receipt.annotation.observation.assessment.evidenceEventIds[0];
+    const evidenceReference=publicProgress.items[0]?.evidenceEventReferences[0];
+    assert.ok(citedEventId);
+    assert.deepEqual(evidenceReference && {eventId:evidenceReference.eventId,worldSeq:evidenceReference.worldSeq},
+      {eventId:citedEventId,worldSeq:world?.seq});
+    assert.ok(evidenceReference && evidenceReference.commitIndex<=cut.commitIndex);
+    assert.doesNotMatch(JSON.stringify(publicProgress),/contextHash|systemPrompt|profile|session|scope/);
+    assert.deepEqual(createRunObservationApplication({journal:fixture.journal}).readDirectorObservations({runId:fixture.claim.runId,atCommitIndex:cut.commitIndex+1}),
+      {kind:'invalidRequest',code:'invalid-cut'});
     const repeated=await worker.run({runId:fixture.claim.runId,pulseId:fixture.pulseId});assert.equal(repeated.kind,'existing');
     assert.equal(stats.requests,2);assert.equal(stats.disposed,1);
     const db=new DatabaseSync(join(fixture.directory,'journal.sqlite'));

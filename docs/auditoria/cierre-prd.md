@@ -1,13 +1,17 @@
-# Cierre documental del PRD
+# Registro del cierre previo y revisión reabierta del PRD
 
-El PRD 1.0 puede pasar a especificaciones. El cuerpo sustantivo corresponde a v0.7, después de siete pases de producto, cinco del custodio y seis de contratos. Los informes conservan hallazgos, reparaciones, hashes y alcance:
+El cierre documental anterior habilitó S01–S07 con el PRD 1.0 y está conservado aquí como antecedente. La descripción original de esa edición —que sólo cambiaba la cabecera— no coincide con el documento actual. La revisión se reabrió el 15 de octubre de 2026 para revisar las adiciones posteriores antes de volver a declarar una versión cerrada.
 
-- [Producto, R7](revision-prd-producto.md): sin hallazgos pendientes de este pase.
-- [Concepto, R5](revision-prd-concepto.md): sin omisión concreta pendiente.
-- [Contratos, R6](revision-prd-contratos.md): autoridad, privacidad, estados y límites coherentes; los dos ajustes posteriores de corpus/audio no alteran ese protocolo.
+La base de revisión v0.7 conserva los informes de siete pases de producto, cinco del custodio y seis de contratos:
 
-Hash del PRD v0.7 revisado: `ab189ca2c1a620165ac15007afced6cb6f35a3a2cf6305f4189251113e2b7de5`. Hash de la edición de cierre1.0: `affdbb0de5a24b78c297d6337917ff0320639e00ba2a34883e4b957a3afbe323`. La edición de cierre sólo cambia la cabecera/versionado; no incorpora una decisión de producto posterior a la revisión.
+- [Producto, R7](revision-prd-producto.md): sin hallazgos pendientes en ese pase.
+- [Concepto, R5](revision-prd-concepto.md): sin omisión concreta pendiente en ese pase.
+- [Contratos, R6](revision-prd-contratos.md): autoridad, privacidad, estados y límites revisados en ese corte.
 
-Hay77requisitos con aceptación individual, categoría/origen/padres y25ensayos planificados. [Trazabilidad](trazabilidad-prd.md) y [espejoJSON](requisitos-prd.json) conservan evidencia **pendiente** para los77. La [lectura inicial](lectura-prd-raiz.md) cubre el corpus base de420archivos mediante responsables y conclusiones, además de los loops de documentos nuevos.
+Hashes históricos: PRD v0.7 revisado, `ab189ca2c1a620165ac15007afced6cb6f35a3a2cf6305f4189251113e2b7de5`; documento de cierre 1.0, `affdbb0de5a24b78c297d6337917ff0320639e00ba2a34883e4b957a3afbe323`. Identifican esos cortes, no el estado actual del PRD.
 
-Este cierre sólo corresponde a lectura/corrección inicial y PRD. No prueba acceso a proveedores, actuación, persistencia, GUI, ritmo audiovisual o audio. El objetivo completo sigue activo: escribir/revisar specs, implementar/revisar y auditar cada requisito frente al producto real.
+La edición vigente añadió la definición de Episodio y amplió ESC-10 junto con los ensayos P04, P13, P14, P15 y P19. El pase actual también corrigió el piso de cobertura de P08 para que coincida con el PRD, separó subresultados de P21 por capacidad y reabrió S07 para reconciliar la evidencia exigida. El inventario conserva 77 requisitos y 25 ensayos; los criterios aún necesitan revisión completa y su estado de aceptación sigue pendiente.
+
+La [trazabilidad](trazabilidad-prd.md), el [espejo JSON](requisitos-prd.json) y la [lectura inicial](lectura-prd-raiz.md) documentan el alcance previo y la cobertura. Ninguna cifra de archivos, un hash ni una revisión anterior sustituye volver a inspeccionar los criterios afectados.
+
+Este registro no cierra la revisión vigente. El PRD se cerrará otra vez cuando la relectura de fuentes, requisitos, ensayos y trazabilidad confirme que no quedan omisiones o contradicciones; luego habrá que sincronizar y revisar S01–S07.

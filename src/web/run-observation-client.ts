@@ -5,6 +5,7 @@ import {
   ConversationPageSchema,
   ConfirmedEventPageSchema,
   TechnicalJobPageSchema,
+  DirectorObservationListSchema,
 } from "../domain/run-observation.ts";
 import { bootstrapSession } from "./client.ts";
 const Id = z.string().uuid();
@@ -54,14 +55,24 @@ export function createRunObservationClient(
     });
   }
   return {
-    async stage(runId: string, signal: AbortSignal, atWorldSeq?: number) {
-      const path = `/api/v1/runs/${Id.parse(runId)}/stage${atWorldSeq === undefined ? "" : `?atWorldSeq=${Seq.parse(atWorldSeq)}`}`;
+    async stage(runId: string, signal: AbortSignal, cut?: number | { commitIndex: number }) {
+      const query = cut === undefined ? '' : typeof cut === 'number'
+        ? `?atWorldSeq=${Seq.parse(cut)}` : `?atCommitIndex=${Seq.parse(cut.commitIndex)}`;
+      const path = `/api/v1/runs/${Id.parse(runId)}/stage${query}`;
       const value = await read(path, RunStageViewSchema, signal);
       if (
         value.runId !== runId ||
-        (atWorldSeq !== undefined && value.worldSeq !== atWorldSeq)
+        (typeof cut === 'number' && value.worldSeq !== cut) ||
+        (typeof cut === 'object' && value.commitIndex !== cut.commitIndex)
       )
         throw new Error("El Escenario recibido corresponde a otro corte.");
+      return value;
+    },
+    async directorObservations(runId: string, signal: AbortSignal, atCommitIndex?: number) {
+      const query = atCommitIndex === undefined ? '' : `?atCommitIndex=${Seq.parse(atCommitIndex)}`;
+      const value = await read(`/api/v1/runs/${Id.parse(runId)}/director-observations${query}`, DirectorObservationListSchema, signal);
+      if (value.runId !== runId || (atCommitIndex !== undefined && value.throughCommitIndex !== atCommitIndex))
+        throw new Error("Las observaciones del Director corresponden a otra representación o corte.");
       return value;
     },
     async conversations(input: {

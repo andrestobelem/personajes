@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync,rmSync } from 'node:fs';
+import { mkdtempSync,realpathSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -14,7 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 test('exchange routes enforce preview target, ETag and durable replay; backup denies absent global fence',async()=>{
  const catalog=await loadCatalog({repositoryRoot:process.cwd()});const dossier=await readDossier({catalog,characterId:'maxwell-smart'});
- const root=mkdtempSync(join(tmpdir(),'personajes-exchange-http-'));const journalPath=join(root,'world.sqlite');
+ const root=realpathSync(mkdtempSync(join(tmpdir(),'personajes-exchange-http-')));const journalPath=join(root,'world.sqlite');
  const dossiers=openDossierExchange({journalPath,getDossier:()=>dossier});const backups=openBackupService({privateDataRoot:root});
  const routes=createExchangeRoutes({journalPath,dossiers,backups});
  function write(path:string[],body:unknown,ifMatch:string|null=null,operationId=randomUUID()):Extract<OperatorRequest,{kind:'write'}>{return {kind:'write',method:'POST',path,body,query:new URLSearchParams(),principalId:'operator',mode:{kind:'observer'},ifMatch,ifNoneMatch:null,idempotencyKey:operationId};}

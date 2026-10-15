@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeliverWorldWorker } from "../../src/application/deliver-world.ts";
@@ -19,7 +19,7 @@ import { createNarrationReviewPiPort } from "../../src/application/narration-rev
 import { controlledNarrationReviewSessionFactory } from "./narration-review-session.ts";
 
 export async function fixture(enabled = true, seedSubjectivity = false) {
-  const directory = mkdtempSync(join(tmpdir(), "personajes-narrator-sdk-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "personajes-narrator-sdk-")));
   const journal = openJournal({ path: join(directory, "journal.sqlite") });
   const draft = draftFixture({
     narrationMode: { kind: enabled ? "enabled" : "disabled" },

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,7 +11,7 @@ import { exchangeIntegrity } from '../src/adapters/exchange-integrity.ts';
 
 const runId='00000000-0000-4000-8000-000000000501';
 function fixture() {
-  const root=mkdtempSync(join(tmpdir(),'personajes-backup-'));
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'personajes-backup-')));
   const db=new DatabaseSync(join(root,'world.sqlite'));
   db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE schema_version(version INTEGER); INSERT INTO schema_version VALUES(26);
     CREATE TABLE world_runs(run_id TEXT,commit_index INTEGER,world_revision INTEGER,last_seq INTEGER,snapshot_hash TEXT);

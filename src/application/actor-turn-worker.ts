@@ -15,7 +15,7 @@ import { compilePrivateActorPrompt } from './prepare-character.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
 
 type Journal = Pick<ReturnType<typeof openJournal>,
-  'readActorTurnRecovery' | 'acceptRecoveredActorTurn' | 'failActorTurnJob' | 'claimActorTurnJob' | 'readWorldConfiguration' | 'readExperiences' | 'loadActorWorldCut'
+  'readActorTurnRecovery' | 'acceptRecoveredActorTurn' | 'failActorTurnJob' | 'claimActorTurnJob' | 'readWorldConfiguration' | 'readExperiences' | 'loadActorWorldCut' | 'readActorMetaIndications'
   | 'compareAndSwapActorKnowledge' | 'loadActorPiSession' | 'registerActorPiSession'
   | 'rotateUnacceptedActorPiSession' | 'checkActorJobEligibility' | 'reserveActorJobRequest'
   | 'expireActorJobRequest' | 'settleActorJobRequestWallTime' | 'transitionActorJobReservation' | 'recordActorJobCheckpoint' | 'recordActorPiCandidate'
@@ -122,6 +122,10 @@ export function createActorTurnWorker(input: {
             throughWorldSeq: cut.worldSeq, fictionalAt: cut.fictionalAt,
             spanishVariety: configuration.spanishVariety,
             experiences: input.journal.readExperiences({ runId: execution.runId, actorId: execution.actorId, throughWorldSeq: cut.worldSeq }),
+            directionContext: claimed.job.frozenDirectionRevision===null
+              ? {directionRevision:0,indications:[]}
+              : input.journal.readActorMetaIndications({runId:execution.runId,actorId:execution.actorId,
+                directionRevision:claimed.job.frozenDirectionRevision,activeSceneId:cut.activeSceneId??null}),
             actorJob: { jobId: execution.jobId, generation: execution.generation, ...execution.lease },
             actorWorldProjectionPort: {
               async projectForActor(request) {

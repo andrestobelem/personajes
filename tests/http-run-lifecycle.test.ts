@@ -22,6 +22,9 @@ function makeRunView(): RunView {
     runId,
     configRevision: configuration.configRevision,
     worldRevision: configuration.worldSnapshot.revision,
+    structureRevision: 0,
+    activeEpisodeId: null,
+    activeSceneId: configuration.worldSnapshot.activeSceneId,
     lastWorldSeq: configuration.worldSnapshot.seq,
     lifecycleRevision: 3,
     lifecycle: { kind: 'ready' },
@@ -76,6 +79,7 @@ function controlledLifecycle(initial = makeRunView()) {
     idempotencyKey: string;
     expectedConfigurationRevision: number;
     expectedWorldRevision: number;
+    expectedStructureRevision: number;
     expectedLifecycleRevision: number;
     command: RunLifecycleControlRequest;
   }> = [];
@@ -105,7 +109,7 @@ async function setup(t: TestContext, runLifecycle: RunLifecycleApplicationPort) 
 }
 
 function etag(view: RunView): string {
-  return `"run:${view.runId}:c${view.configRevision}:w${view.worldRevision}:l${view.lifecycleRevision}"`;
+  return `"run:${view.runId}:c${view.configRevision}:w${view.worldRevision}:s${view.structureRevision}:l${view.lifecycleRevision}"`;
 }
 
 test('GET RunView devuelve ETag fuerte con lifecycleRevision y falla cerrado ante port fuera de scope', async (t) => {
@@ -140,7 +144,7 @@ test('POST controls exige CSRF, key, ETag fuerte y comando cerrado antes de llam
   assert.equal((await post({ key: randomUUID(), match: validMatch, headers: { 'X-CSRF-Token': 'wrong' } })).status, 403);
   assert.equal((await post({ match: validMatch })).status, 400);
   assert.equal((await post({ key: randomUUID() })).status, 428);
-  for (const malformed of [`W/${validMatch}`, `"run:${randomUUID()}:c${state.view.configRevision}:w${state.view.worldRevision}:l${state.view.lifecycleRevision}"`, `"run:${state.view.runId}:c${state.view.configRevision}:w${state.view.worldRevision}:l9007199254740992"`]) {
+  for (const malformed of [`W/${validMatch}`, `"run:${randomUUID()}:c${state.view.configRevision}:w${state.view.worldRevision}:s${state.view.structureRevision}:l${state.view.lifecycleRevision}"`, `"run:${state.view.runId}:c${state.view.configRevision}:w${state.view.worldRevision}:s${state.view.structureRevision}:l9007199254740992"`]) {
     assert.equal((await post({ key: randomUUID(), match: malformed })).status, 412);
   }
   assert.equal((await post({ key: randomUUID(), match: validMatch, body: { kind: 'pause', force: true } })).status, 422);
@@ -160,6 +164,7 @@ test('control pasa CAS y principal al puerto; replay, step y resultados de domin
   assert.deepEqual(state.controls[0], {
     principalId: 'local-operator', idempotencyKey: key, runId: state.view.runId,
     expectedConfigurationRevision: state.view.configRevision, expectedWorldRevision: state.view.worldRevision,
+    expectedStructureRevision: state.view.structureRevision,
     expectedLifecycleRevision: state.view.lifecycleRevision, command: { kind: 'pause' },
   });
 

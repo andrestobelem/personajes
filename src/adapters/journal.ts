@@ -10,7 +10,13 @@ import { fingerprintInferenceProfile } from '../application/pi-access-check.ts';
 import { ExperienceSchema, FrozenExperienceSchema } from '../domain/experience.ts';
 import { IcmMemoryIdSchema, MemoryProjectionReceiptSchema } from '../domain/memory-projection.ts';
 import { HumanParticipantProfileSchema } from '../domain/interaction.ts';
+import { SceneIdSchema } from '../domain/world-schema.ts';
 import { HumanInterventionResolutionSchema, resolveHumanIntervention } from '../domain/human-intervention.ts';
+import {
+  ActorDirectionContextSchema, DirectionCommandWriteSchema, DirectionEventsQuerySchema,
+  DirectionEventsPageSchema, DirectionLookupSchema, DirectionLookupResultSchema,
+  DirectionMutationResultSchema, MetaIndicationEventSchema, MetaIndicationPayloadSchema,
+} from '../domain/direction-indications.ts';
 import { freezeExperience, readPrivateExperience } from '../application/experience-envelope.ts';
 import type { FrozenExperience } from '../domain/experience.ts';
 import {
@@ -19,6 +25,7 @@ import {
   WorldEventSchema,
   WorldPerceptionSchema,
   WorldResolutionSchema,
+  WorldSceneSchema,
   WorldSnapshotSchema,
   WorldAttemptIdSchema,
   emptyActorKnowledge,
@@ -41,6 +48,19 @@ import {
   RunLifecycleCommandResultSchema,
   RunLifecycleCommandLookupSchema,
   RunLifecycleCommandLookupResultSchema,
+  EpisodeIdSchema,
+  ActIdSchema,
+  DramaticCutSchema,
+  DramaticLineEvidenceSchema,
+  DramaticActViewSchema,
+  DramaticEpisodeViewSchema,
+  DramaticStructureEventSchema,
+  DramaticStructureViewSchema,
+  DramaticStructureCommandSchema,
+  DramaticStructureWriteSchema,
+  DramaticStructureMutationResultSchema,
+  DramaticStructureLookupSchema,
+  DramaticStructureLookupResultSchema,
   resolveRunControlTransition,
   WorldRunRegistrationSchema,
   WorldProposalRegistrationSchema,
@@ -252,9 +272,37 @@ const ProjectionStoredRowSchema = z.strictObject({
 const WorldRunRowSchema = z.strictObject({
   run_id: RunIdSchema, config_revision: counter, configuration_json: z.string(), configuration_hash: HashSchema,
   continuity_fence_json: z.string(), lifecycle: WorldLifecycleSchema, lifecycle_revision: counter, closed_at: counter.nullable(),
-  world_revision: counter, last_seq: counter,
+  world_revision: counter, structure_revision: counter, direction_revision: counter, last_seq: counter,
   commit_index: counter, initial_snapshot_json: z.string(), initial_snapshot_hash: HashSchema,
   snapshot_json: z.string(), snapshot_hash: HashSchema, created_at: counter.nullable().optional(), updated_at: counter,
+});
+const DramaticEpisodeDbRowSchema = z.strictObject({
+  run_id: RunIdSchema, episode_id: EpisodeIdSchema, ordinal: counter.min(1), title: z.string().nullable(),
+  lifecycle: z.enum(['open', 'closed']), opening_cut_json: z.string(), opening_cut_hash: HashSchema,
+  closing_cut_json: z.string().nullable(), closing_cut_hash: HashSchema.nullable(),
+  consequence_event_ids_json: z.string(), open_lines_json: z.string(),
+});
+const DramaticActDbRowSchema = z.strictObject({
+  run_id: RunIdSchema, episode_id: EpisodeIdSchema, act_id: ActIdSchema, ordinal: counter.min(1), title: z.string(),
+});
+const DramaticStructureEventDbRowSchema = z.strictObject({
+  run_id: RunIdSchema, structure_revision: counter.min(1), operation_id: z.string().uuid(), principal_id: z.string(),
+  event_kind: z.enum(['episodeOpened', 'episodeClosed', 'sceneOpened', 'sceneClosed', 'actsSet']),
+  payload_json: z.string(), payload_hash: HashSchema, world_revision: counter, world_seq: counter,
+  commit_index: counter.min(1), recorded_at: counter,
+});
+const DramaticStructureOperationDbRowSchema = z.strictObject({
+  run_id: RunIdSchema, principal_id: z.string(), idempotency_key: z.string().uuid(), operation_id: z.string().uuid(),
+  operation_kind: z.enum(['openEpisode', 'closeEpisode', 'openScene', 'closeScene', 'setEpisodeActs']),
+  request_hash: HashSchema, result_json: z.string(), result_hash: HashSchema, recorded_at: counter,
+});
+const DirectionEventDbRowSchema = z.strictObject({
+  run_id: RunIdSchema, direction_revision: counter.min(1), operation_id: z.string().uuid(), principal_id: z.string(),
+  payload_json: z.string(), payload_hash: HashSchema, world_revision: counter, world_seq: counter, commit_index: counter, recorded_at: counter,
+});
+const DirectionOperationDbRowSchema = z.strictObject({
+  run_id: RunIdSchema, principal_id: z.string(), idempotency_key: z.string().uuid(), operation_id: z.string().uuid(),
+  request_hash: HashSchema, result_json: z.string(), result_hash: HashSchema, recorded_at: counter,
 });
 const WorldProposalDbRowSchema = z.strictObject({
   proposal_id: ProposalIdSchema, version: counter, actor_id: CharacterIdSchema, scene_id: z.string(),
@@ -314,6 +362,7 @@ const ActorTurnJobDbRowSchema = z.strictObject({
   owner_token: z.string().uuid().nullable(), claim_token: z.string().uuid().nullable(),
   frozen_perception_ids_json: z.string().nullable(),
   frozen_world_cut_json: z.string().nullable(),
+  frozen_direction_revision: counter.nullable(),
   created_at: counter, updated_at: counter,
 });
 const ActorTurnJobInputDbRowSchema = z.strictObject({
@@ -346,6 +395,7 @@ const ActorSessionScopeSchema = z.strictObject({
 const ActorInputCutSchema = z.strictObject({
   worldRevision: counter, worldSeq: WorldSeqSchema, fictionalAt: z.number().int(),
   perceptionIds: z.array(PerceptionIdSchema).max(100_000),
+  activeSceneId: SceneIdSchema.nullable().optional(),
 }).superRefine((cut, context) => {
   if (new Set(cut.perceptionIds).size !== cut.perceptionIds.length) {
     context.addIssue({ code: 'custom', path: ['perceptionIds'], message: 'La entrada no puede repetir percepciones' });
@@ -457,7 +507,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1522,6 +1572,83 @@ export function openJournal(input: { path: string }) {
     catch(error){try{database.exec('ROLLBACK;PRAGMA foreign_keys=ON;');}catch{/* Atomic migration. */}database.close();throw error;}
   }
 
+  if (initialVersion === undefined || initialVersion < 29) {
+    const worldRunColumns=database.prepare('PRAGMA table_info(world_runs)').all().map((value)=>z.object({name:z.string()}).parse(value).name);
+    const addStructureRevision=worldRunColumns.includes('structure_revision')?'':'ALTER TABLE world_runs ADD COLUMN structure_revision INTEGER NOT NULL DEFAULT 0 CHECK(structure_revision>=0);';
+    try { database.exec(`BEGIN IMMEDIATE;${addStructureRevision}
+      CREATE TABLE IF NOT EXISTS episodes(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        episode_id TEXT NOT NULL,ordinal INTEGER NOT NULL CHECK(ordinal>=1),title TEXT,
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN('open','closed')),
+        opening_cut_json TEXT NOT NULL,opening_cut_hash TEXT NOT NULL,
+        closing_cut_json TEXT,closing_cut_hash TEXT,
+        consequence_event_ids_json TEXT NOT NULL,open_lines_json TEXT NOT NULL,
+        PRIMARY KEY(run_id,episode_id),UNIQUE(run_id,ordinal),
+        CHECK((lifecycle='open' AND closing_cut_json IS NULL AND closing_cut_hash IS NULL)
+          OR (lifecycle='closed' AND closing_cut_json IS NOT NULL AND closing_cut_hash IS NOT NULL))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS episodes_one_open ON episodes(run_id) WHERE lifecycle='open';
+      CREATE TABLE IF NOT EXISTS episode_scenes(
+        run_id TEXT NOT NULL,episode_id TEXT NOT NULL,scene_id TEXT NOT NULL,ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+        PRIMARY KEY(run_id,episode_id,scene_id),UNIQUE(run_id,scene_id),UNIQUE(run_id,episode_id,ordinal),
+        FOREIGN KEY(run_id,episode_id) REFERENCES episodes(run_id,episode_id) ON DELETE RESTRICT
+      );
+      CREATE TABLE IF NOT EXISTS acts(
+        run_id TEXT NOT NULL,episode_id TEXT NOT NULL,act_id TEXT NOT NULL,ordinal INTEGER NOT NULL CHECK(ordinal>=1),title TEXT NOT NULL,
+        PRIMARY KEY(run_id,episode_id,act_id),UNIQUE(run_id,episode_id,ordinal),
+        FOREIGN KEY(run_id,episode_id) REFERENCES episodes(run_id,episode_id) ON DELETE RESTRICT
+      );
+      CREATE TABLE IF NOT EXISTS act_scenes(
+        run_id TEXT NOT NULL,episode_id TEXT NOT NULL,act_id TEXT NOT NULL,scene_id TEXT NOT NULL,ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+        PRIMARY KEY(run_id,episode_id,act_id,scene_id),UNIQUE(run_id,episode_id,scene_id),UNIQUE(run_id,episode_id,act_id,ordinal),
+        FOREIGN KEY(run_id,episode_id,act_id) REFERENCES acts(run_id,episode_id,act_id) ON DELETE RESTRICT,
+        FOREIGN KEY(run_id,episode_id,scene_id) REFERENCES episode_scenes(run_id,episode_id,scene_id) ON DELETE RESTRICT
+      );
+      CREATE TABLE IF NOT EXISTS structure_events(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        structure_revision INTEGER NOT NULL CHECK(structure_revision>0),operation_id TEXT NOT NULL UNIQUE,
+        principal_id TEXT NOT NULL,event_kind TEXT NOT NULL CHECK(event_kind IN('episodeOpened','episodeClosed','sceneOpened','sceneClosed','actsSet')),
+        payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        world_revision INTEGER NOT NULL CHECK(world_revision>=0),world_seq INTEGER NOT NULL CHECK(world_seq>=0),
+        commit_index INTEGER NOT NULL CHECK(commit_index>0),recorded_at INTEGER NOT NULL CHECK(recorded_at>=0),
+        PRIMARY KEY(run_id,structure_revision),UNIQUE(run_id,commit_index),
+        FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT
+      );
+      CREATE TABLE IF NOT EXISTS structure_operations(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+        operation_id TEXT NOT NULL,operation_kind TEXT NOT NULL CHECK(operation_kind IN('openEpisode','closeEpisode','openScene','closeScene','setEpisodeActs')),
+        request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,recorded_at INTEGER NOT NULL CHECK(recorded_at>=0),
+        PRIMARY KEY(run_id,principal_id,idempotency_key),UNIQUE(run_id,operation_id)
+      );
+      CREATE INDEX IF NOT EXISTS structure_events_history ON structure_events(run_id,commit_index);
+      INSERT OR IGNORE INTO schema_version VALUES(29);COMMIT;`); }
+    catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+
+  if (initialVersion === undefined || initialVersion < 30) {
+    const worldRunColumns=database.prepare('PRAGMA table_info(world_runs)').all().map((value)=>z.object({name:z.string()}).parse(value).name);
+    const jobColumns=database.prepare('PRAGMA table_info(actor_turn_jobs)').all().map((value)=>z.object({name:z.string()}).parse(value).name);
+    const addDirectionRevision=worldRunColumns.includes('direction_revision')?'':'ALTER TABLE world_runs ADD COLUMN direction_revision INTEGER NOT NULL DEFAULT 0 CHECK(direction_revision>=0);';
+    const addFrozenDirectionRevision=jobColumns.includes('frozen_direction_revision')?'':'ALTER TABLE actor_turn_jobs ADD COLUMN frozen_direction_revision INTEGER CHECK(frozen_direction_revision IS NULL OR frozen_direction_revision>=0);';
+    try { database.exec(`BEGIN IMMEDIATE;${addDirectionRevision}${addFrozenDirectionRevision}
+      CREATE TABLE IF NOT EXISTS direction_events(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        direction_revision INTEGER NOT NULL CHECK(direction_revision>0),operation_id TEXT NOT NULL UNIQUE,
+        principal_id TEXT NOT NULL,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        world_revision INTEGER NOT NULL CHECK(world_revision>=0),world_seq INTEGER NOT NULL CHECK(world_seq>=0),
+        commit_index INTEGER NOT NULL CHECK(commit_index>=0),recorded_at INTEGER NOT NULL CHECK(recorded_at>=0),
+        PRIMARY KEY(run_id,direction_revision)
+      );
+      CREATE TABLE IF NOT EXISTS direction_operations(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+        operation_id TEXT NOT NULL UNIQUE,request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,
+        recorded_at INTEGER NOT NULL CHECK(recorded_at>=0),PRIMARY KEY(run_id,principal_id,idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS direction_events_recipient ON direction_events(run_id,direction_revision);
+      INSERT OR IGNORE INTO schema_version VALUES(30);COMMIT;`); }
+    catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -1850,6 +1977,7 @@ export function openJournal(input: { path: string }) {
       runId: row.run_id, actorId: row.actor_id, jobId: row.job_id, generation: row.generation,
       pulseId: row.pulse_id, lifecycleRevision: row.lifecycle_revision, state: row.state,
       failureCode: row.failure_code, perceptionIds: inputs, frozenPerceptionIds, frozenWorldCut,
+      frozenDirectionRevision: row.frozen_direction_revision,
     });
   }
 
@@ -2924,6 +3052,69 @@ export function openJournal(input: { path: string }) {
     if(rows.length>10000)throw new Error('El contexto Director excede su límite; requiere continuación administrativa explícita');
     return rows.map(lookup=>{const receipt=directorReceipt(lookup);if(receipt===undefined)throw new Error('Anotación Director perdida');return receipt.annotation;});
   }
+  function directorObservationHistory(input:unknown) {
+    const request=z.strictObject({runId:RunIdSchema,throughCommitIndex:RevisionSchema,worldRevision:RevisionSchema,throughWorldSeq:WorldSeqSchema}).parse(input);
+    const runValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+    if(runValue===undefined)return undefined;
+    const run=parseWorldRun(runValue);
+    if(request.throughCommitIndex>run.row.commit_index)throw new Error('Corte Director futuro');
+    let selectedSnapshot:z.infer<typeof WorldSnapshotSchema>;
+    if(request.throughCommitIndex===0){
+      selectedSnapshot=run.initialSnapshot;
+    }else{
+      const selectedValue=database.prepare('SELECT snapshot_json,snapshot_hash,world_revision,last_seq,commit_index FROM world_commits WHERE run_id=? AND commit_index=?')
+        .get(request.runId,request.throughCommitIndex);
+      if(selectedValue===undefined)throw new Error('Corte Director sin commit persistido');
+      const selected=z.strictObject({snapshot_json:z.string(),snapshot_hash:HashSchema,world_revision:RevisionSchema,last_seq:WorldSeqSchema,commit_index:RevisionSchema}).parse(selectedValue);
+      if(sha256(selected.snapshot_json)!==selected.snapshot_hash)throw new Error('Hash del corte Director no coincide');
+      selectedSnapshot=WorldSnapshotSchema.parse(parseStoredJson(selected.snapshot_json));
+      if(canonicalJson(selectedSnapshot)!==selected.snapshot_json||selectedSnapshot.runId!==request.runId
+        ||selectedSnapshot.revision!==selected.world_revision||selectedSnapshot.seq!==selected.last_seq
+        ||selected.commit_index!==request.throughCommitIndex)throw new Error('Commit Director alterado');
+    }
+    if(selectedSnapshot.runId!==request.runId||selectedSnapshot.revision!==request.worldRevision||selectedSnapshot.seq!==request.throughWorldSeq){
+      throw new Error('Corte Director distinto del snapshot seleccionado');
+    }
+    const rows=database.prepare('SELECT job_id,generation FROM director_annotations WHERE run_id=? AND through_world_seq<=? ORDER BY accepted_at,annotation_id LIMIT 10001')
+      .all(request.runId,request.throughWorldSeq).map(value=>AdministrativeJobLookupSchema.parse({jobId:Reflect.get(value,'job_id'),generation:Reflect.get(value,'generation')}));
+    if(rows.length>10000)throw new Error('La historia Director excede su límite; requiere continuación explícita');
+    const commitIndexes=new Map<string,number>();
+    const evidenceById=new Map<string,{eventId:string;worldSeq:number;commitIndex:number}>();
+    const evidenceRow=database.prepare(`SELECT e.payload_json,e.payload_hash,e.world_seq,c.commit_index FROM world_events e
+      JOIN world_commits c ON c.run_id=e.run_id AND c.commit_index=(SELECT MIN(commit_index) FROM world_commits x WHERE x.run_id=e.run_id AND x.last_seq>=e.world_seq)
+      WHERE e.run_id=? AND e.event_id=?`);
+    return rows.flatMap(lookup=>{
+      const receipt=directorReceipt(lookup);if(receipt===undefined)throw new Error('Anotación Director perdida');
+      const annotation=receipt.annotation;
+      const key=`${annotation.scope.worldRevision}:${annotation.scope.throughWorldSeq}`;
+      let commitIndex=commitIndexes.get(key);
+      if(commitIndex===undefined){
+        const target=snapshotAndCommitAtCut(run,annotation.scope.worldRevision,annotation.scope.throughWorldSeq);
+        if(target===undefined)throw new Error('La observación Director cita un corte no persistido');
+        commitIndex=target.commitIndex;commitIndexes.set(key,commitIndex);
+      }
+      if(commitIndex>request.throughCommitIndex)return [];
+      const evidenceEventReferences=annotation.observation.assessment.evidenceEventIds.map(eventId=>{
+        let reference=evidenceById.get(eventId);
+        if(reference===undefined){
+          const value=evidenceRow.get(request.runId,eventId);
+          if(value===undefined)throw new Error('La evidencia citada por el Director no tiene evento confirmado');
+          const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,world_seq:WorldSeqSchema,commit_index:RevisionSchema}).parse(value);
+          if(sha256(row.payload_json)!==row.payload_hash)throw new Error('Hash de evidencia Director alterado');
+          const event=WorldEventSchema.parse(parseStoredJson(row.payload_json));
+          if(canonicalJson(event)!==row.payload_json||event.runId!==request.runId||event.id!==eventId||event.seq!==row.world_seq){
+            throw new Error('Evento de evidencia Director alterado o fuera de corrida');
+          }
+          reference={eventId,worldSeq:event.seq,commitIndex:row.commit_index};evidenceById.set(eventId,reference);
+        }
+        if(reference.worldSeq>annotation.scope.throughWorldSeq||reference.commitIndex>commitIndex){
+          throw new Error('La evidencia Director es posterior al corte citado');
+        }
+        return reference;
+      });
+      return [{annotation,acceptedAt:receipt.acceptedAt,commitIndex,evidenceEventReferences}];
+    });
+  }
   function directorContextForPulse(run:ReturnType<typeof parseWorldRun>,pulseId:z.infer<typeof PulseIdSchema>,jobId:z.infer<typeof JobIdSchema>,generation:number) {
     const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
     const events=database.prepare('SELECT payload_json,payload_hash FROM world_events WHERE run_id=? AND world_seq<=? ORDER BY world_seq LIMIT 10001')
@@ -3304,8 +3495,14 @@ export function openJournal(input: { path: string }) {
             && hashJson(existing.fence).json === fenceJson) return 'existing';
           if(!replaceEditable||(existing.row.lifecycle!=='draft'&&existing.row.lifecycle!=='ready'))throw new Error('Run existente requiere una nueva lineage/configuración versionada');
           database.prepare(`UPDATE world_runs SET config_revision=?,configuration_json=?,configuration_hash=?,continuity_fence_json=?,lifecycle='ready',
-            world_revision=?,last_seq=?,commit_index=0,initial_snapshot_json=?,initial_snapshot_hash=?,snapshot_json=?,snapshot_hash=?,updated_at=? WHERE run_id=? AND lifecycle IN('draft','ready')`)
+            world_revision=?,structure_revision=0,last_seq=?,commit_index=0,initial_snapshot_json=?,initial_snapshot_hash=?,snapshot_json=?,snapshot_hash=?,updated_at=? WHERE run_id=? AND lifecycle IN('draft','ready')`)
             .run(registration.configurationRevision,configurationJson,configurationHash,fenceJson,snapshot.revision,snapshot.seq,snapshotJson,snapshotHash,snapshotJson,snapshotHash,Date.now(),snapshot.runId);
+          database.prepare('DELETE FROM act_scenes WHERE run_id=?').run(snapshot.runId);
+          database.prepare('DELETE FROM acts WHERE run_id=?').run(snapshot.runId);
+          database.prepare('DELETE FROM structure_events WHERE run_id=?').run(snapshot.runId);
+          database.prepare('DELETE FROM structure_operations WHERE run_id=?').run(snapshot.runId);
+          database.prepare('DELETE FROM episode_scenes WHERE run_id=?').run(snapshot.runId);
+          database.prepare('DELETE FROM episodes WHERE run_id=?').run(snapshot.runId);
           if(ReadyRunConfigurationSchema.safeParse(registration.configuration).success) ensureModelTimeRunState(snapshot.runId);
           database.prepare('DELETE FROM world_prepared_contexts WHERE run_id=?').run(snapshot.runId);
           database.prepare('DELETE FROM actor_knowledge WHERE run_id=?').run(snapshot.runId);
@@ -3410,7 +3607,410 @@ export function openJournal(input: { path: string }) {
     return 'expired';
   }
 
+  function structureEventRow(rowValue: unknown) {
+    const row = DramaticStructureEventDbRowSchema.parse(rowValue);
+    const payload = parseStoredJson(row.payload_json);
+    const record = z.record(z.string(), z.unknown()).parse(payload);
+    if (canonicalJson(record) !== row.payload_json || sha256(row.payload_json) !== row.payload_hash) {
+      throw new Error('Evento estructural alterado o no canónico');
+    }
+    const commitValue = database.prepare('SELECT world_revision,last_seq FROM world_commits WHERE run_id=? AND commit_index=?')
+      .get(row.run_id,row.commit_index);
+    if (commitValue === undefined) throw new Error('Evento estructural sin commit de representación');
+    const commit = z.strictObject({world_revision:counter,last_seq:counter}).parse(commitValue);
+    if (commit.world_revision !== row.world_revision || commit.last_seq !== row.world_seq) {
+      throw new Error('Corte del evento estructural no coincide con su commit');
+    }
+    return DramaticStructureEventSchema.parse({
+      runId: row.run_id, structureRevision: row.structure_revision, operationId: row.operation_id,
+      principalId: row.principal_id, kind: row.event_kind, payload: record, payloadHash: row.payload_hash,
+      worldRevision: row.world_revision, worldSeq: row.world_seq, commitIndex: row.commit_index,
+      recordedAt: row.recorded_at,
+    });
+  }
+
+  function readDramaticStructureForRun(run: ReturnType<typeof parseWorldRun>) {
+    const eventRows = database.prepare('SELECT * FROM structure_events WHERE run_id=? ORDER BY structure_revision').all(run.row.run_id);
+    const events = eventRows.map(structureEventRow);
+    if (events.length !== run.row.structure_revision || (events.at(-1)?.structureRevision ?? 0) !== run.row.structure_revision) {
+      throw new Error('La revisión estructural no coincide con el journal de estructura');
+    }
+    const mappedScenes = new Set<string>();
+    const episodeRows = database.prepare('SELECT * FROM episodes WHERE run_id=? ORDER BY ordinal').all(run.row.run_id);
+    const episodes = episodeRows.map((value) => {
+      const row = DramaticEpisodeDbRowSchema.parse(value);
+      const openingCut = DramaticCutSchema.parse(parseStoredJson(row.opening_cut_json));
+      if (canonicalJson(openingCut) !== row.opening_cut_json || sha256(row.opening_cut_json) !== row.opening_cut_hash) {
+        throw new Error('Corte de apertura de episodio alterado');
+      }
+      let closingCut: z.infer<typeof DramaticCutSchema> | null = null;
+      if (row.closing_cut_json !== null) {
+        closingCut = DramaticCutSchema.parse(parseStoredJson(row.closing_cut_json));
+        if (canonicalJson(closingCut) !== row.closing_cut_json || sha256(row.closing_cut_json) !== row.closing_cut_hash) {
+          throw new Error('Corte de cierre de episodio alterado');
+        }
+      } else if (row.closing_cut_hash !== null) throw new Error('Hash de cierre de episodio sin corte');
+      const sceneRows = database.prepare('SELECT scene_id FROM episode_scenes WHERE run_id=? AND episode_id=? ORDER BY ordinal')
+        .all(row.run_id,row.episode_id).map((sceneValue) => z.strictObject({scene_id:z.string().uuid()}).parse(sceneValue).scene_id);
+      sceneRows.forEach((sceneId) => mappedScenes.add(sceneId));
+      const actRows = database.prepare('SELECT * FROM acts WHERE run_id=? AND episode_id=? ORDER BY ordinal').all(row.run_id,row.episode_id);
+      const acts = actRows.map((actValue) => {
+        const act = DramaticActDbRowSchema.parse(actValue);
+        const actSceneIds = database.prepare('SELECT scene_id FROM act_scenes WHERE run_id=? AND episode_id=? AND act_id=? ORDER BY ordinal')
+          .all(act.run_id,act.episode_id,act.act_id).map((sceneValue) => z.strictObject({scene_id:z.string().uuid()}).parse(sceneValue).scene_id);
+        return DramaticActViewSchema.parse({actId:act.act_id,ordinal:act.ordinal,title:act.title,sceneIds:actSceneIds});
+      });
+      const consequenceEventIds = z.array(EventIdSchema).max(10_000).parse(parseStoredJson(row.consequence_event_ids_json));
+      const openLines = z.array(DramaticLineEvidenceSchema).max(10_000).parse(parseStoredJson(row.open_lines_json));
+      if (canonicalJson(consequenceEventIds) !== row.consequence_event_ids_json || canonicalJson(openLines) !== row.open_lines_json) {
+        throw new Error('Consecuencias estructurales de episodio no canónicas');
+      }
+      return DramaticEpisodeViewSchema.parse({
+        episodeId:row.episode_id,ordinal:row.ordinal,title:row.title,lifecycle:row.lifecycle,
+        openingCut,closingCut,consequenceEventIds,openLines,sceneIds:sceneRows,acts,
+      });
+    });
+    const activeEpisode = episodes.find((episode) => episode.lifecycle === 'open');
+    if (episodes.filter((episode) => episode.lifecycle === 'open').length > 1) throw new Error('Más de un episodio activo');
+    const currentSceneIds = new Set<string>(run.snapshot.scenes.map((scene) => scene.id));
+    if ([...mappedScenes].some((sceneId) => !currentSceneIds.has(sceneId))) throw new Error('Estructura refiere escenas ausentes del snapshot');
+    const unassignedLegacyScenes = run.snapshot.scenes.filter((scene) => !mappedScenes.has(scene.id));
+    return DramaticStructureViewSchema.parse({runId:run.row.run_id,structureRevision:run.row.structure_revision,
+      activeEpisodeId:activeEpisode?.episodeId??null,activeSceneId:run.snapshot.activeSceneId,episodes,unassignedLegacyScenes});
+  }
+
+  function readDramaticStructureAtCut(run: ReturnType<typeof parseWorldRun>, worldRevision: number, worldSeq: number) {
+    const cut=snapshotAndCommitAtCut(run,worldRevision,worldSeq);
+    if(cut===undefined)return undefined;
+    const rows=database.prepare('SELECT * FROM structure_events WHERE run_id=? AND commit_index<=? ORDER BY structure_revision')
+      .all(run.row.run_id,cut.commitIndex);
+    const events=rows.map(structureEventRow);
+    if(events.some((event,index)=>event.structureRevision!==index+1))throw new Error('El corte estructural no es continuo');
+    const episodes:Array<z.infer<typeof DramaticEpisodeViewSchema>>=[];
+    const findEpisode=(episodeId:string)=>episodes.find((episode)=>episode.episodeId===episodeId);
+    for(const event of events){
+      const eventCut=DramaticCutSchema.parse({worldRevision:event.worldRevision,worldSeq:event.worldSeq,
+        structureRevision:event.structureRevision,commitIndex:event.commitIndex});
+      switch(event.kind){
+        case 'episodeOpened': {
+          const payload=z.object({episodeId:EpisodeIdSchema,ordinal:counter,title:z.string().nullable(),
+            associatedInitialSceneId:WorldSceneSchema.shape.id.optional()}).parse(event.payload);
+          if(episodes.some((episode)=>episode.episodeId===payload.episodeId))throw new Error('Episodio duplicado en el journal estructural');
+          episodes.push(DramaticEpisodeViewSchema.parse({episodeId:payload.episodeId,ordinal:payload.ordinal,title:payload.title,
+            lifecycle:'open',openingCut:eventCut,closingCut:null,consequenceEventIds:[],openLines:[],
+            sceneIds:payload.associatedInitialSceneId===undefined?[]:[payload.associatedInitialSceneId],acts:[]}));
+          break;
+        }
+        case 'sceneOpened': {
+          const payload=z.object({episodeId:EpisodeIdSchema,scene:WorldSceneSchema}).parse(event.payload);
+          const episode=findEpisode(payload.episodeId);
+          if(episode===undefined||episode.lifecycle!=='open'||episode.sceneIds.includes(payload.scene.id))throw new Error('Apertura de escena incoherente en el journal');
+          episode.sceneIds.push(payload.scene.id);
+          break;
+        }
+        case 'episodeClosed': {
+          const payload=z.object({episodeId:EpisodeIdSchema,consequenceEventIds:z.array(EventIdSchema).max(10_000),
+            openLines:z.array(DramaticLineEvidenceSchema).max(10_000),cut:DramaticCutSchema}).parse(event.payload);
+          const episode=findEpisode(payload.episodeId);
+          if(episode===undefined||episode.lifecycle!=='open'||canonicalJson(payload.cut)!==canonicalJson(eventCut))throw new Error('Cierre de episodio incoherente en el journal');
+          episode.lifecycle='closed';episode.closingCut=payload.cut;episode.consequenceEventIds=payload.consequenceEventIds;episode.openLines=payload.openLines;
+          break;
+        }
+        case 'actsSet': {
+          const payload=z.object({episodeId:EpisodeIdSchema,acts:z.array(z.object({actId:ActIdSchema,title:z.string().trim().min(1).max(200),
+            sceneIds:z.array(WorldSceneSchema.shape.id).min(1).max(10_000)})).max(1_000)}).parse(event.payload);
+          const episode=findEpisode(payload.episodeId);
+          if(episode===undefined||payload.acts.some((act)=>act.sceneIds.some((sceneId)=>!episode.sceneIds.includes(sceneId))))throw new Error('Actos incoherentes en el journal estructural');
+          episode.acts=payload.acts.map((act,index)=>DramaticActViewSchema.parse({...act,ordinal:index+1}));
+          break;
+        }
+        case 'sceneClosed': {
+          const payload=z.object({episodeId:EpisodeIdSchema.nullable(),sceneId:WorldSceneSchema.shape.id,reason:z.string()}).parse(event.payload);
+          if(payload.episodeId!==null&&!findEpisode(payload.episodeId)?.sceneIds.includes(payload.sceneId))throw new Error('Cierre de escena incoherente en el journal');
+          break;
+        }
+        default:{const exhaustive:never=event.kind;throw new Error(`Evento estructural desconocido: ${String(exhaustive)}`);}
+      }
+    }
+    if(events.length>cut.commitIndex)throw new Error('El corte incluye revisiones estructurales posteriores');
+    const activeEpisodes=episodes.filter((episode)=>episode.lifecycle==='open');
+    if(activeEpisodes.length>1)throw new Error('Más de un episodio activo en el corte histórico');
+    const mappedScenes=new Set(episodes.flatMap((episode)=>episode.sceneIds));
+    const snapshotSceneIds=new Set(cut.snapshot.scenes.map((scene)=>scene.id));
+    if([...mappedScenes].some((sceneId)=>!snapshotSceneIds.has(sceneId)))throw new Error('El corte estructural refiere escenas ausentes del snapshot histórico');
+    return {structure:DramaticStructureViewSchema.parse({runId:run.row.run_id,structureRevision:events.at(-1)?.structureRevision??0,
+      activeEpisodeId:activeEpisodes[0]?.episodeId??null,activeSceneId:cut.snapshot.activeSceneId,episodes,
+      unassignedLegacyScenes:cut.snapshot.scenes.filter((scene)=>!mappedScenes.has(scene.id))}),
+      worldRevision:cut.snapshot.revision,worldSeq:cut.snapshot.seq,commitIndex:cut.commitIndex};
+  }
+
+  function writeStructuralCommit(input: {
+    run: ReturnType<typeof parseWorldRun>; operationId: string; principalId: string;
+    eventKind: z.infer<typeof DramaticStructureEventDbRowSchema>['event_kind']; payload: Record<string, unknown>;
+    snapshotChanges?: Partial<z.infer<typeof WorldSnapshotSchema>>; recordedAt?: number;
+  }) {
+    const recordedAt=input.recordedAt??Date.now();
+    const worldRevision=input.run.row.world_revision+1;
+    const structureRevision=input.run.row.structure_revision+1;
+    const commitIndex=input.run.row.commit_index+1;
+    const snapshot=WorldSnapshotSchema.parse({...input.run.snapshot,...input.snapshotChanges,schemaVersion:2,revision:worldRevision});
+    const snapshotPayload=hashJson(snapshot);
+    database.prepare(`INSERT INTO world_commits(run_id,origin_kind,origin_id,commit_index,world_revision,last_seq,snapshot_json,snapshot_hash,created_at)
+      VALUES(?,'dramaticStructure',?,?,?,?,?,?,?)`).run(input.run.row.run_id,input.operationId,commitIndex,worldRevision,input.run.row.last_seq,snapshotPayload.json,snapshotPayload.hash,recordedAt);
+    const changed=database.prepare(`UPDATE world_runs SET world_revision=?,structure_revision=?,commit_index=?,snapshot_json=?,snapshot_hash=?,updated_at=?
+      WHERE run_id=? AND world_revision=? AND structure_revision=? AND commit_index=?`).run(
+      worldRevision,structureRevision,commitIndex,snapshotPayload.json,snapshotPayload.hash,recordedAt,input.run.row.run_id,
+      input.run.row.world_revision,input.run.row.structure_revision,input.run.row.commit_index);
+    if(changed.changes!==1)throw new Error('CAS de estructura cambió dentro de la transacción');
+    const payload=hashJson(input.payload);
+    database.prepare(`INSERT INTO structure_events(run_id,structure_revision,operation_id,principal_id,event_kind,payload_json,payload_hash,
+      world_revision,world_seq,commit_index,recorded_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      input.run.row.run_id,structureRevision,input.operationId,input.principalId,input.eventKind,payload.json,payload.hash,
+      worldRevision,input.run.row.last_seq,commitIndex,recordedAt);
+    return {worldRevision,worldSeq:input.run.row.last_seq,structureRevision,commitIndex,activeSceneId:snapshot.activeSceneId,snapshot};
+  }
+
+  function persistDramaticStructureResult(input: {runId:string;principalId:string;idempotencyKey:string;operationId:string;kind:string;requestHash:string;
+    result:z.infer<typeof DramaticStructureMutationResultSchema>;recordedAt?:number}) {
+    const payload=hashJson(input.result);
+    database.prepare(`INSERT INTO structure_operations(run_id,principal_id,idempotency_key,operation_id,operation_kind,request_hash,result_json,result_hash,recorded_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(input.runId,input.principalId,input.idempotencyKey,input.operationId,input.kind,input.requestHash,payload.json,payload.hash,input.recordedAt??Date.now());
+    return input.result;
+  }
+
+  function structuralOperationCrossExists(principalId:string,idempotencyKey:string) {
+    return [
+      'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM run_control_operations WHERE principal_id=? AND idempotency_key=?',
+    ].some((sql)=>database.prepare(sql).get(principalId,idempotencyKey)!==undefined);
+  }
+
+  function openInitialEpisodeAtStart(run:ReturnType<typeof parseWorldRun>,principalId:string,operationId:string,recordedAt:number) {
+    const structure=readDramaticStructureForRun(run);
+    if(run.row.structure_revision!==0||structure.episodes.length!==0||run.snapshot.activeSceneId===null){
+      throw new Error('Ready inicial requiere un snapshot con una escena activa sin episodio previo');
+    }
+    const scene=run.snapshot.scenes.find((item)=>item.id===run.snapshot.activeSceneId);
+    if(scene===undefined||scene.lifecycle.kind!=='open')throw new Error('Escena inicial no está abierta');
+    const episodeId=EpisodeIdSchema.parse(randomUUID());
+    const cut=DramaticCutSchema.parse({worldRevision:run.row.world_revision+1,worldSeq:run.row.last_seq,
+      structureRevision:run.row.structure_revision+1,commitIndex:run.row.commit_index+1});
+    writeStructuralCommit({run,operationId,principalId,eventKind:'episodeOpened',recordedAt,
+      payload:{episodeId,ordinal:1,title:null,associatedInitialSceneId:scene.id,origin:'runStart'}});
+    const cutPayload=hashJson(cut);const emptyArray='[]';
+    database.prepare(`INSERT INTO episodes(run_id,episode_id,ordinal,title,lifecycle,opening_cut_json,opening_cut_hash,
+      closing_cut_json,closing_cut_hash,consequence_event_ids_json,open_lines_json) VALUES(?,?,1,NULL,'open',?,?,NULL,NULL,?,?)`)
+      .run(run.row.run_id,episodeId,cutPayload.json,cutPayload.hash,emptyArray,emptyArray);
+    database.prepare('INSERT INTO episode_scenes(run_id,episode_id,scene_id,ordinal) VALUES(?,?,?,1)')
+      .run(run.row.run_id,episodeId,scene.id);
+    return {episodeId,cut};
+  }
+
+  function readDramaticStructureOperation(input:unknown) {
+    const request=DramaticStructureLookupSchema.parse(input);
+    if(structuralOperationCrossExists(request.principalId,request.idempotencyKey))return DramaticStructureLookupResultSchema.parse({kind:'idempotencyConflict'});
+    const value=database.prepare('SELECT * FROM structure_operations WHERE run_id=? AND principal_id=? AND idempotency_key=?')
+      .get(request.runId,request.principalId,request.idempotencyKey);
+    if(value===undefined)return DramaticStructureLookupResultSchema.parse({kind:'missing'});
+    const row=DramaticStructureOperationDbRowSchema.parse(value);
+    const result=DramaticStructureMutationResultSchema.parse(parseStoredJson(row.result_json));
+    if(sha256(row.result_json)!==row.result_hash||canonicalJson(result)!==row.result_json)throw new Error('Receipt estructural idempotente alterado');
+    return DramaticStructureLookupResultSchema.parse({kind:'found',result:result.kind==='stored'?{...result,kind:'existing'}:result});
+  }
+
+  function applyDramaticStructureCommand(input:unknown) {
+    const request=DramaticStructureWriteSchema.parse(input);
+    const command=DramaticStructureCommandSchema.parse(request.command);
+    const operationKind=command.kind;
+    const requestHash=hashJson({runId:request.runId,operationId:request.operationId,expectedWorldRevision:request.expectedWorldRevision,
+      expectedStructureRevision:request.expectedStructureRevision,command}).hash;
+    return transact(()=>{
+      if(structuralOperationCrossExists(request.principalId,request.idempotencyKey))return DramaticStructureMutationResultSchema.parse({kind:'idempotencyConflict'});
+      const previousValue=database.prepare('SELECT * FROM structure_operations WHERE run_id=? AND principal_id=? AND idempotency_key=?')
+        .get(request.runId,request.principalId,request.idempotencyKey);
+      if(previousValue!==undefined){
+        const previous=DramaticStructureOperationDbRowSchema.parse(previousValue);
+        if(previous.operation_id!==request.operationId||previous.operation_kind!==operationKind||previous.request_hash!==requestHash)
+          return DramaticStructureMutationResultSchema.parse({kind:'idempotencyConflict'});
+        const prior=DramaticStructureMutationResultSchema.parse(parseStoredJson(previous.result_json));
+        if(sha256(previous.result_json)!==previous.result_hash||canonicalJson(prior)!==previous.result_json)throw new Error('Receipt estructural idempotente alterado');
+        return DramaticStructureMutationResultSchema.parse(prior.kind==='stored'?{...prior,kind:'existing'}:prior);
+      }
+      const reusedOperation=database.prepare('SELECT 1 FROM structure_operations WHERE run_id=? AND operation_id=?').get(request.runId,request.operationId)
+        ??database.prepare('SELECT 1 FROM structure_events WHERE run_id=? AND operation_id=?').get(request.runId,request.operationId);
+      if(reusedOperation!==undefined)return DramaticStructureMutationResultSchema.parse({kind:'idempotencyConflict'});
+      const runValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      if(runValue===undefined)return DramaticStructureMutationResultSchema.parse({kind:'missing'});
+      const run=parseWorldRun(runValue);
+      const record=(result:z.infer<typeof DramaticStructureMutationResultSchema>)=>persistDramaticStructureResult({runId:request.runId,
+        principalId:request.principalId,idempotencyKey:request.idempotencyKey,operationId:request.operationId,kind:operationKind,requestHash,result});
+      if(run.row.world_revision!==request.expectedWorldRevision||run.row.structure_revision!==request.expectedStructureRevision){
+        return record(DramaticStructureMutationResultSchema.parse({kind:'conflict',worldRevision:run.row.world_revision,structureRevision:run.row.structure_revision}));
+      }
+      if(!['running','paused','stopped'].includes(run.row.lifecycle))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
+      if(database.prepare("SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND state IN('queued','running','blocked') LIMIT 1").get(request.runId)!==undefined){
+        return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'actorJobsActive'}));
+      }
+      const structure=readDramaticStructureForRun(run);
+      const activeEpisode=structure.episodes.find((episode)=>episode.lifecycle==='open');
+      const episodeRow=(episodeId:string)=>{
+        const value=database.prepare('SELECT * FROM episodes WHERE run_id=? AND episode_id=?').get(request.runId,episodeId);
+        return value===undefined?undefined:DramaticEpisodeDbRowSchema.parse(value);
+      };
+      const hasEventReferences=(eventIds:readonly string[])=>{
+        if(eventIds.length===0)return true;
+        const uniqueEventIds=[...new Set(eventIds)];
+        const placeholders=uniqueEventIds.map(()=>'?').join(',');
+        const found=z.strictObject({count:counter}).parse(database.prepare(`SELECT COUNT(*) AS count FROM world_events
+          WHERE run_id=? AND world_seq<=? AND event_id IN(${placeholders})`).get(request.runId,run.row.last_seq,...uniqueEventIds)).count;
+        return found===uniqueEventIds.length;
+      };
+      const receipt=(commit:ReturnType<typeof writeStructuralCommit>,episodeId: string|null)=>DramaticStructureMutationResultSchema.parse({
+        kind:'stored',receipt:{operationId:request.operationId,worldRevision:commit.worldRevision,worldSeq:commit.worldSeq,
+          structureRevision:commit.structureRevision,commitIndex:commit.commitIndex,activeEpisodeId:episodeId,activeSceneId:commit.activeSceneId},
+      });
+      const now=Date.now();
+
+      if(command.kind==='openEpisode'){
+        if(activeEpisode!==undefined)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeAlreadyOpen'}));
+        const existingSceneId=run.snapshot.activeSceneId;
+        if(existingSceneId!==null)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'sceneAlreadyOpen'}));
+        const ordinal=z.strictObject({ordinal:counter.nullable()}).parse(database.prepare('SELECT MAX(ordinal) AS ordinal FROM episodes WHERE run_id=?').get(request.runId)).ordinal??0;
+        const cut=DramaticCutSchema.parse({worldRevision:run.row.world_revision+1,worldSeq:run.row.last_seq,
+          structureRevision:run.row.structure_revision+1,commitIndex:run.row.commit_index+1});
+        const commit=writeStructuralCommit({run,operationId:request.operationId,principalId:request.principalId,eventKind:'episodeOpened',recordedAt:now,
+          payload:{episodeId:command.episodeId,ordinal:ordinal+1,title:command.title??null,origin:'operator'}});
+        const cutPayload=hashJson(cut);const empty='[]';
+        database.prepare(`INSERT INTO episodes(run_id,episode_id,ordinal,title,lifecycle,opening_cut_json,opening_cut_hash,closing_cut_json,closing_cut_hash,
+          consequence_event_ids_json,open_lines_json) VALUES(?,?,?,?,'open',?,?,NULL,NULL,?,?)`)
+          .run(request.runId,command.episodeId,ordinal+1,command.title??null,cutPayload.json,cutPayload.hash,empty,empty);
+        return record(receipt(commit,command.episodeId));
+      }
+
+      if(command.kind==='openScene'){
+        if(activeEpisode===undefined)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeNotOpen'}));
+        if(run.snapshot.activeSceneId!==null)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'sceneAlreadyOpen'}));
+        if(run.snapshot.scenes.some((scene)=>scene.id===command.scene.id))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'sceneAlreadyOpen'}));
+        const knownPlaces=new Set(run.snapshot.places.map((place)=>place.id));
+        if(command.scene.placeIds.some((placeId)=>!knownPlaces.has(placeId))){
+          return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'invalidPlaceReference'}));
+        }
+        const participants=command.scene.participantIds.map((characterId)=>run.snapshot.entities.find((entity)=>entity.kind==='character'&&entity.characterId===characterId));
+        if(participants.some((character)=>character===undefined||character.kind!=='character'||character.preparation.kind!=='prepared'||!command.scene.placeIds.includes(character.placeId))){
+          return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'invalidParticipants'}));
+        }
+        const scene=WorldSceneSchema.parse({id:command.scene.id,label:command.scene.label,
+          lifecycle:{kind:'open',startedAt:run.snapshot.clock.instant},participantIds:command.scene.participantIds,placeIds:command.scene.placeIds});
+        const entities=run.snapshot.entities.map((entity)=>entity.kind==='character'&&command.scene.participantIds.includes(entity.characterId)
+          ?{...entity,presence:{kind:'present' as const,sceneId:scene.id}}:entity);
+        const commit=writeStructuralCommit({run,operationId:request.operationId,principalId:request.principalId,eventKind:'sceneOpened',recordedAt:now,
+          payload:{episodeId:activeEpisode.episodeId,scene},snapshotChanges:{scenes:[...run.snapshot.scenes,scene],activeSceneId:scene.id,entities}});
+        const ordinal=z.strictObject({ordinal:counter.nullable()}).parse(database.prepare('SELECT MAX(ordinal) AS ordinal FROM episode_scenes WHERE run_id=? AND episode_id=?')
+          .get(request.runId,activeEpisode.episodeId)).ordinal??0;
+        database.prepare('INSERT INTO episode_scenes(run_id,episode_id,scene_id,ordinal) VALUES(?,?,?,?)')
+          .run(request.runId,activeEpisode.episodeId,scene.id,ordinal+1);
+        return record(receipt(commit,activeEpisode.episodeId));
+      }
+
+      if(command.kind==='closeScene'){
+        const activeSceneId=run.snapshot.activeSceneId;
+        const scene=run.snapshot.scenes.find((candidate)=>candidate.id===command.sceneId);
+        if(scene===undefined)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'sceneMissing'}));
+        if(activeSceneId===null)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'noActiveScene'}));
+        if(activeSceneId!==command.sceneId||scene.lifecycle.kind!=='open')return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'sceneNotOpen'}));
+        const closed=WorldSceneSchema.parse({...scene,lifecycle:{kind:'closed',startedAt:scene.lifecycle.startedAt,closedAt:run.snapshot.clock.instant,reason:command.reason}});
+        const nextActiveScene=run.snapshot.scenes.find((candidate)=>candidate.id!==command.sceneId&&candidate.lifecycle.kind==='open');
+        const entities=run.snapshot.entities.map((entity)=>entity.kind==='character'&&entity.presence.kind==='present'&&entity.presence.sceneId===scene.id
+          ?{...entity,presence:nextActiveScene?.participantIds.includes(entity.characterId)
+            ?{kind:'present' as const,sceneId:nextActiveScene.id}:{kind:'absent' as const}}:entity);
+        const commit=writeStructuralCommit({run,operationId:request.operationId,principalId:request.principalId,eventKind:'sceneClosed',recordedAt:now,
+          payload:{episodeId:activeEpisode?.episodeId??null,sceneId:command.sceneId,reason:command.reason},
+          snapshotChanges:{scenes:run.snapshot.scenes.map((candidate)=>candidate.id===command.sceneId?closed:candidate),activeSceneId:nextActiveScene?.id??null,entities}});
+        return record(receipt(commit,activeEpisode?.episodeId??null));
+      }
+
+      if(command.kind==='closeEpisode'){
+        const episode=episodeRow(command.episodeId);
+        if(episode===undefined)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeMissing'}));
+        if(episode.lifecycle!=='open')return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeNotOpen'}));
+        const sceneRows=database.prepare('SELECT scene_id FROM episode_scenes WHERE run_id=? AND episode_id=? ORDER BY ordinal')
+          .all(request.runId,command.episodeId).map((value)=>z.strictObject({scene_id:z.string().uuid()}).parse(value));
+        if(sceneRows.length===0)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeHasNoScenes'}));
+        const openSceneIds=new Set<string>(run.snapshot.scenes.filter((scene)=>scene.lifecycle.kind==='open').map((scene)=>scene.id));
+        if(sceneRows.some((scene)=>openSceneIds.has(scene.scene_id)))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeHasOpenScenes'}));
+        const evidenceIds=[...command.consequenceEventIds,...command.openLines.flatMap((line)=>line.evidenceEventIds)];
+        if(!hasEventReferences(evidenceIds))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'invalidConsequenceReference'}));
+        const cut=DramaticCutSchema.parse({worldRevision:run.row.world_revision+1,worldSeq:run.row.last_seq,
+          structureRevision:run.row.structure_revision+1,commitIndex:run.row.commit_index+1});
+        const commit=writeStructuralCommit({run,operationId:request.operationId,principalId:request.principalId,eventKind:'episodeClosed',recordedAt:now,
+          payload:{episodeId:command.episodeId,consequenceEventIds:command.consequenceEventIds,openLines:command.openLines,cut}});
+        const cutPayload=hashJson(cut);const consequences=hashJson(command.consequenceEventIds);const lines=hashJson(command.openLines);
+        const changed=database.prepare(`UPDATE episodes SET lifecycle='closed',closing_cut_json=?,closing_cut_hash=?,consequence_event_ids_json=?,open_lines_json=?
+          WHERE run_id=? AND episode_id=? AND lifecycle='open'`).run(cutPayload.json,cutPayload.hash,consequences.json,lines.json,request.runId,command.episodeId);
+        if(changed.changes!==1)throw new Error('El episodio cambió dentro de la transacción');
+        return record(receipt(commit,null));
+      }
+
+      if(command.kind==='setEpisodeActs'){
+        const episode=episodeRow(command.episodeId);
+        if(episode===undefined)return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'episodeMissing'}));
+        const episodeSceneRows=database.prepare('SELECT scene_id FROM episode_scenes WHERE run_id=? AND episode_id=?').all(request.runId,command.episodeId);
+        const episodeSceneIds=new Set(episodeSceneRows.map((value)=>z.strictObject({scene_id:z.string().uuid()}).parse(value).scene_id));
+        if(command.acts.some((act)=>act.sceneIds.some((sceneId)=>!episodeSceneIds.has(sceneId)))
+          ||command.acts.some((act)=>database.prepare('SELECT 1 FROM acts WHERE run_id=? AND act_id=? AND episode_id<>?').get(request.runId,act.actId,command.episodeId)!==undefined)){
+          return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'invalidActGrouping'}));
+        }
+        const commit=writeStructuralCommit({run,operationId:request.operationId,principalId:request.principalId,eventKind:'actsSet',recordedAt:now,
+          payload:{episodeId:command.episodeId,acts:command.acts}});
+        database.prepare('DELETE FROM act_scenes WHERE run_id=? AND episode_id=?').run(request.runId,command.episodeId);
+        database.prepare('DELETE FROM acts WHERE run_id=? AND episode_id=?').run(request.runId,command.episodeId);
+        command.acts.forEach((act,index)=>{
+          database.prepare('INSERT INTO acts(run_id,episode_id,act_id,ordinal,title) VALUES(?,?,?,?,?)')
+            .run(request.runId,command.episodeId,act.actId,index+1,act.title);
+          act.sceneIds.forEach((sceneId,sceneIndex)=>database.prepare('INSERT INTO act_scenes(run_id,episode_id,act_id,scene_id,ordinal) VALUES(?,?,?,?,?)')
+            .run(request.runId,command.episodeId,act.actId,sceneId,sceneIndex+1));
+        });
+        const resultingEpisode=activeEpisode?.episodeId??null;
+        return record(receipt(commit,resultingEpisode));
+      }
+
+      const exhaustive:never=command;void exhaustive;
+      throw new Error('Comando estructural desconocido');
+    });
+  }
+
   return {
+    readDramaticStructure(input:unknown) {
+      const request=z.strictObject({runId:RunIdSchema}).parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      return value===undefined?undefined:readDramaticStructureForRun(parseWorldRun(value));
+    },
+    readDramaticStructureAtCut(input:unknown) {
+      const request=z.strictObject({runId:RunIdSchema,worldRevision:counter,worldSeq:WorldSeqSchema}).parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      return value===undefined?undefined:readDramaticStructureAtCut(parseWorldRun(value),request.worldRevision,request.worldSeq);
+    },
+    readDramaticStructureEvents(input:unknown) {
+      const request=z.strictObject({runId:RunIdSchema,afterStructureRevision:counter.nullable().default(null),
+        throughCommitIndex:counter.nullable().default(null),limit:counter.min(1).max(1_000).default(100)}).parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      if(value===undefined)return undefined;
+      const run=parseWorldRun(value);
+      if(request.throughCommitIndex!==null&&request.throughCommitIndex>run.row.commit_index)return undefined;
+      const rows=database.prepare(`SELECT * FROM structure_events WHERE run_id=? AND (? IS NULL OR structure_revision>?)
+        AND (? IS NULL OR commit_index<=?) ORDER BY structure_revision LIMIT ?`).all(request.runId,request.afterStructureRevision,
+        request.afterStructureRevision,request.throughCommitIndex,request.throughCommitIndex,request.limit+1);
+      const events=rows.slice(0,request.limit).map(structureEventRow);
+      const revision=request.throughCommitIndex===null?run.row.structure_revision:z.strictObject({revision:counter.nullable()})
+        .parse(database.prepare('SELECT MAX(structure_revision) AS revision FROM structure_events WHERE run_id=? AND commit_index<=?')
+          .get(request.runId,request.throughCommitIndex)).revision??0;
+      return {events,hasMore:rows.length>request.limit,structureRevision:revision};
+    },
+    readDramaticStructureOperation(input:unknown) { return readDramaticStructureOperation(input); },
+    applyDramaticStructureCommand(input:unknown) { return applyDramaticStructureCommand(input); },
     readRunModelTimeBudget(input: unknown) { return readRunModelTimeBudget(RunModelTimeBudgetReadSchema.parse(input)); },
     recoverAbandonedModelTimeRequests(input: unknown) {
       const request = ModelTimeOwnerRecoverySchema.parse(input);
@@ -3440,6 +4040,104 @@ export function openJournal(input: { path: string }) {
         }
         return { releasedReservations: released, uncertainTransports: abandonedTransports.length };
       });
+    },
+
+    applyDirectionCommand(input: unknown) {
+      const request=DirectionCommandWriteSchema.parse(input);
+      const requestHash=hashJson({runId:request.runId,operationId:request.operationId,
+        expectedDirectionRevision:request.expectedDirectionRevision,payload:request.payload}).hash;
+      return transact(()=>{
+        const previousValue=database.prepare('SELECT * FROM direction_operations WHERE run_id=? AND principal_id=? AND idempotency_key=?')
+          .get(request.runId,request.principalId,request.idempotencyKey);
+        if(previousValue!==undefined){
+          const previous=DirectionOperationDbRowSchema.parse(previousValue);
+          if(previous.operation_id!==request.operationId||previous.request_hash!==requestHash)
+            return DirectionMutationResultSchema.parse({kind:'idempotencyConflict'});
+          const result=DirectionMutationResultSchema.parse(parseStoredJson(previous.result_json));
+          if(sha256(previous.result_json)!==previous.result_hash||canonicalJson(result)!==previous.result_json)
+            throw new Error('Receipt de Dirección alterado');
+          return DirectionMutationResultSchema.parse(result.kind==='stored'?{...result,kind:'existing'}:result);
+        }
+        if(database.prepare('SELECT 1 FROM direction_operations WHERE run_id=? AND operation_id=?').get(request.runId,request.operationId)!==undefined
+          ||database.prepare('SELECT 1 FROM direction_events WHERE run_id=? AND operation_id=?').get(request.runId,request.operationId)!==undefined)
+          return DirectionMutationResultSchema.parse({kind:'idempotencyConflict'});
+        const runValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+        if(runValue===undefined)return DirectionMutationResultSchema.parse({kind:'missing'});
+        const run=parseWorldRun(runValue);
+        const save=(result:z.infer<typeof DirectionMutationResultSchema>)=>{
+          const payload=hashJson(result);
+          database.prepare(`INSERT INTO direction_operations(run_id,principal_id,idempotency_key,operation_id,request_hash,result_json,result_hash,recorded_at)
+            VALUES(?,?,?,?,?,?,?,?)`).run(request.runId,request.principalId,request.idempotencyKey,request.operationId,requestHash,payload.json,payload.hash,Date.now());
+          return result;
+        };
+        if(run.row.direction_revision!==request.expectedDirectionRevision)
+          return save(DirectionMutationResultSchema.parse({kind:'conflict',directionRevision:run.row.direction_revision}));
+        if(!['ready','running','paused','stopped'].includes(run.row.lifecycle))
+          return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
+        const recipients=request.payload.recipients.map((id)=>run.snapshot.entities.find((entity)=>
+          entity.kind==='character'&&entity.characterId===id&&entity.preparation.kind==='prepared'));
+        if(recipients.some((entity)=>entity===undefined))
+          return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'invalidRecipient'}));
+        const scopeSceneId=request.payload.scope.kind==='scene'?request.payload.scope.sceneId:null;
+        if(scopeSceneId!==null){
+          const scene=run.snapshot.scenes.find((item)=>item.id===scopeSceneId&&item.lifecycle.kind==='open');
+          if(scene===undefined||run.snapshot.activeSceneId!==scopeSceneId)
+            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'sceneNotActive'}));
+          if(request.payload.recipients.some((id)=>!scene.participantIds.includes(id)))
+            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'sceneRecipientMismatch'}));
+        }
+        const directionRevision=RevisionSchema.parse(run.row.direction_revision+1);
+        const payload=hashJson(request.payload);
+        const recordedAt=Date.now();
+        database.prepare(`INSERT INTO direction_events(run_id,direction_revision,operation_id,principal_id,payload_json,payload_hash,
+          world_revision,world_seq,commit_index,recorded_at) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(request.runId,directionRevision,request.operationId,
+          request.principalId,payload.json,payload.hash,run.row.world_revision,run.row.last_seq,run.row.commit_index,recordedAt);
+        const changed=database.prepare('UPDATE world_runs SET direction_revision=?,updated_at=? WHERE run_id=? AND direction_revision=?')
+          .run(directionRevision,recordedAt,request.runId,run.row.direction_revision);
+        if(changed.changes!==1)throw new Error('CAS de Dirección cambió dentro de la transacción');
+        return save(DirectionMutationResultSchema.parse({kind:'stored',receipt:{operationId:request.operationId,directionRevision,recordedAt}}));
+      });
+    },
+    readDirectionOperation(input: unknown) {
+      const request=DirectionLookupSchema.parse(input);
+      const value=database.prepare('SELECT * FROM direction_operations WHERE run_id=? AND principal_id=? AND idempotency_key=?')
+        .get(request.runId,request.principalId,request.idempotencyKey);
+      if(value===undefined)return DirectionLookupResultSchema.parse({kind:'missing'});
+      const row=DirectionOperationDbRowSchema.parse(value);
+      const result=DirectionMutationResultSchema.parse(parseStoredJson(row.result_json));
+      if(sha256(row.result_json)!==row.result_hash||canonicalJson(result)!==row.result_json)throw new Error('Receipt de Dirección alterado');
+      return DirectionLookupResultSchema.parse({kind:'found',result});
+    },
+    readDirectionEvents(input: unknown) {
+      const request=DirectionEventsQuerySchema.parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      if(value===undefined)return undefined;
+      const run=parseWorldRun(value);
+      const rows=database.prepare('SELECT * FROM direction_events WHERE run_id=? AND direction_revision>? ORDER BY direction_revision LIMIT ?')
+        .all(request.runId,request.afterDirectionRevision,request.limit+1);
+      const events=rows.slice(0,request.limit).map((rowValue)=>{
+        const row=DirectionEventDbRowSchema.parse(rowValue);
+        const payload=MetaIndicationPayloadSchema.parse(parseStoredJson(row.payload_json));
+        if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json)throw new Error('Metaindicación alterada');
+        return MetaIndicationEventSchema.parse({runId:row.run_id,directionRevision:row.direction_revision,operationId:row.operation_id,
+          principalId:row.principal_id,payload,payloadHash:row.payload_hash,worldRevision:row.world_revision,worldSeq:row.world_seq,
+          commitIndex:row.commit_index,recordedAt:row.recorded_at});
+      });
+      return DirectionEventsPageSchema.parse({events,directionRevision:run.row.direction_revision,hasMore:rows.length>request.limit});
+    },
+    readActorMetaIndications(input: unknown) {
+      const request=z.strictObject({runId:RunIdSchema,actorId:CharacterIdSchema,directionRevision:RevisionSchema,
+        activeSceneId:SceneIdSchema.nullable()}).parse(input);
+      const rows=database.prepare('SELECT * FROM direction_events WHERE run_id=? AND direction_revision<=? ORDER BY direction_revision')
+        .all(request.runId,request.directionRevision);
+      const indications=rows.flatMap((rowValue)=>{
+        const row=DirectionEventDbRowSchema.parse(rowValue);
+        const payload=MetaIndicationPayloadSchema.parse(parseStoredJson(row.payload_json));
+        if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json)throw new Error('Metaindicación alterada');
+        const inScope=payload.scope.kind==='run'||payload.scope.sceneId===request.activeSceneId;
+        return inScope&&payload.recipients.includes(request.actorId)?[payload]:[];
+      });
+      return ActorDirectionContextSchema.parse({directionRevision:request.directionRevision,indications});
     },
 
     registerWorldRun(input:unknown):'stored'|'existing'{return transact(()=>registerWorldRunWithinTransaction(input));},
@@ -3541,7 +4239,8 @@ export function openJournal(input: { path: string }) {
 
         if (run.row.lifecycle_revision !== request.expectedLifecycleRevision
           || run.row.config_revision !== request.expectedConfigRevision
-          || run.row.world_revision !== request.expectedWorldRevision) {
+          || run.row.world_revision !== request.expectedWorldRevision
+          || (request.expectedStructureRevision !== undefined && run.row.structure_revision !== request.expectedStructureRevision)) {
           return record(RunLifecycleCommandResultSchema.parse({ kind: 'stale', state: state() }));
         }
 
@@ -3581,11 +4280,17 @@ export function openJournal(input: { path: string }) {
           }
         }
         const now = Date.now();
+        if(request.command.kind==='start'){
+          openInitialEpisodeAtStart(run,request.principalId,randomUUID(),now);
+          const refreshed=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+          if(refreshed===undefined)throw new Error('Run desapareció al abrir el episodio inicial');
+          run=parseWorldRun(refreshed);
+        }
         if (request.command.kind !== 'step') database.prepare("UPDATE run_step_jobs SET state='canceled',revision=revision+1,updated_at=? WHERE run_id=? AND state='interrupted'").run(now,request.runId);
         const changed = database.prepare(`UPDATE world_runs SET lifecycle=?,lifecycle_revision=lifecycle_revision+1,closed_at=?,updated_at=?
-          WHERE run_id=? AND lifecycle_revision=? AND config_revision=? AND world_revision=?`)
+          WHERE run_id=? AND lifecycle_revision=? AND config_revision=? AND world_revision=? AND structure_revision=?`)
           .run(transition.kind === 'singlePulse' ? 'running' : transition.to, transition.kind === 'transition' && transition.to === 'closed' ? now : null, now, request.runId,
-            request.expectedLifecycleRevision, request.expectedConfigRevision, request.expectedWorldRevision);
+            request.expectedLifecycleRevision, request.expectedConfigRevision, run.row.world_revision, run.row.structure_revision);
         if (changed.changes !== 1) throw new Error('CAS de lifecycle cambió dentro de la transacción');
         run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
         reconcileRunLifecycleEpoch(request.runId, run.row.lifecycle, run.row.lifecycle_revision, now);
@@ -3613,9 +4318,33 @@ export function openJournal(input: { path: string }) {
     /** Host-only inspector cut. A sequence alone may identify multiple zero-event
      * subjective revisions; return that ambiguity instead of inventing a past mind. */
     readInspectorWorldCut(input: unknown) {
-      const request=z.strictObject({runId:RunIdSchema,atWorldSeq:WorldSeqSchema.optional(),worldRevision:RevisionSchema.optional()}).parse(input);
+      const request=z.strictObject({runId:RunIdSchema,atWorldSeq:WorldSeqSchema.optional(),worldRevision:RevisionSchema.optional(),
+        atCommitIndex:RevisionSchema.optional()}).superRefine((value,context)=>{
+          if(value.atCommitIndex!==undefined&&(value.atWorldSeq!==undefined||value.worldRevision!==undefined))context.addIssue({code:'custom',message:'Elegí commitIndex o el par worldRevision/worldSeq.'});
+          if(value.worldRevision!==undefined&&value.atWorldSeq===undefined)context.addIssue({code:'custom',message:'worldRevision requiere atWorldSeq.'});
+        }).parse(input);
       const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(value===undefined)return undefined;
-      const run=parseWorldRun(value);const seq=request.atWorldSeq??run.row.last_seq;
+      const run=parseWorldRun(value);
+      if(request.atCommitIndex!==undefined){
+        if(request.atCommitIndex>run.row.commit_index)return undefined;
+        if(request.atCommitIndex===0){
+          const matches=z.strictObject({count:counter}).parse(database.prepare('SELECT COUNT(*) AS count FROM world_commits WHERE run_id=? AND last_seq=?')
+            .get(request.runId,run.initialSnapshot.seq)).count+1;
+          return {snapshot:run.initialSnapshot,commitIndex:0,ambiguousSeq:matches>1};
+        }
+        const rowValue=database.prepare('SELECT snapshot_json,snapshot_hash,world_revision,last_seq,commit_index FROM world_commits WHERE run_id=? AND commit_index=?')
+          .get(request.runId,request.atCommitIndex);
+        if(rowValue===undefined)return undefined;
+        const row=z.strictObject({snapshot_json:z.string(),snapshot_hash:HashSchema,world_revision:counter,last_seq:counter,commit_index:counter}).parse(rowValue);
+        if(sha256(row.snapshot_json)!==row.snapshot_hash)throw new Error('Hash de snapshot por commit no coincide');
+        const snapshot=WorldSnapshotSchema.parse(parseStoredJson(row.snapshot_json));
+        if(canonicalJson(snapshot)!==row.snapshot_json||snapshot.runId!==request.runId||snapshot.revision!==row.world_revision
+          ||snapshot.seq!==row.last_seq||row.commit_index!==request.atCommitIndex)throw new Error('El commit solicitado no coincide con el snapshot persistido');
+        const matches=z.strictObject({count:counter}).parse(database.prepare('SELECT COUNT(*) AS count FROM world_commits WHERE run_id=? AND last_seq=?')
+          .get(request.runId,row.last_seq)).count+(row.last_seq===run.initialSnapshot.seq?1:0);
+        return {snapshot,commitIndex:row.commit_index,ambiguousSeq:matches>1};
+      }
+      const seq=request.atWorldSeq??run.row.last_seq;
       if(seq>run.row.last_seq)return undefined;
       const matches=z.strictObject({count:counter}).parse(database.prepare('SELECT COUNT(*) count FROM world_commits WHERE run_id=? AND last_seq=?').get(request.runId,seq)).count+(seq===run.initialSnapshot.seq?1:0);
       if(request.atWorldSeq===undefined&&request.worldRevision===undefined)return {snapshot:run.snapshot,commitIndex:run.row.commit_index,ambiguousSeq:matches>1};
@@ -4300,7 +5029,7 @@ export function openJournal(input: { path: string }) {
           snapshot = WorldSnapshotSchema.parse(parseStoredJson(commit.snapshot_json));
           if (snapshot.runId !== request.runId || snapshot.revision !== commit.world_revision || snapshot.seq !== commit.last_seq) throw new Error('Corte anterior ajeno al evento');
         }
-        return {event,snapshot};
+        return {event,snapshot,commitIndex:row.commit_index};
       });
     },
 
@@ -5378,6 +6107,7 @@ export function openJournal(input: { path: string }) {
     checkAdministrativeJobEligibility(input:unknown){return administrativeEligibility(AdministrativeJobExecutionSchema.parse(input));},
     readDirectorReceipt(input:unknown){return directorReceipt(AdministrativeJobLookupSchema.parse(input));},
     readDirectorAnnotations(input:unknown){const request=z.strictObject({runId:RunIdSchema,throughWorldSeq:WorldSeqSchema}).parse(input);return directorAnnotationsAt(request.runId,request.throughWorldSeq);},
+    readDirectorObservationHistory(input:unknown){return directorObservationHistory(input);},
     registerAdministrativeSession(input:unknown){
       const request=z.strictObject({execution:AdministrativeJobExecutionSchema,sessionId:z.string().min(1).max(200),sessionPath:z.string().min(1),baseLeafId:AdministrativeSessionSchema.shape.baseLeafId,profile:AdministrativeSessionSchema.shape.profile}).parse(input);
       if(!isAbsolute(request.sessionPath))throw new Error('La sesión administrativa debe tener ruta absoluta');
@@ -5840,7 +6570,6 @@ export function openJournal(input: { path: string }) {
         let frozenPerceptionIds = frozenActorTurnPerceptionIds(row);
         let frozenWorldCut = frozenActorTurnWorldCut(row);
         if (frozenPerceptionIds === null || frozenWorldCut === null) {
-          const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
           if (frozenPerceptionIds === null) {
             const coordinated = database.prepare('SELECT 1 FROM coordinator_pulses WHERE pulse_id=? AND run_id=?').get(row.pulse_id, row.run_id) !== undefined;
             frozenPerceptionIds = coordinated ? assignedActorTurnPerceptionIds(request) : actorPerceptionIdsAvailableAtCut({
@@ -5857,6 +6586,7 @@ export function openJournal(input: { path: string }) {
               worldSeq: run.snapshot.seq,
               fictionalAt: run.snapshot.clock.instant,
               perceptionIds: frozenPerceptionIds,
+              activeSceneId: run.snapshot.activeSceneId,
             });
           }
         }
@@ -5871,11 +6601,12 @@ export function openJournal(input: { path: string }) {
         }
         const frozenJson = canonicalJson(frozenPerceptionIds);
         const frozenWorldCutJson = canonicalJson(frozenWorldCut);
+        const frozenDirectionRevision = row.frozen_direction_revision ?? run.row.direction_revision;
         const updated = database.prepare(`
           UPDATE actor_turn_jobs SET state='running',owner_token=?,claim_token=?,frozen_perception_ids_json=?,
-            frozen_world_cut_json=?,updated_at=?
+            frozen_world_cut_json=?,frozen_direction_revision=?,updated_at=?
           WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='queued'
-        `).run(request.ownerToken, request.claimToken, frozenJson, frozenWorldCutJson, Date.now(),
+        `).run(request.ownerToken, request.claimToken, frozenJson, frozenWorldCutJson, frozenDirectionRevision, Date.now(),
           request.runId, request.actorId, request.jobId, request.generation);
         if (updated.changes !== 1) return ActorTurnJobClaimResultSchema.parse({ kind: 'busy' });
         const claimedValue = database.prepare(`

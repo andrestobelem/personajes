@@ -10,6 +10,7 @@ import {
   CharacterIdSchema, FictionalInstantSchema, HashSchema, JobIdSchema, PerceptionIdSchema,
   PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
 } from '../domain/values.ts';
+import { SceneIdSchema } from '../domain/world-schema.ts';
 
 const AdminRoleSchema = z.enum(['continuista', 'director', 'configurador', 'narrador']);
 const PiIdentitySchema = z.discriminatedUnion('kind', [
@@ -26,6 +27,7 @@ const ActorJobLeaseSchema = z.strictObject({ ownerToken: z.string().uuid(), clai
 const PiActorInputCutSchema = z.strictObject({
   worldRevision: RevisionSchema, worldSeq: WorldSeqSchema, fictionalAt: FictionalInstantSchema,
   perceptionIds: z.array(PerceptionIdSchema).max(100_000),
+  activeSceneId: SceneIdSchema.nullable().optional(),
 }).superRefine((cut, context) => {
   if (new Set(cut.perceptionIds).size !== cut.perceptionIds.length) {
     context.addIssue({ code: 'custom', path: ['perceptionIds'], message: 'El corte de Pi repite percepciones' });

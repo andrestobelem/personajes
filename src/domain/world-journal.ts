@@ -4,6 +4,12 @@ import { WorldLifecycleSchema } from './run-lifecycle.ts';
 export { RunControlCommandSchema, RunLifecycleViewSchema, WorldLifecycleSchema, resolveRunControlTransition } from './run-lifecycle.ts';
 import type { WorldIdSource } from './world.ts';
 import { ActorKnowledgeSchema, SceneIdSchema, WorldAttemptIdSchema, WorldAttemptSchema, WorldSnapshotSchema, hashCommunicationContent } from './world.ts';
+export {
+  ActIdSchema, DramaticActViewSchema, DramaticCutSchema, DramaticEpisodeViewSchema, DramaticLineEvidenceSchema,
+  DramaticStructureCommandSchema, DramaticStructureEventSchema, DramaticStructureLookupResultSchema, DramaticStructureLookupSchema,
+  DramaticStructureMutationResultSchema, DramaticStructureSceneOptionsSchema, DramaticStructureViewSchema,
+  DramaticStructureWriteSchema, EpisodeIdSchema,
+} from './dramatic-structure.ts';
 import { ProductionValidationIssueSchema, RunConfigurationDraftSchema } from './production.ts';
 import { HumanInterventionRequestSchema } from './interaction.ts';
 import { HumanInterventionResolutionSchema } from './human-intervention.ts';
@@ -249,6 +255,7 @@ export const RunLifecycleCommandWriteSchema = z.strictObject({
   expectedLifecycleRevision: RevisionSchema,
   expectedConfigRevision: RevisionSchema,
   expectedWorldRevision: RevisionSchema,
+  expectedStructureRevision: RevisionSchema.optional(),
   command: RunLifecycleCommandSchema,
   preflightJobId: JobIdSchema.optional(),
 }).superRefine((request, context) => {
@@ -296,6 +303,8 @@ export const WorldRunLoadSchema = z.strictObject({
   runId: RunIdSchema,
   throughWorldSeq: WorldSeqSchema.optional(),
 });
+
+export type { DramaticStructureCommand } from './dramatic-structure.ts';
 
 /** Host-authorized participant and idempotency scope; profile and origin are never client-supplied. */
 export const HumanInterventionCommitSchema = z.strictObject({
@@ -361,6 +370,7 @@ export const FrozenActorWorldCutSchema = z.strictObject({
   worldSeq: WorldSeqSchema,
   fictionalAt: FictionalInstantSchema,
   perceptionIds: z.array(PerceptionIdSchema).max(100_000),
+  activeSceneId: SceneIdSchema.nullable().optional(),
 }).superRefine((cut, context) => {
   if (new Set(cut.perceptionIds).size !== cut.perceptionIds.length) {
     context.addIssue({ code: 'custom', path: ['perceptionIds'], message: 'El corte congelado no puede repetir percepciones' });
@@ -379,6 +389,8 @@ export const ActorTurnJobViewSchema = z.strictObject({
   frozenPerceptionIds: z.array(PerceptionIdSchema).max(100_000).nullable(),
   /** Complete World cut that was visible when the job first claimed its inbox. */
   frozenWorldCut: FrozenActorWorldCutSchema.nullable(),
+  /** Direction ledger revision frozen on the first claim; null means legacy/unavailable. */
+  frozenDirectionRevision: RevisionSchema.nullable(),
 });
 
 export const CoordinatorPulseRequestSchema = z.strictObject({ runId: RunIdSchema });

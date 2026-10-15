@@ -42,7 +42,7 @@ test('audio budget unavailable does not block pausing inference and successful c
     const app=createRunLifecycleApplication({journal:fixture.journal,readVoiceBudget:()=>{throw new Error('audio unreadable');}});
     const view=app.readRunView({runId:fixture.claim.runId});assert.ok(view);
     assert.equal(view.budget.status,'available');assert.equal(view.budget.audioBudgetStatus,'unavailable');
-    const paused=await app.controlRun({runId:view.runId,principalId:'local-operator',idempotencyKey:randomUUID(),expectedConfigurationRevision:view.configRevision,expectedWorldRevision:view.worldRevision,expectedLifecycleRevision:view.lifecycleRevision,command:{kind:'pause'}});
+    const paused=await app.controlRun({runId:view.runId,principalId:'local-operator',idempotencyKey:randomUUID(),expectedConfigurationRevision:view.configRevision,expectedWorldRevision:view.worldRevision,expectedStructureRevision:view.structureRevision,expectedLifecycleRevision:view.lifecycleRevision,command:{kind:'pause'}});
     assert.equal(paused.kind,'updated');
     const known=createRunLifecycleApplication({journal:fixture.journal,readVoiceBudget:()=>({voiceDesignCalls:{limit:3,used:1,reserved:1,remaining:1},ttsCalls:{limit:8,used:2,reserved:0,remaining:6},sfxCalls:{limit:1,used:0,reserved:0,remaining:1}})}).readRunView({runId:view.runId});
     assert.ok(known);assert.equal(known.budget.audioBudgetStatus,'known');assert.equal(known.budget.ttsCalls.used,2);assert.equal(known.limits.maxDesignCallsPerRun,3);

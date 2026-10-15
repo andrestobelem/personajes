@@ -31,11 +31,14 @@ import { HumanInterventionRequestSchema, HumanInteractionContextSchema } from '.
 import {
   HumanInterventionCommitResultSchema, RunDraftMutationResultSchema, RunDraftPatchSchema,
   RunDraftStateSchema, RunDraftValidationResultSchema, RunStepJobViewSchema,
+  DramaticLineEvidenceSchema, DramaticStructureCommandSchema, DramaticStructureEventSchema,
+  DramaticStructureMutationResultSchema, DramaticStructureSceneOptionsSchema, DramaticStructureViewSchema, EpisodeIdSchema,
 } from '../domain/world-journal.ts';
 import {
   CatalogCharacterEntrySchema, CatalogDocumentEntrySchema, DossierSchema,
 } from '../domain/catalog.ts';
-import { CharacterIdSchema, JobIdSchema, RunIdSchema } from '../domain/values.ts';
+import { CharacterIdSchema, EventIdSchema, JobIdSchema, RevisionSchema, RunIdSchema } from '../domain/values.ts';
+import { PlaceIdSchema, SceneIdSchema } from '../domain/world-schema.ts';
 import { RunConfigurationDraftSchema } from '../domain/production.ts';
 import { validateRunConfiguration } from '../application/production-preflight.ts';
 import { RunModelTimeBudgetSchema } from '../domain/model-time-budget.ts';
@@ -43,13 +46,19 @@ import { OperatorResponseSchema, type OperatorExtension, type OperatorRequest } 
 import { InspectorCharactersSchema, InspectorRequestSchema, InspectorViewSchema } from '../domain/run-inspector.ts';
 import type { RunInspectorApplication } from '../application/run-inspector.ts';
 
-import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema } from '../domain/run-observation.ts';
+import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema, DirectorObservationListSchema } from '../domain/run-observation.ts';
 import { WorldSeqSchema } from '../domain/values.ts';
 import { RunRefreshSchema, type RunRefresh } from '../domain/run-refresh.ts';
+import {
+  DirectionEventsPageSchema, DirectionMutationResultSchema, MetaIndicationPayloadSchema,
+} from '../domain/direction-indications.ts';
 import type { createHostRequestBarrier } from '../application/host-request-barrier.ts';
 
 const ObservationSequenceQuerySchema = z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(WorldSeqSchema);
-const ObservationStageQuerySchema = z.strictObject({atWorldSeq:ObservationSequenceQuerySchema.optional()});
+const ObservationStageQuerySchema = z.strictObject({atWorldSeq:ObservationSequenceQuerySchema.optional(),atCommitIndex:ObservationSequenceQuerySchema.optional()})
+  .superRefine((query,context)=>{
+    if(query.atWorldSeq!==undefined&&query.atCommitIndex!==undefined)context.addIssue({code:'custom',message:'Elegí un corte por secuencia o commitIndex.'});
+  });
 const ObservationEventsQuerySchema = z.strictObject({fromWorldSeq:ObservationSequenceQuerySchema.optional(),toWorldSeq:ObservationSequenceQuerySchema.optional(),
   pageCursor:z.string().min(1).max(2048).optional(),limit:z.string().regex(/^\d{1,3}$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional()});
 const ObservationJobsQuerySchema = z.strictObject({cursor:z.string().min(1).max(2048).optional(),limit:z.string().regex(/^\d{1,3}$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional()});
@@ -58,6 +67,63 @@ export type RunObservationApplicationPort = {
   readEvents(input:unknown):unknown|Promise<unknown>;
   readConversations(input:unknown):unknown|Promise<unknown>;
   readJobs(input:unknown):unknown|Promise<unknown>;
+  readDirectorObservations(input:unknown):unknown|Promise<unknown>;
+};
+
+const DramaticStructureReadViewSchema = DramaticStructureViewSchema.extend({ worldRevision: RevisionSchema });
+const DramaticStructureHistoricalReadViewSchema = DramaticStructureViewSchema.extend({
+  worldRevision: RevisionSchema, worldSeq: WorldSeqSchema, commitIndex: RevisionSchema,
+});
+const DramaticStructureQuerySchema = z.strictObject({
+  worldRevision: z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(RevisionSchema).optional(),
+  worldSeq: z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(WorldSeqSchema).optional(),
+}).superRefine((query, context) => {
+  if ((query.worldRevision === undefined) !== (query.worldSeq === undefined)) context.addIssue({ code: 'custom', message: 'El corte requiere worldRevision y worldSeq.' });
+});
+const DramaticStructureEventsQuerySchema = z.strictObject({
+  afterStructureRevision: z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(RevisionSchema).optional(),
+  throughCommitIndex: z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(RevisionSchema).optional(),
+  limit: z.string().regex(/^\d{1,4}$/).transform(Number).pipe(z.number().int().min(1).max(1_000)).optional(),
+});
+const DirectionEventsHttpQuerySchema=z.strictObject({
+  afterDirectionRevision:z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(RevisionSchema).optional(),
+  limit:z.string().regex(/^\d{1,4}$/).transform(Number).pipe(z.number().int().min(1).max(1_000)).optional(),
+});
+const DirectionIfMatchSchema=z.string().regex(/^"directions:[0-9a-f-]{36}:d(0|[1-9]\d{0,15})"$/);
+const OpenEpisodeBodySchema = z.strictObject({ title: z.string().trim().min(1).max(200).optional() });
+const OpenSceneBodySchema = z.strictObject({
+  label: z.string().trim().min(1).max(200),
+  participantIds: z.array(CharacterIdSchema).min(1).max(100),
+  placeIds: z.array(PlaceIdSchema).min(1).max(100),
+}).superRefine((value, context) => {
+  if (new Set(value.participantIds).size !== value.participantIds.length) context.addIssue({ code: 'custom', path: ['participantIds'], message: 'Participante duplicado' });
+  if (new Set(value.placeIds).size !== value.placeIds.length) context.addIssue({ code: 'custom', path: ['placeIds'], message: 'Lugar duplicado' });
+});
+const CloseSceneBodySchema = z.strictObject({ reason: z.string().trim().min(1).max(500) });
+const CloseEpisodeBodySchema = z.strictObject({
+  consequenceEventIds: z.array(EventIdSchema).max(10_000),
+  openLines: z.array(DramaticLineEvidenceSchema).max(10_000),
+});
+const SetEpisodeActsBodySchema = z.strictObject({
+  acts: z.array(z.strictObject({ title: z.string().trim().min(1).max(200), sceneIds: z.array(SceneIdSchema).min(1).max(10_000) })).max(1_000),
+});
+const DramaticStructureEventsPageSchema = z.strictObject({
+  events: z.array(DramaticStructureEventSchema).max(1_000),
+  hasMore: z.boolean(),
+  structureRevision: RevisionSchema,
+});
+export type RunDramaticStructureApplicationPort = {
+  read(input: unknown): unknown | undefined | Promise<unknown | undefined>;
+  readAtCut?(input: unknown): unknown | undefined | Promise<unknown | undefined>;
+  readSceneOptions(input: unknown): unknown | undefined | Promise<unknown | undefined>;
+  readEvents(input: unknown): unknown | undefined | Promise<unknown | undefined>;
+  apply(input: unknown): unknown | Promise<unknown>;
+  readOperation(input: unknown): unknown | Promise<unknown>;
+};
+export type RunDirectionsApplicationPort={
+  readEvents(input:unknown):unknown|undefined|Promise<unknown|undefined>;
+  apply(input:unknown):unknown|Promise<unknown>;
+  readOperation(input:unknown):unknown|Promise<unknown>;
 };
 
 const SESSION_COOKIE = 'personajes_session';
@@ -247,6 +313,7 @@ export type RunLifecycleApplicationPort = {
     readonly runId: string;
     readonly expectedConfigurationRevision: number;
     readonly expectedWorldRevision: number;
+    readonly expectedStructureRevision: number;
     readonly expectedLifecycleRevision: number;
     readonly command: RunLifecycleControlRequest;
   }): unknown | Promise<unknown>;
@@ -276,6 +343,9 @@ export type LocalHttpOptions = {
   readonly runLifecycle?: RunLifecycleApplicationPort;
   /** Public, read-only stage/event/delivery/job projections under the host session. */
   readonly runObservation?: RunObservationApplicationPort;
+  /** Durable operator-only episodes, scenes, acts and structural event journal. */
+  readonly runDramaticStructure?: RunDramaticStructureApplicationPort;
+  readonly runDirections?: RunDirectionsApplicationPort;
   readonly runInspector?: RunInspectorApplication;
   readonly onInspectorRead?: (metadata: {runId:string;characterId?:string;atWorldSeq?:number;requestId:string}) => void;
   /** Host-composed operator services; core routes and their authority take precedence. */
@@ -596,32 +666,72 @@ function runEtag(runId: string, configurationRevision: number, worldRevision: nu
 }
 
 function runViewEtag(view: z.infer<typeof RunViewSchema>): string {
-  return `"run:${view.runId}:c${view.configRevision}:w${view.worldRevision}:l${view.lifecycleRevision}"`;
+  return `"run:${view.runId}:c${view.configRevision}:w${view.worldRevision}:s${view.structureRevision}:l${view.lifecycleRevision}"`;
+}
+
+function dramaticStructureEtag(runId: string, worldRevision: number, structureRevision: number): string {
+  return `"structure:${runId}:w${worldRevision}:s${structureRevision}"`;
+}
+
+function directionEtag(runId:string,directionRevision:number){return `"directions:${runId}:d${directionRevision}"`;}
+
+function readExpectedDirectionRevision(req:IncomingMessage,runId:string){
+  const provided=req.headers['if-match'];
+  if(typeof provided!=='string')fail({status:428,kind:'precondition',code:'PRECONDITION_REQUIRED',message:'Se requiere If-Match de Dirección.'});
+  const matched=DirectionIfMatchSchema.safeParse(provided);
+  if(!matched.success)return fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'La revisión de Dirección no coincide con esta corrida.'});
+  const match=/^"directions:([0-9a-f-]{36}):d(0|[1-9]\d{0,15})"$/.exec(provided);
+  const revision=Number(match?.[2]);
+  if(match?.[1]!==runId||!Number.isSafeInteger(revision))return fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'La revisión de Dirección no coincide con esta corrida.'});
+  return {expectedDirectionRevision:revision};
+}
+
+function readExpectedDramaticStructureRevisions(req: IncomingMessage, runId: string) {
+  const provided = req.headers['if-match'];
+  if (typeof provided !== 'string') fail({ status: 428, kind: 'precondition', code: 'PRECONDITION_REQUIRED', message: 'Se requiere If-Match de la estructura dramática.' });
+  const match = /^"structure:([0-9a-f-]{36}):w(0|[1-9]\d{0,15}):s(0|[1-9]\d{0,15})"$/.exec(provided);
+  const matchedRunId = match?.[1]; const worldText = match?.[2]; const structureText = match?.[3];
+  if (matchedRunId !== runId || !RunIdSchema.safeParse(matchedRunId).success || worldText === undefined || structureText === undefined
+    || !Number.isSafeInteger(Number(worldText)) || !Number.isSafeInteger(Number(structureText))) {
+    fail({ status: 412, kind: 'precondition', code: 'PRECONDITION_FAILED', message: 'La revisión no coincide con esta estructura.' });
+  }
+  return { expectedWorldRevision: Number(worldText), expectedStructureRevision: Number(structureText) };
+}
+
+function deriveStableUuid(namespace: string): string {
+  const bytes = createHash('sha256').update(namespace, 'utf8').digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function readExpectedRunViewRevisions(req: IncomingMessage, runId: string): {
   expectedConfigurationRevision: number;
   expectedWorldRevision: number;
+  expectedStructureRevision: number;
   expectedLifecycleRevision: number;
 } {
   const provided = req.headers['if-match'];
   if (typeof provided !== 'string') {
     fail({ status: 428, kind: 'precondition', code: 'PRECONDITION_REQUIRED', message: 'Se requiere If-Match de la corrida.' });
   }
-  const match = /^"run:([0-9a-f-]{36}):c(0|[1-9]\d{0,15}):w(0|[1-9]\d{0,15}):l(0|[1-9]\d{0,15})"$/.exec(provided);
+  const match = /^"run:([0-9a-f-]{36}):c(0|[1-9]\d{0,15}):w(0|[1-9]\d{0,15}):s(0|[1-9]\d{0,15}):l(0|[1-9]\d{0,15})"$/.exec(provided);
   const matchedRunId = match?.[1];
   const configText = match?.[2];
   const worldText = match?.[3];
-  const lifecycleText = match?.[4];
+  const structureText = match?.[4];
+  const lifecycleText = match?.[5];
   if (matchedRunId !== runId || !RunIdSchema.safeParse(matchedRunId).success
-    || configText === undefined || worldText === undefined || lifecycleText === undefined
-    || !Number.isSafeInteger(Number(configText)) || !Number.isSafeInteger(Number(worldText))
+    || configText === undefined || worldText === undefined || structureText === undefined || lifecycleText === undefined
+    || !Number.isSafeInteger(Number(configText)) || !Number.isSafeInteger(Number(worldText)) || !Number.isSafeInteger(Number(structureText))
     || !Number.isSafeInteger(Number(lifecycleText))) {
     fail({ status: 412, kind: 'precondition', code: 'PRECONDITION_FAILED', message: 'La revisión no coincide con la corrida.' });
   }
   return {
     expectedConfigurationRevision: Number(configText),
     expectedWorldRevision: Number(worldText),
+    expectedStructureRevision: Number(structureText),
     expectedLifecycleRevision: Number(lifecycleText),
   };
 }
@@ -1235,17 +1345,19 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         startRefreshTimer();return;
       }
 
-      if (route.length === 3 && route[0] === 'runs' && ['stage','events','conversations','jobs'].includes(route[2] ?? '') && method === 'GET') {
+      if (route.length === 3 && route[0] === 'runs' && ['stage','events','conversations','jobs','director-observations'].includes(route[2] ?? '') && method === 'GET') {
         const runId = parseSchema(RunIdSchema,route[1]);
         const port = options.runObservation;
         if (port === undefined) fail({status:503,kind:'dependency',code:'RUN_OBSERVATION_UNAVAILABLE',message:'La observación pública no está disponible.',safeCode:'RUN_OBSERVATION_UNAVAILABLE',retryable:true});
         const surface = route[2];
         const query = surface === 'stage' ? parseQuery(url,ObservationStageQuerySchema)
           : surface === 'jobs' ? parseQuery(url,ObservationJobsQuerySchema)
+            : surface === 'director-observations' ? parseQuery(url,z.strictObject({atCommitIndex:ObservationSequenceQuerySchema.optional()}))
             : parseQuery(url,ObservationEventsQuerySchema);
         const request = {runId,...query};
         const raw = surface === 'stage' ? await port.readStage(request) : surface === 'jobs' ? await port.readJobs(request)
-          : surface === 'events' ? await port.readEvents(request) : await port.readConversations(request);
+          : surface === 'director-observations' ? await port.readDirectorObservations(request)
+            : surface === 'events' ? await port.readEvents(request) : await port.readConversations(request);
         const result = z.discriminatedUnion('kind',[
           z.strictObject({kind:z.literal('found'),value:z.unknown()}),z.strictObject({kind:z.literal('missing')}),
           z.strictObject({kind:z.literal('invalidRequest'),code:z.enum(['invalid-cut','invalid-cursor'])}),
@@ -1253,11 +1365,174 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         if (result.kind === 'missing') fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
         if (result.kind === 'invalidRequest') fail({status:422,kind:'validation',code:'MALFORMED_REQUEST',message:result.code==='invalid-cut'?'El corte o intervalo debe pertenecer a la historia confirmada.':'El cursor no pertenece a esta corrida, superficie o intervalo.',issues:[]});
         const value = surface === 'stage' ? RunStageViewSchema.parse(result.value) : surface === 'jobs' ? TechnicalJobPageSchema.parse(result.value)
-          : surface === 'events' ? ConfirmedEventPageSchema.parse(result.value) : ConversationPageSchema.parse(result.value);
+          : surface === 'director-observations' ? DirectorObservationListSchema.parse(result.value)
+            : surface === 'events' ? ConfirmedEventPageSchema.parse(result.value) : ConversationPageSchema.parse(result.value);
         if (value.runId !== runId) throw new Error('Proyección pública fuera del ámbito solicitado');
         const etag = `"observation:${runId}:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}"`;
         sendJson(res,200,value,{ETag:etag});
         return;
+      }
+
+      if (route.length === 3 && route[0] === 'runs' && route[2] === 'dramatic-structure' && method === 'GET') {
+        const runId = parseSchema(RunIdSchema, route[1]);
+        const port = options.runDramaticStructure;
+        if (port === undefined) fail({status:503,kind:'dependency',code:'DRAMATIC_STRUCTURE_UNAVAILABLE',message:'La estructura dramática no está disponible.',safeCode:'DRAMATIC_STRUCTURE_UNAVAILABLE',retryable:true});
+        const query = parseQuery(url,DramaticStructureQuerySchema);
+        if (query.worldRevision !== undefined && query.worldSeq !== undefined) {
+          if (port.readAtCut === undefined) fail({status:503,kind:'dependency',code:'DRAMATIC_STRUCTURE_UNAVAILABLE',message:'La lectura histórica de estructura no está disponible.',safeCode:'DRAMATIC_STRUCTURE_UNAVAILABLE',retryable:true});
+          const raw = await port.readAtCut({runId,worldRevision:query.worldRevision,worldSeq:query.worldSeq});
+          if (raw === undefined || raw === null) fail({status:422,kind:'validation',code:'MALFORMED_REQUEST',message:'El corte estructural no pertenece a la historia confirmada.',issues:[]});
+          const value = DramaticStructureHistoricalReadViewSchema.parse(raw);
+          if (value.runId !== runId || value.worldRevision !== query.worldRevision || value.worldSeq !== query.worldSeq) throw new Error('La estructura histórica no coincide con el corte solicitado');
+          const etag = `"structure:${runId}:w${value.worldRevision}:s${value.structureRevision}:c${value.commitIndex}"`;
+          sendJson(res,200,value,{ETag:etag});
+          return;
+        }
+        if (options.runLifecycle === undefined) fail({status:503,kind:'dependency',code:'DRAMATIC_STRUCTURE_UNAVAILABLE',message:'La estructura dramática no está disponible.',safeCode:'DRAMATIC_STRUCTURE_UNAVAILABLE',retryable:true});
+        const rawRun = await options.runLifecycle.readRunView({runId});
+        if (rawRun === undefined || rawRun === null) fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        const run = RunViewSchema.parse(rawRun);
+        const raw = await port.read({runId});
+        if (raw === undefined || raw === null) fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        const structure = DramaticStructureViewSchema.parse(raw);
+        if (structure.runId !== runId || structure.structureRevision !== run.structureRevision) throw new Error('La estructura leída no coincide con la revisión actual de la corrida');
+        const value = DramaticStructureReadViewSchema.parse({...structure,worldRevision:run.worldRevision});
+        sendJson(res,200,value,{ETag:dramaticStructureEtag(runId,run.worldRevision,run.structureRevision)});
+        return;
+      }
+
+      if (route.length === 4 && route[0] === 'runs' && route[2] === 'dramatic-structure' && route[3] === 'scene-options' && method === 'GET') {
+        const runId = parseSchema(RunIdSchema, route[1]);
+        const port = options.runDramaticStructure;
+        if (port === undefined) fail({status:503,kind:'dependency',code:'DRAMATIC_STRUCTURE_UNAVAILABLE',message:'Las opciones de escena no están disponibles.',safeCode:'DRAMATIC_STRUCTURE_UNAVAILABLE',retryable:true});
+        const raw = await port.readSceneOptions({ runId });
+        if (raw === undefined || raw === null) fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        const value = DramaticStructureSceneOptionsSchema.parse(raw);
+        if (value.runId !== runId) throw new Error('Las opciones de escena pertenecen a otra corrida');
+        sendJson(res,200,value,{ETag:`"scene-options:${runId}:w${value.worldRevision}"`});
+        return;
+      }
+
+      if (route.length === 3 && route[0] === 'runs' && route[2] === 'structure-events' && method === 'GET') {
+        const runId = parseSchema(RunIdSchema, route[1]);
+        const port = options.runDramaticStructure;
+        if (port === undefined) fail({status:503,kind:'dependency',code:'DRAMATIC_STRUCTURE_UNAVAILABLE',message:'La historia estructural no está disponible.',safeCode:'DRAMATIC_STRUCTURE_UNAVAILABLE',retryable:true});
+        const query = parseQuery(url,DramaticStructureEventsQuerySchema);
+        const raw = await port.readEvents({runId,...query});
+        if (raw === undefined || raw === null) fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        const page = DramaticStructureEventsPageSchema.parse(raw);
+        const etag = `"structure-events:${runId}:s${page.structureRevision}:a${query.afterStructureRevision ?? 0}${query.throughCommitIndex === undefined ? '' : `:c${query.throughCommitIndex}`}"`;
+        sendJson(res,200,page,{ETag:etag});
+        return;
+      }
+
+      if(route.length===3&&route[0]==='runs'&&route[2]==='directions'&&method==='GET'){
+        const runId=parseSchema(RunIdSchema,route[1]);
+        if(session.mode.kind!=='director'||session.mode.runId!==runId)
+          fail({status:403,kind:'forbidden',code:'CAPABILITY_REQUIRED',message:'La sesión debe estar en modo Director para consultar sus indicaciones.'});
+        const port=options.runDirections;
+        if(port===undefined)fail({status:503,kind:'dependency',code:'DIRECTION_UNAVAILABLE',message:'El ledger de Dirección no está disponible.',safeCode:'DIRECTION_UNAVAILABLE',retryable:true});
+        const query=parseQuery(url,DirectionEventsHttpQuerySchema);
+        const raw=await port.readEvents({runId,afterDirectionRevision:query.afterDirectionRevision??0,limit:query.limit??100});
+        if(raw===undefined||raw===null)fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        const page=DirectionEventsPageSchema.parse(raw);
+        sendJson(res,200,page,{ETag:directionEtag(runId,page.directionRevision)});return;
+      }
+
+      if(route.length===3&&route[0]==='runs'&&route[2]==='directions'&&method==='POST'){
+        requireCsrf(req,session);
+        const runId=parseSchema(RunIdSchema,route[1]);
+        if(session.mode.kind!=='director'||session.mode.runId!==runId)
+          fail({status:403,kind:'forbidden',code:'CAPABILITY_REQUIRED',message:'La sesión debe estar en modo Director para enviar indicaciones.'});
+        const port=options.runDirections;
+        if(port===undefined)fail({status:503,kind:'dependency',code:'DIRECTION_UNAVAILABLE',message:'El ledger de Dirección no está disponible.',safeCode:'DIRECTION_UNAVAILABLE',retryable:true});
+        const body=parseSchema(MetaIndicationPayloadSchema,await readJsonBody(req));
+        if(session.mode.scope.kind==='scene'
+          &&(body.scope.kind!=='scene'||body.scope.sceneId!==session.mode.scope.sceneId))
+          fail({status:403,kind:'forbidden',code:'SCOPE_MISMATCH',message:'La indicación excede el alcance de escena de esta sesión.'});
+        const replayed=checkIdempotentReplay({req,res,session,path:pathname,body});if(replayed)return;
+        const key=readIdempotencyKey(req);const expected=readExpectedDirectionRevision(req,runId);
+        const namespace=`direction:${runId}:${key}`;const operationId=deriveStableUuid(`${namespace}:operation`);
+        const result=DirectionMutationResultSchema.parse(await port.apply({runId,principalId:localOperatorPrincipalId(),idempotencyKey:key,
+          operationId,...expected,payload:body}));
+        switch(result.kind){
+          case 'stored':case 'existing':{
+            const etag=directionEtag(runId,result.receipt.directionRevision);
+            rememberOperation({req,session,key,path:pathname,body,status:200,result,etag});
+            sendJson(res,200,result,{ETag:etag,...(result.kind==='existing'?{'Idempotency-Replayed':'true'}:{})});return;
+          }
+          case 'conflict':fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'Cambió el ledger de Dirección. Volvé a leerlo antes de continuar.',currentEtag:directionEtag(runId,result.directionRevision)});
+          case 'missing':fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+          case 'idempotencyConflict':fail({status:409,kind:'conflict',code:'IDEMPOTENCY_CONFLICT',message:'La clave ya se usó con otra indicación.'});
+          case 'invalidState':{
+            if(result.code==='invalidRecipient'||result.code==='sceneRecipientMismatch')fail({status:422,kind:'validation',code:'INVALID_DIRECTION',message:'La indicación refiere un destinatario que no corresponde al reparto o escena.',issues:[]});
+            fail({status:409,kind:'conflict',code:'DIRECTION_SCOPE_CLOSED',message:'La corrida o escena ya no admite esa indicación.'});
+          }
+          default:{const exhaustive:never=result;void exhaustive;throw new Error('Resultado de Dirección desconocido');}
+        }
+      }
+
+      const isStructureMutation = method === 'POST' && route[0] === 'runs' && (
+        (route.length === 3 && ['episodes','scenes'].includes(route[2] ?? ''))
+        || (route.length === 5 && ((route[2] === 'episodes' && route[4] === 'close')
+          || (route[2] === 'scenes' && route[4] === 'close'))))
+        || (method === 'PUT' && route.length === 5 && route[0] === 'runs' && route[2] === 'episodes' && route[4] === 'acts');
+      if (isStructureMutation) {
+        requireCsrf(req,session);
+        const port = options.runDramaticStructure;
+        if (port === undefined || options.runLifecycle === undefined) fail({status:503,kind:'dependency',code:'DRAMATIC_STRUCTURE_UNAVAILABLE',message:'La estructura dramática no está disponible.',safeCode:'DRAMATIC_STRUCTURE_UNAVAILABLE',retryable:true});
+        const runId = parseSchema(RunIdSchema,route[1]);
+        const idempotencyKey = readIdempotencyKey(req);
+        const principalId = localOperatorPrincipalId();
+        const expected = readExpectedDramaticStructureRevisions(req,runId);
+        const namespace = `dramatic-structure:${runId}:${route.slice(2).join(':')}:${idempotencyKey}`;
+        const operationId = deriveStableUuid(`${namespace}:operation`);
+        let command: z.infer<typeof DramaticStructureCommandSchema>;
+        if (method === 'POST' && route.length === 3 && route[2] === 'episodes') {
+          const body = parseSchema(OpenEpisodeBodySchema,await readJsonBody(req));
+          command = DramaticStructureCommandSchema.parse({kind:'openEpisode',episodeId:deriveStableUuid(`${namespace}:episode`),...(body.title===undefined?{}:{title:body.title})});
+        } else if (method === 'POST' && route.length === 3 && route[2] === 'scenes') {
+          const body = parseSchema(OpenSceneBodySchema,await readJsonBody(req));
+          command = DramaticStructureCommandSchema.parse({kind:'openScene',scene:{...body,id:randomUUID()}});
+        } else if (method === 'POST' && route.length === 5 && route[2] === 'scenes' && route[4] === 'close') {
+          const sceneId = parseSchema(SceneIdSchema,route[3]);
+          const body = parseSchema(CloseSceneBodySchema,await readJsonBody(req));
+          command = DramaticStructureCommandSchema.parse({kind:'closeScene',sceneId,reason:body.reason});
+        } else if (method === 'POST' && route.length === 5 && route[2] === 'episodes' && route[4] === 'close') {
+          const episodeId = parseSchema(EpisodeIdSchema,route[3]);
+          const body = parseSchema(CloseEpisodeBodySchema,await readJsonBody(req));
+          command = DramaticStructureCommandSchema.parse({kind:'closeEpisode',episodeId,...body});
+        } else if (method === 'PUT' && route.length === 5 && route[2] === 'episodes' && route[4] === 'acts') {
+          const episodeId = parseSchema(EpisodeIdSchema,route[3]);
+          const body = parseSchema(SetEpisodeActsBodySchema,await readJsonBody(req));
+          command = DramaticStructureCommandSchema.parse({kind:'setEpisodeActs',episodeId,acts:body.acts.map((act,index)=>({...act,actId:deriveStableUuid(`${namespace}:act:${index}`)}))});
+        } else {
+          fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Recurso no encontrado.'});
+        }
+        const result = DramaticStructureMutationResultSchema.parse(await port.apply({runId,principalId,operationId,idempotencyKey,...expected,command}));
+        switch (result.kind) {
+          case 'stored':
+          case 'existing': {
+            const receipt = result.receipt;
+            if (receipt.operationId !== operationId) throw new Error('Receipt estructural pertenece a otra operación');
+            sendJson(res,200,result,{ETag:dramaticStructureEtag(runId,receipt.worldRevision,receipt.structureRevision),...(result.kind==='existing'?{'Idempotency-Replayed':'true'}:{})});
+            return;
+          }
+          case 'conflict': {
+            const rawRun = await options.runLifecycle.readRunView({runId});
+            const current = rawRun === undefined || rawRun === null ? undefined : RunViewSchema.parse(rawRun);
+            fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'Cambió la estructura dramática. Volvé a leerla antes de continuar.',...(current===undefined?{}:{currentEtag:dramaticStructureEtag(runId,current.worldRevision,current.structureRevision)})});
+          }
+          case 'missing': fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+          case 'idempotencyConflict': fail({status:409,kind:'conflict',code:'IDEMPOTENCY_CONFLICT',message:'La clave ya se usó con otra operación.'});
+          case 'invalidState': {
+            const invalidInput = result.code === 'invalidParticipants' || result.code === 'invalidPlaceReference'
+              || result.code === 'invalidConsequenceReference' || result.code === 'invalidActGrouping';
+            if (invalidInput) fail({status:422,kind:'validation',code:'INVALID_DRAMATIC_STRUCTURE',message:'La solicitud refiere participantes, hechos o escenas que no corresponden al corte.',issues:[]});
+            fail({status:409,kind:'conflict',code:'DRAMATIC_STRUCTURE_CONFLICT',message:'La transición no es válida en el estado actual de la estructura.'});
+          }
+          default: {const exhaustive:never=result;throw new Error(String(exhaustive));}
+        }
       }
 
       if (route.length === 4 && route[0] === 'runs' && route[2] === 'steps' && method === 'GET') {

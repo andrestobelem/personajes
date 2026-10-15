@@ -9,6 +9,7 @@ export function stageFixture() {
     configRevision: 2,
     worldRevision: 4,
     worldSeq: 8,
+    commitIndex: 9,
     fictionalAt: 0,
     clock: {
       instant: 0,
@@ -19,12 +20,14 @@ export function stageFixture() {
       },
     },
     lifecycle: "paused",
+    lifecycleAsOf: "current",
     activeSceneId: "22222222-2222-4222-8222-222222222222",
     scenes: [
       {
         id: "22222222-2222-4222-8222-222222222222",
         label: "Escena de prueba",
         lifecycle: "open",
+        participantIds: ["maxwell-smart"],
         placeIds: ["sala"],
       },
     ],
@@ -73,6 +76,7 @@ export function conversationFixture() {
     eventId: "66666666-6666-4666-8666-666666666666",
     runId: stage.runId,
     worldSeq: stage.worldSeq,
+    commitIndex: stage.commitIndex,
     fictionalAt: stage.fictionalAt,
     sceneId: stage.activeSceneId,
     speaker: {

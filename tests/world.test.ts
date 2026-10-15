@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import {
   ActorKnowledgeSchema, WorldAttemptSchema, WorldContentApprovalReceiptSchema, WorldEntityIdSchema, WorldSnapshotSchema,
@@ -13,6 +14,21 @@ import {
 
 function uuid(value: number): string {
   return `00000000-0000-4000-8000-${value.toString(16).padStart(12, '0')}`;
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new Error('Fixture no serializable');
+    return encoded;
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+}
+
+function canonicalHash(value: unknown): string {
+  return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
 
 const runId = RunIdSchema.parse(uuid(1));
@@ -64,7 +80,7 @@ function humanSpeech(recipientCharacterIds: string[] = ['maxwell-smart', 'agente
   } as const;
 }
 
-function worldFixture() {
+function worldFixtureValue() {
   const initialExperience = {
     schemaVersion: 1,
     experienceId: evidenceId,
@@ -97,7 +113,7 @@ function worldFixture() {
     routine: { kind: 'always' },
     mind: { goals: [], beliefs: [], relationships: [], recognizedCharacterIds: [], experiences: [] },
   };
-  const snapshot = WorldSnapshotSchema.parse({
+  return {
     schemaVersion: 1,
     runId,
     revision: 0,
@@ -191,9 +207,48 @@ function worldFixture() {
       acceptOfferMs: 100, maxWaitMs: 10_000, maxRestMs: 60_000,
       offerValidityMs: 5_000, interactionRange: 2,
     },
-  });
-  return snapshot;
+  };
 }
+
+function worldFixture() {
+  return WorldSnapshotSchema.parse(worldFixtureValue());
+}
+
+test('WorldSnapshot acepta v1 sin alterar su forma canónica y v2 entre escenas', () => {
+  const rawV1 = worldFixtureValue();
+  const hashBeforeParse = canonicalHash(rawV1);
+  const v1 = WorldSnapshotSchema.parse(rawV1);
+  const reparsedV1 = WorldSnapshotSchema.parse(v1);
+  assert.deepEqual(reparsedV1, v1);
+  assert.equal(canonicalHash(v1), hashBeforeParse);
+  assert.equal(canonicalHash(reparsedV1), hashBeforeParse);
+
+  const closedScene = {
+    ...v1.scenes[0]!,
+    lifecycle: { kind: 'closed' as const, startedAt: 0, closedAt: 10, reason: 'corte entre escenas' },
+  };
+  const activeV2 = WorldSnapshotSchema.parse({ ...v1, schemaVersion: 2 });
+  assert.equal(activeV2.schemaVersion, 2);
+  assert.equal(activeV2.activeSceneId, sceneId);
+
+  const betweenScenes = WorldSnapshotSchema.parse({
+    ...v1,
+    schemaVersion: 2,
+    scenes: [closedScene],
+    activeSceneId: null,
+  });
+  assert.equal(betweenScenes.schemaVersion, 2);
+  assert.equal(betweenScenes.activeSceneId, null);
+
+  assert.throws(() => WorldSnapshotSchema.parse({ ...v1, activeSceneId: null }));
+  assert.throws(() => WorldSnapshotSchema.parse({ ...v1, schemaVersion: 2, activeSceneId: null }));
+  assert.throws(() => WorldSnapshotSchema.parse({
+    ...v1,
+    schemaVersion: 2,
+    scenes: [closedScene],
+    activeSceneId: v1.activeSceneId,
+  }));
+});
 
 function knowledge(actorId: string, bindings: unknown[] = []) {
   return ActorKnowledgeSchema.parse({ runId, actorId, bindings });

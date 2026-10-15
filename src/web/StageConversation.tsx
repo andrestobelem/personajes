@@ -38,7 +38,7 @@ export function ConversationMessage({
 }: {
   item: ConversationView;
   clock: RunStageView["clock"];
-  onSelectEvent: (seq: number) => void;
+  onSelectEvent: (commitIndex: number) => void;
 }) {
   return (
     <li className="stage-message">
@@ -112,8 +112,8 @@ export function ConversationMessage({
           {item.sceneId} · canal {item.channel.id}
         </p>
       </details>
-      <button onClick={() => onSelectEvent(item.worldSeq)}>
-        Ver corte del evento {item.worldSeq}
+      <button onClick={() => onSelectEvent(item.commitIndex)}>
+        Ver commit {item.commitIndex} del evento {item.worldSeq}
       </button>
     </li>
   );
@@ -125,7 +125,7 @@ export function StageConversation({
 }: {
   items: ConversationView[];
   stage: RunStageView;
-  onSelectEvent: (seq: number) => void;
+  onSelectEvent: (commitIndex: number) => void;
 }) {
   const [speaker, setSpeaker] = React.useState("");
   const [channel, setChannel] = React.useState("");

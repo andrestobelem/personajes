@@ -501,6 +501,7 @@ test('step durable compone preflight fresco, ICM y actuación SDK local; segunda
       }}});
     const request = {principalId:authorization.principalId,idempotencyKey:randomUUID(),runId,
       expectedConfigurationRevision:authorization.state.configRevision,expectedWorldRevision:authorization.state.worldRevision,
+      expectedStructureRevision:host.journal.readDramaticStructure({runId})!.structureRevision,
       expectedLifecycleRevision:authorization.state.lifecycleRevision,command:{kind:'step',preflightJobId:authorization.preflightJobId}};
     const accepted = await application.controlRun(request);
     if (accepted.kind !== 'accepted') assert.fail(`No accepted step: ${accepted.kind}`);

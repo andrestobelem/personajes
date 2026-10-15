@@ -1,6 +1,6 @@
 {
   "kind": "documentary-check",
-  "date": "2026-10-14",
+  "date": "2026-10-15",
   "specHashScope": "Los hashes originales conservan el corte histórico de comprobación/cierre; los hashes actuales incluyen notas posteriores de implementación y no reescriben el baseline liberado.",
   "specHashes": {
     "docs/specs/01-dominio-y-catalogo.md": "c14ec021efa6c0e85fdf837b1ba91a372f422bc8837f948ed30e995a4a4209ce",
@@ -13,14 +13,14 @@
     "docs/specs/README.md": "bac8b6d0a62fe1642124918d1e82ed7dc46211045eae3834001034db6aee2bd9"
   },
   "currentSpecHashes": {
-    "docs/specs/01-dominio-y-catalogo.md": "bb914785405e47745f14865ba22e59a747e15c8c74b12236e2adc997b2341dec",
-    "docs/specs/02-persistencia-e-icm.md": "4b175dcf2ed14de43c1f1cbecf63f371231793a822447269670df3043d9a9ec1",
-    "docs/specs/03-pi-y-coordinacion.md": "a28c27c30eb9b65ed6234d424de8f470265df2fa24b5c798eb16363cc5ebcca4",
-    "docs/specs/04-api-y-autoridad.md": "609e3f315b4b7649177bb9521f5b16c118090546e84f44c98473bf827a15bb8a",
-    "docs/specs/05-interfaz.md": "acc5a6747205af2241390e9283d1a9ceb8871d039377e0e87c476cffb33a782a",
+    "docs/specs/01-dominio-y-catalogo.md": "a9e56d1d1f51d2d4cad8f6060ab8f3a772da08b7a9dbd1a23b888248e50d3dad",
+    "docs/specs/02-persistencia-e-icm.md": "85f097f63321a4ffbb41faaa2e69bcac742238c2c4c89ea5961a1d66ae16ddce",
+    "docs/specs/03-pi-y-coordinacion.md": "9615b49748f39f1fc9502d823346d14ef308698ea04704caa2ed737aa5ff8adc",
+    "docs/specs/04-api-y-autoridad.md": "15e14a6d26fb55076387349b1ecf7681f287bf5680bda36a29fa30584e05fef3",
+    "docs/specs/05-interfaz.md": "ee66aaa69f6040320361495f94cf7f4cdee038d0aebddf0e7e30ec43ee31f8ee",
     "docs/specs/06-voces-y-ritmo.md": "1c05faf8ce57d7d17ed95f63843eb75b2eff28885401b3de51424ed6bd31ea08",
-    "docs/specs/07-verificacion.md": "da5f3df49d1d002009517eb93cdfbf1f68d0c97887476779ed68cd47cf6477db",
-    "docs/specs/README.md": "11f75c29eb576f22ff1e30dd2596a7e564ac84d32def091600d8172ced7d9d5c"
+    "docs/specs/07-verificacion.md": "496a53e7a38f0ae69faef78b3e65832c5584fd0c617c7f122da56bef00216abf",
+    "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"
   },
   "requirements": 77,
   "matrixRows": 77,
@@ -33,10 +33,10 @@
     "limitation": "API probe only; not durable SQLite/ICM proof, not product test"
   },
   "productEvidence": {
-    "partialRequirementRowsUpdated": 35,
+    "partialRequirementRowsUpdated": 46,
     "acceptanceStatus": "pending for all 77 requirements",
     "matrix": "docs/auditoria/trazabilidad-prd.md"
   },
-  "currentPrdHash": "27c2a35521c2527cd248ea14b5dc99050d1fab4e3b546b65e65e05c60f45897c",
-  "currentChangeNote": "La decisión posterior Sol low / Opus medium cambia ACT-03 y contratos de perfil sin retirar ninguno de los 77 requisitos. Hashes baseline se conservan históricos."
+  "currentPrdHash": "bf322eff2edb8ab789960d705311d5e5b25649766cbacea57ef77b3f23509bc0",
+  "currentChangeNote": "R8 15/10: corte 34 incorpora el compositor gráfico de metaindicaciones con modo Director, alcances de corrida/escena, destinatarios, ledger e idempotencia. Los 77 estados de aceptación siguen pendientes."
 }

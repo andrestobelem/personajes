@@ -16,7 +16,8 @@ import {
 } from './production.ts';
 import { PersistedInferenceProfileSchema } from './inference-profile.ts';
 import { SpanishVarietyForActingSchema } from './preparation.ts';
-import { WorldClockSchema } from './world-schema.ts';
+import { SceneIdSchema, WorldClockSchema } from './world-schema.ts';
+import { EpisodeIdSchema } from './dramatic-structure.ts';
 import { JobIdSchema } from './values.ts';
 import {
   CharacterIdSchema, EventIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
@@ -432,6 +433,9 @@ export const RunViewSchema = z.strictObject({
   runId: RunIdSchema,
   configRevision: RevisionSchema,
   worldRevision: RevisionSchema,
+  structureRevision: RevisionSchema,
+  activeEpisodeId: EpisodeIdSchema.nullable(),
+  activeSceneId: SceneIdSchema.nullable(),
   lastWorldSeq: WorldSeqSchema,
   /** Added to the S04 ETag because lifecycle transitions have their own durable CAS revision. */
   lifecycleRevision: RevisionSchema,

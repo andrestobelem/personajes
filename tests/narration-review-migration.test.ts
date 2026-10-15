@@ -23,7 +23,7 @@ test('v27 publication migrates without reinference; frozen legacy hash rejects a
     const lookup={jobId:result.receipt.publication.scope.jobId,generation:result.receipt.publication.scope.generation};
     f.journal.close();
     const db=new DatabaseSync(join(f.directory,'journal.sqlite'));
-    try {db.exec('PRAGMA foreign_keys=OFF;DROP TABLE legacy_narration_publications;DROP TABLE narration_review_receipts;DROP TABLE narration_review_candidates;DELETE FROM administrative_jobs WHERE role=\'narration-reviewer\';DELETE FROM schema_version WHERE version=28;');}
+    try {db.exec('PRAGMA foreign_keys=OFF;DROP TABLE legacy_narration_publications;DROP TABLE narration_review_receipts;DROP TABLE narration_review_candidates;DELETE FROM administrative_jobs WHERE role=\'narration-reviewer\';DELETE FROM schema_version WHERE version IN(28,29,30);');}
     finally {db.close();}
     reopened=openJournal({path:join(f.directory,'journal.sqlite')});
     assert.deepEqual(reopened.readNarrationReceipt(lookup),result.receipt);

@@ -10,13 +10,13 @@ import { RunModelTimeBudgetSchema } from '../domain/model-time-budget.ts';
 import { RunLifecycleControlRequestSchema } from '../domain/run-lifecycle.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
 import {
-  RunLifecycleCommandLookupResultSchema, RunLifecycleCommandResultSchema,
+  DramaticStructureViewSchema, RunLifecycleCommandLookupResultSchema, RunLifecycleCommandResultSchema,
 } from '../domain/world-journal.ts';
 import { JobIdSchema, RunIdSchema } from '../domain/values.ts';
 import { RunPreflightJobDocumentSchema } from '../domain/run-preflight-jobs.ts';
 
 type Journal = Pick<ReturnType<typeof openJournal>, 'readWorldLifecycle' | 'readWorldConfiguration' | 'loadWorld'
-  | 'readRunModelTimeBudget' | 'readRunLifecycleCommand' | 'applyRunLifecycleCommand' | 'readRunStepJob'>;
+  | 'readRunModelTimeBudget' | 'readRunLifecycleCommand' | 'applyRunLifecycleCommand' | 'readRunStepJob' | 'readDramaticStructure'>;
 type PreflightReader = { readJob(input: { runId: string; jobId: string }): unknown | Promise<unknown> };
 type Runtime = {
   scheduleRun(input: unknown): Promise<boolean>;
@@ -30,6 +30,7 @@ const ControlInputSchema = z.strictObject({
   runId: RunIdSchema,
   expectedConfigurationRevision: z.number().int().nonnegative(),
   expectedWorldRevision: z.number().int().nonnegative(),
+  expectedStructureRevision: z.number().int().nonnegative(),
   expectedLifecycleRevision: z.number().int().nonnegative(),
   command: RunLifecycleControlRequestSchema,
 });
@@ -58,11 +59,13 @@ export function createRunLifecycleApplication(input: {
     }).parse(stateValue);
     const rawConfiguration = input.journal.readWorldConfiguration({ runId });
     const rawSnapshot = input.journal.loadWorld({ runId });
+    const rawStructure = input.journal.readDramaticStructure({ runId });
     const rawBudget = input.journal.readRunModelTimeBudget({ runId });
-    if (rawConfiguration === undefined || rawSnapshot === undefined || rawBudget === undefined) return undefined;
+    if (rawConfiguration === undefined || rawSnapshot === undefined || rawStructure === undefined || rawBudget === undefined) return undefined;
 
     const storedConfiguration = ReadyRunConfigurationSchema.parse(rawConfiguration);
     const snapshot = WorldSnapshotSchema.parse(rawSnapshot);
+    const structure = DramaticStructureViewSchema.parse(rawStructure);
     const modelBudget = RunModelTimeBudgetSchema.parse(rawBudget);
     // Project only operator-facing fields. The verified ready configuration also
     // carries host-only snapshot, actor-context and availability fences.
@@ -130,6 +133,9 @@ export function createRunLifecycleApplication(input: {
       runId,
       configRevision: state.configRevision,
       worldRevision: snapshot.revision,
+      structureRevision: structure.structureRevision,
+      activeEpisodeId: structure.activeEpisodeId,
+      activeSceneId: structure.activeSceneId,
       lifecycleRevision: state.lifecycleRevision,
       lastWorldSeq: snapshot.seq,
       lifecycle,
@@ -233,6 +239,7 @@ export function createRunLifecycleApplication(input: {
       expectedLifecycleRevision: request.expectedLifecycleRevision,
       expectedConfigRevision: request.expectedConfigurationRevision,
       expectedWorldRevision: request.expectedWorldRevision,
+      expectedStructureRevision: request.expectedStructureRevision,
       command: journalCommand,
       ...(preflightJobId === undefined ? {} : { preflightJobId }),
     }));

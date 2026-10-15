@@ -473,9 +473,14 @@ test('un dato civil desconocido en la ficha no se convierte en amnesia del perso
     worldRevision: RevisionSchema.parse(4),
     throughWorldSeq: WorldSeqSchema.parse(0), fictionalAt: FictionalInstantSchema.parse(0),
     spanishVariety: { kind: 'proposed', label: 'español de la puesta', source: 'editorial-proposal' },
-    experiences: [], actorWorldProjectionPort: actorWorldProjectionPort(),
+    experiences: [], directionContext: { directionRevision: RevisionSchema.parse(1), indications: [{ kind: 'metaIndication',
+      recipients: ['agente-99'], text: 'Mantén una reserva antes de confiar en el informe.', scope: { kind: 'run' },
+    }] }, actorWorldProjectionPort: actorWorldProjectionPort(),
   });
   assert.match(compilation.text, /La ausencia de un dato en el contexto no prueba que lo hayas olvidado ni que no lo sepas/);
+  assert.match(compilation.text, /METAINDICACIONES DE DIRECCIÓN \(contexto administrativo privado, no parlamento ni memoria\)/);
+  assert.match(compilation.text, /Mantén una reserva antes de confiar en el informe/);
+  assert.deepEqual(compilation.includedExperienceIds, [], 'la dirección no se convierte en experiencia ni recuerdo');
   assert.doesNotMatch(compilation.text, /Nombre civil de Agente 99/);
   assert.doesNotMatch(compilation.text, /no conoces tu nombre civil|has olvidado tu nombre/);
 });

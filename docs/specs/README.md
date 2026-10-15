@@ -1,6 +1,6 @@
 # Especificaciones de implementación
 
-Versión 1.0, **revisión documental cerrada para implementar**, después del [cierre documental del PRD](../auditoria/cierre-prd.md). Estas especificaciones describen el producto completo; no acreditan que exista código o una integración ejecutada. El [PRD 1.0](../PRD.md) y sus 77 requisitos conservan autoridad funcional.
+Versión de trabajo 1.0, **revisión documental reabierta el 15 de octubre de 2026** después de las aclaraciones posteriores del [PRD](../PRD.md). El cierre previo se conserva como histórico en [cierre de specs](../auditoria/cierre-specs.md). Estas especificaciones describen el producto completo; no acreditan que exista código o una integración ejecutada. El PRD y sus 77 requisitos conservan autoridad funcional.
 
 ## Componentes
 
@@ -44,4 +44,4 @@ El almacenamiento vivo pertenece a un directorio privado del host, fuera del rep
 
 ## Gate para implementar
 
-Cada requisito debe apuntar a una spec y a su ensayo con evidencia adecuada. La revisión debe detectar contradicciones de schemas, autoridad, flujo, persistencia, privacidad, voz y UX; comprobar conteos/enlaces por sí solo no basta. Hasta cerrar esa revisión no se declara terminada la fase de specs ni se sustituye el runtime por una demo.
+Para cerrar G0 otra vez, cada requisito debe apuntar a una spec y a un ensayo con evidencia adecuada. La revisión debe detectar contradicciones de schemas, autoridad, flujo, persistencia, privacidad, voz y UX; comprobar conteos/enlaces por sí solo no basta. El cierre anterior habilitó la implementación, pero está reabierto por las discrepancias anotadas en [cierre-specs.md](../auditoria/cierre-specs.md). Todo cambio posterior de contrato obliga a revisar las superficies afectadas y actualizar ese registro si altera la conclusión.

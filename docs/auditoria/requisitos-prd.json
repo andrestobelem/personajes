@@ -2,7 +2,7 @@
   "prdVersion": "1.0",
   "classificationAuthor": "integrador",
   "classifiedOn": "2026-10-14",
-  "note": "Espejo de trazabilidad, no evidencia de cumplimiento. Las fuentes y categorías se revisan semánticamente.",
+  "note": "Espejo de trazabilidad, no evidencia de cumplimiento. Registra criterios, ensayos, niveles mínimos y subresultados; las fuentes y categorías se revisan semánticamente.",
   "requirements": [
     {
       "id": "CAT-01",
@@ -21,6 +21,11 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-03"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "G"
       ]
     },
     {
@@ -44,6 +49,12 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-07"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "L",
+        "G"
       ]
     },
     {
@@ -60,7 +71,12 @@
         "P01"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "G"
+      ]
     },
     {
       "id": "CAT-04",
@@ -80,7 +96,12 @@
         "P01"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "G"
+      ]
     },
     {
       "id": "CAT-05",
@@ -97,7 +118,13 @@
         "P02"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "L",
+        "A"
+      ]
     },
     {
       "id": "CAT-06",
@@ -117,7 +144,14 @@
         "P24"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "CAT-07",
@@ -141,6 +175,13 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-03"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -162,7 +203,13 @@
         "P22"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "CAT-09",
@@ -181,6 +228,11 @@
       "decisions": [
         "DP-01",
         "DP-03"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "G"
       ]
     },
     {
@@ -200,6 +252,12 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-06"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -217,7 +275,13 @@
         "P09"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ]
     },
     {
       "id": "ESC-03",
@@ -236,7 +300,13 @@
         "P09"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ]
     },
     {
       "id": "ESC-04",
@@ -255,7 +325,14 @@
         "P05"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ESC-05",
@@ -273,7 +350,13 @@
         "P10"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ESC-06",
@@ -289,7 +372,13 @@
         "P09"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ]
     },
     {
       "id": "ESC-07",
@@ -309,7 +398,13 @@
         "P09"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ]
     },
     {
       "id": "ESC-08",
@@ -329,7 +424,13 @@
         "P13"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ]
     },
     {
       "id": "ESC-09",
@@ -346,12 +447,19 @@
         "P22"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A",
+        "H"
+      ]
     },
     {
       "id": "ESC-10",
       "requirement": "Guardar cierre de escena/episodio y consecuencias que continúan.",
-      "acceptance": "Fin local no exige resolver toda línea; un reinicio o bifurcación se identifica como continuidad distinta.",
+      "acceptance": "Cierres se vinculan a un corte y a eventos confirmados; pueden dejar líneas abiertas. Cerrar una escena retira la presencia en esa escena sin alterar el lugar físico confirmado. Un episodio nuevo continúa el mismo estado si sigue en el run; un reinicio/bifurcación crea un run y continuidad identificables sin alterar el origen.",
       "category": "D",
       "sourceSection": 6,
       "sourceRequestIds": [
@@ -364,10 +472,20 @@
       ],
       "plannedTests": [
         "P04",
+        "P13",
+        "P14",
+        "P15",
         "P19"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ACT-01",
@@ -383,7 +501,11 @@
         "P18"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "A"
+      ]
     },
     {
       "id": "ACT-02",
@@ -399,7 +521,11 @@
         "P18"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "A"
+      ]
     },
     {
       "id": "ACT-03",
@@ -415,7 +541,11 @@
         "P18"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "A"
+      ]
     },
     {
       "id": "ACT-04",
@@ -432,7 +562,12 @@
         "P08"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "A",
+        "H"
+      ]
     },
     {
       "id": "ACT-05",
@@ -450,7 +585,15 @@
         "P08"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A",
+        "H"
+      ]
     },
     {
       "id": "ACT-06",
@@ -467,7 +610,14 @@
         "P17"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ACT-07",
@@ -484,7 +634,13 @@
         "P10"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ACT-08",
@@ -505,6 +661,12 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-08"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -526,7 +688,14 @@
         "P10"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ACT-10",
@@ -543,7 +712,13 @@
         "P11"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ACT-11",
@@ -565,7 +740,13 @@
         "P17"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "ACT-12",
@@ -585,6 +766,10 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-05"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "A"
       ]
     },
     {
@@ -604,6 +789,10 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-04"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L"
       ]
     },
     {
@@ -622,7 +811,13 @@
         "P12"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "MEM-03",
@@ -642,7 +837,13 @@
         "P12"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "MEM-04",
@@ -659,7 +860,13 @@
         "P12"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "MEM-05",
@@ -679,7 +886,12 @@
         "P13"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L"
+      ]
     },
     {
       "id": "MEM-06",
@@ -699,7 +911,12 @@
         "P13"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L"
+      ]
     },
     {
       "id": "MEM-07",
@@ -717,7 +934,12 @@
         "P24"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G"
+      ]
     },
     {
       "id": "MEM-08",
@@ -738,7 +960,12 @@
         "P24"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G"
+      ]
     },
     {
       "id": "MEM-09",
@@ -754,7 +981,12 @@
         "P15"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G"
+      ]
     },
     {
       "id": "MEM-10",
@@ -777,7 +1009,14 @@
         "P12"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "DIR-01",
@@ -793,12 +1032,19 @@
         "P19"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "DIR-02",
       "requirement": "Permitir metaindicaciones autorizadas y cambios de circunstancia versionados.",
-      "acceptance": "Efectos pasan por Escenario; director no decide deseos privados ni la respuesta de otro.",
+      "acceptance": "Metaindicación con destinatarios y alcance sceneId o runId; permanece disponible en turnos elegibles dentro del alcance, vence al cerrarse éste y nunca despierta ni obliga al actor. Los efectos físicos pasan por Escenario; Dirección no decide deseos privados ni la respuesta de otro.",
       "category": "E+D",
       "sourceSection": 9,
       "sourceRequestIds": [
@@ -809,7 +1055,14 @@
         "P19"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "DIR-03",
@@ -825,7 +1078,13 @@
         "P20"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "DIR-04",
@@ -843,7 +1102,14 @@
         "P19"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "TIM-01",
@@ -859,7 +1125,13 @@
         "P16"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ]
     },
     {
       "id": "TIM-02",
@@ -881,6 +1153,12 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-06"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
       ]
     },
     {
@@ -899,6 +1177,12 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-06"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
       ]
     },
     {
@@ -919,7 +1203,13 @@
         "P17"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "UI-01",
@@ -937,7 +1227,14 @@
         "P23"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A",
+        "H"
+      ]
     },
     {
       "id": "UI-02",
@@ -954,7 +1251,14 @@
         "P23"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "H"
+      ]
     },
     {
       "id": "UI-03",
@@ -971,7 +1275,13 @@
         "P15"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "UI-04",
@@ -987,7 +1297,13 @@
         "P05"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "UI-05",
@@ -1006,7 +1322,13 @@
         "P22"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "UI-06",
@@ -1029,6 +1351,13 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-05"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -1048,7 +1377,13 @@
         "P10"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "UI-08",
@@ -1066,6 +1401,11 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-07"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "G",
+        "H"
       ]
     },
     {
@@ -1086,7 +1426,14 @@
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "UI-10",
@@ -1105,6 +1452,11 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-07"
+      ],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G"
       ]
     },
     {
@@ -1125,7 +1477,14 @@
         "P19"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "VOZ-01",
@@ -1148,6 +1507,15 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-09"
+      ],
+      "plannedSubresults": [
+        "P21-FIDELIDAD"
+      ],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A",
+        "H"
       ]
     },
     {
@@ -1164,7 +1532,16 @@
         "P21"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [
+        "P21-RITMO"
+      ],
+      "minimumEvidence": [
+        "U",
+        "G",
+        "A",
+        "H"
+      ]
     },
     {
       "id": "VOZ-03",
@@ -1180,7 +1557,14 @@
         "P21"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [
+        "P21-REC"
+      ],
+      "minimumEvidence": [
+        "D",
+        "G"
+      ]
     },
     {
       "id": "VOZ-04",
@@ -1199,6 +1583,16 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-02"
+      ],
+      "plannedSubresults": [
+        "P21-LOCAL",
+        "P21-LIVE"
+      ],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -1221,6 +1615,15 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-02"
+      ],
+      "plannedSubresults": [
+        "P21-LOCAL"
+      ],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -1237,7 +1640,14 @@
         "P21"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [
+        "P21-CORPUS"
+      ],
+      "minimumEvidence": [
+        "D",
+        "H"
+      ]
     },
     {
       "id": "VOZ-07",
@@ -1255,6 +1665,14 @@
       "evidenceStatus": "pending",
       "decisions": [
         "DP-02"
+      ],
+      "plannedSubresults": [
+        "P21-LIVE"
+      ],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
       ]
     },
     {
@@ -1271,7 +1689,12 @@
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L"
+      ]
     },
     {
       "id": "NFR-02",
@@ -1294,7 +1717,14 @@
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "NFR-03",
@@ -1316,7 +1746,12 @@
         "P14"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L"
+      ]
     },
     {
       "id": "NFR-04",
@@ -1336,7 +1771,12 @@
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L"
+      ]
     },
     {
       "id": "NFR-05",
@@ -1356,7 +1796,14 @@
         "P23"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A",
+        "H"
+      ]
     },
     {
       "id": "NFR-06",
@@ -1374,7 +1821,13 @@
         "P17"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "NFR-07",
@@ -1395,7 +1848,13 @@
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "A"
+      ]
     },
     {
       "id": "NFR-08",
@@ -1417,7 +1876,14 @@
         "P21"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [
+        "P21-REC"
+      ],
+      "minimumEvidence": [
+        "D",
+        "G"
+      ]
     },
     {
       "id": "NFR-09",
@@ -1438,7 +1904,14 @@
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G",
+        "A"
+      ]
     },
     {
       "id": "NFR-10",
@@ -1456,10 +1929,137 @@
         "MEM-08"
       ],
       "plannedTests": [
+        "P01",
+        "P02",
+        "P03",
+        "P04",
+        "P05",
+        "P06",
+        "P07",
+        "P08",
+        "P09",
+        "P10",
+        "P11",
+        "P12",
+        "P13",
+        "P14",
+        "P15",
+        "P16",
+        "P17",
+        "P18",
+        "P19",
+        "P20",
+        "P21",
+        "P22",
+        "P23",
+        "P24",
         "P25"
       ],
       "evidenceStatus": "pending",
-      "decisions": []
+      "decisions": [],
+      "plannedSubresults": [],
+      "minimumEvidence": [
+        "D",
+        "U",
+        "L",
+        "G",
+        "A",
+        "H"
+      ]
     }
-  ]
+  ],
+  "currentSpecHashes": {
+    "docs/specs/01-dominio-y-catalogo.md": "a9e56d1d1f51d2d4cad8f6060ab8f3a772da08b7a9dbd1a23b888248e50d3dad",
+    "docs/specs/02-persistencia-e-icm.md": "85f097f63321a4ffbb41faaa2e69bcac742238c2c4c89ea5961a1d66ae16ddce",
+    "docs/specs/03-pi-y-coordinacion.md": "9615b49748f39f1fc9502d823346d14ef308698ea04704caa2ed737aa5ff8adc",
+    "docs/specs/04-api-y-autoridad.md": "15e14a6d26fb55076387349b1ecf7681f287bf5680bda36a29fa30584e05fef3",
+    "docs/specs/05-interfaz.md": "ee66aaa69f6040320361495f94cf7f4cdee038d0aebddf0e7e30ec43ee31f8ee",
+    "docs/specs/06-voces-y-ritmo.md": "1c05faf8ce57d7d17ed95f63843eb75b2eff28885401b3de51424ed6bd31ea08",
+    "docs/specs/07-verificacion.md": "496a53e7a38f0ae69faef78b3e65832c5584fd0c617c7f122da56bef00216abf",
+    "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"
+  },
+  "currentSpecHashDate": "2026-10-15",
+  "currentPrdHash": "bf322eff2edb8ab789960d705311d5e5b25649766cbacea57ef77b3f23509bc0",
+  "currentChangeNote": "R8 15/10: corte 34 incorpora el compositor gráfico de metaindicaciones con modo Director, alcances de corrida/escena, destinatarios, ledger e idempotencia. Los 77 estados de aceptación siguen pendientes.",
+  "subresults": {
+    "P21-REC": {
+      "parentTest": "P21",
+      "requirementIds": [
+        "VOZ-03",
+        "NFR-08"
+      ],
+      "scope": "Recetas, cobertura de identidades y procedencia consultables; no exige crear voz, preview ni audio por identidad.",
+      "minimumEvidence": [
+        "D",
+        "G"
+      ],
+      "evidenceStatus": "pending"
+    },
+    "P21-FIDELIDAD": {
+      "parentTest": "P21",
+      "requirementIds": [
+        "VOZ-01"
+      ],
+      "scope": "Diferenciación textual situada por personaje, con revisión cualitativa de actuación.",
+      "minimumEvidence": [
+        "A",
+        "H"
+      ],
+      "evidenceStatus": "pending"
+    },
+    "P21-RITMO": {
+      "parentTest": "P21",
+      "requirementIds": [
+        "VOZ-02"
+      ],
+      "scope": "Política configurable, muestras multivuelta y revisión cualitativa; no afirma mediciones acústicas sin escucha/anotación.",
+      "minimumEvidence": [
+        "U",
+        "G",
+        "A",
+        "H"
+      ],
+      "evidenceStatus": "pending"
+    },
+    "P21-LOCAL": {
+      "parentTest": "P21",
+      "requirementIds": [
+        "VOZ-04",
+        "VOZ-05"
+      ],
+      "scope": "Estados locales del adaptador, audio apagado/activado, errores, preservación textual y reintento sin nueva actuación.",
+      "minimumEvidence": [
+        "U",
+        "L",
+        "G"
+      ],
+      "evidenceStatus": "pending"
+    },
+    "P21-LIVE": {
+      "parentTest": "P21",
+      "requirementIds": [
+        "VOZ-04",
+        "VOZ-07"
+      ],
+      "scope": "Recorrido real Voice Design, preview, escucha/selección, guardado, binding probado/aceptado y TTS.",
+      "minimumEvidence": [
+        "L",
+        "G",
+        "A"
+      ],
+      "evidenceStatus": "pending"
+    },
+    "P21-CORPUS": {
+      "parentTest": "P21",
+      "requirementIds": [
+        "VOZ-06"
+      ],
+      "scope": "Inventario y escucha/anotación del corpus audiovisual con la rúbrica indicada.",
+      "minimumEvidence": [
+        "D",
+        "H"
+      ],
+      "evidenceStatus": "pending"
+    }
+  }
 }

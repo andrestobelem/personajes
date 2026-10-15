@@ -76,6 +76,8 @@ _Evitar_: propuesta como sinónimo de acontecimiento consumado.
 **Evento del escenario**: Acontecimiento ocurrido dentro de la representación, distinto de lo que cualquiera de sus participantes cree que ocurrió.
 _Evitar_: evento del mundo como nombre operativo.
 
+**Evento estructural de la representación**: Apertura o cierre registrado de una escena, acto o episodio, ligado a un corte del escenario. Organiza la obra, pero no es un hecho diegético ni una percepción del personaje.
+
 **Capacidad**: Medio o habilidad que permite a un personaje intentar ciertas acciones, sujeto a las condiciones de la situación.
 
 **Límite**: Condición que restringe qué puede ocurrir o ejecutarse. No equivale a un deseo ni a una capacidad.
@@ -101,6 +103,9 @@ _Evitar_: etapa como sinónimo automático de acto.
 
 **Acto**: Unidad amplia de organización de una representación que puede reunir varias escenas.
 _Evitar_: acto como sinónimo de etapa del conflicto.
+
+**Episodio de la obra**: Unidad narrativa moderna que agrupa una o más escenas y puede organizarse en actos. Su cierre registra lo ocurrido y lo que continúa abierto; no obliga a resolver todas las líneas ni cierra por sí solo la representación. Es distinto del «episodio» como parte formal de ciertas obras teatrales griegas.
+_Evitar_: episodio como sinónimo de escena, acto, etapa dramática o corrida.
 
 **Escena**: Unidad de representación que concentra una situación con uno o más personajes. Puede desarrollarse mediante acciones solitarias, monólogo, silencio o interacción entre participantes.
 _Evitar_: escena como sinónimo obligatorio de diálogo entre dos personajes.

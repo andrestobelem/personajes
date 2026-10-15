@@ -8,8 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { z } from 'zod';
 import { ReadyRunConfigurationSchema } from '../src/application/production-preflight.ts';
+import { fingerprintInferenceProfile } from '../src/application/pi-access-check.ts';
+import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import { PreparedCharacterSchema } from '../src/domain/preparation.ts';
-import { ActorJobExecutionSchema, ContinuistaReviewInputSchema, ContinuistaStoredReviewSchema } from '../src/domain/world-journal.ts';
+import { ActorJobExecutionSchema, ContinuistaReviewInputSchema, ContinuistaStoredReviewSchema, RunDraftPatchSchema } from '../src/domain/world-journal.ts';
 import { setup as setupContinuistaFixture, deterministicFactory as continuistaActorFactory, responseFor as continuistaResponse } from './fixtures/continuista.ts';
 import { createActorTurnWorker } from '../src/application/actor-turn-worker.ts';
 import { assembleContinuistaReviewContext } from '../src/application/continuista-review-context.ts';
@@ -61,6 +63,29 @@ const secondProposalId = ProposalIdSchema.parse(uuid(721));
 const maxExperienceId = ExperienceIdSchema.parse(uuid(722));
 const maxGoalId = GoalIdSchema.parse(uuid(723));
 const thirdProposalId = ProposalIdSchema.parse(uuid(724));
+
+const dramaticStructurePrincipalId = 'dramatic-structure-test';
+
+function configuredDraftField(value: unknown) {
+  return { kind: 'configured', value, evidence: { kind: 'operator-choice', operatorId: 'synthetic-test', recordedAt: '1900-01-01T00:00:00Z' } };
+}
+
+function draftPatchFromReadyConfiguration(configuration: Awaited<ReturnType<typeof setupContinuistaFixture>>['configuration']) {
+  const worldSnapshot = {
+    ...configuration.worldSnapshot,
+    entities: configuration.worldSnapshot.entities.map((entity) => entity.kind === 'character'
+      ? { ...entity, mind: { ...entity.mind, experiences: [] } }
+      : entity),
+  };
+  return RunDraftPatchSchema.parse(Object.fromEntries(Object.entries({
+    name: configuration.name, fictionalAt: configuration.fictionalAt, continuity: configuration.continuity,
+    roster: configuration.roster, humanParticipants: configuration.humanParticipants, worldSnapshot,
+    dramaticLine: configuration.dramaticLine, circadianPolicy: configuration.circadianPolicy,
+    spanishVariety: configuration.spanishVariety, narrationMode: configuration.narrationMode,
+    inferenceProfile: configuration.inferenceProfile, budget: configuration.budget,
+    maxReformulations: configuration.maxReformulations, audio: configuration.audio,
+  }).map(([field, value]) => [field, configuredDraftField(value)])));
+}
 
 function worldFixture() {
   const character = (input: { characterId: string; entityId: string; name: string; position: number }) => ({
@@ -181,6 +206,236 @@ function withJournal(run: (journal: ReturnType<typeof openJournal>, path: string
   finally { try { journal.close(); } catch { /* Closed before reopen. */ } rmSync(directory, { recursive: true, force: true }); }
 }
 
+test('estructura v29 conserva lo legado y guarda episodios/escenas/actos con CAS e idempotencia', () => {
+  withJournal((journal, path) => {
+    registerRun(journal);
+    const legacy = journal.readDramaticStructure({ runId });
+    assert.ok(legacy);
+    assert.equal(legacy.structureRevision, 0);
+    assert.deepEqual(legacy.episodes, [], 'la migración no inventa episodios para corridas anteriores');
+    assert.deepEqual(legacy.unassignedLegacyScenes.map((scene) => scene.id), [sceneId]);
+    assert.equal(legacy.unassignedLegacyScenes[0]?.lifecycle.kind, 'open');
+
+    const activeSceneEpisode = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(728), idempotencyKey: uuid(729), expectedWorldRevision: 0, expectedStructureRevision: 0,
+      command: { kind: 'openEpisode', episodeId: uuid(730) } });
+    assert.deepEqual(activeSceneEpisode, { kind: 'invalidState', code: 'sceneAlreadyOpen' });
+
+    const closedLegacyScene = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(730), idempotencyKey: uuid(731), expectedWorldRevision: 0, expectedStructureRevision: 0,
+      command: { kind: 'closeScene', sceneId, reason: 'Cierre explícito de la escena heredada.' } });
+    assert.equal(closedLegacyScene.kind, 'stored');
+    assert.ok(journal.loadWorld({ runId })?.entities.filter((entity) => entity.kind === 'character')
+      .every((entity) => entity.presence.kind === 'absent'), 'cerrar la escena libera la presencia de sus participantes');
+    assert.deepEqual(journal.readDramaticStructure({ runId })?.episodes, [], 'cerrar una escena legacy tampoco inventa un episodio');
+
+    const openEpisode = {
+      runId, principalId: dramaticStructurePrincipalId, operationId: uuid(732), idempotencyKey: uuid(733),
+      expectedWorldRevision: 1, expectedStructureRevision: 1,
+      command: { kind: 'openEpisode' as const, episodeId: uuid(734), title: 'Primer episodio' },
+    };
+    const opened = journal.applyDramaticStructureCommand(openEpisode);
+    assert.equal(opened.kind, 'stored');
+    if (opened.kind !== 'stored') assert.fail('No se abrió el episodio');
+    assert.deepEqual(opened.receipt, {
+      operationId: uuid(732), worldRevision: 2, worldSeq: 0, structureRevision: 2, commitIndex: 2,
+      activeEpisodeId: uuid(734), activeSceneId: null,
+    });
+    assert.equal(journal.readInspectorWorldCut({ runId, atCommitIndex: 1 })?.snapshot.revision, 1);
+    assert.equal(journal.readInspectorWorldCut({ runId, atCommitIndex: 2 })?.snapshot.revision, 2,
+      'el selector por commit distingue cambios estructurales con el mismo worldSeq');
+    const replay = journal.applyDramaticStructureCommand(openEpisode);
+    assert.deepEqual(replay, { ...opened, kind: 'existing' });
+    assert.deepEqual(journal.readDramaticStructureOperation({ runId, principalId: dramaticStructurePrincipalId, idempotencyKey: uuid(733) }),
+      { kind: 'found', result: { ...opened, kind: 'existing' } });
+
+    const invalidPlaceScene = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(749), idempotencyKey: uuid(750), expectedWorldRevision: 2, expectedStructureRevision: 2,
+      command: { kind: 'openScene', scene: { id: uuid(751), label: 'Lugar inexistente', participantIds: [maxId], placeIds: [roomId, 'lugar-inexistente'] } } });
+    assert.deepEqual(invalidPlaceScene, { kind: 'invalidState', code: 'invalidPlaceReference' });
+    assert.equal(journal.loadWorld({ runId })?.revision, 2, 'un lugar inválido no debe persistir una mutación parcial');
+    assert.equal(journal.readDramaticStructure({ runId })?.activeSceneId, null);
+
+    const newSceneId = uuid(735);
+    const openedScene = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(736), idempotencyKey: uuid(737), expectedWorldRevision: 2, expectedStructureRevision: 2,
+      command: { kind: 'openScene', scene: { id: newSceneId, label: 'Nueva escena', participantIds: [maxId, agentId], placeIds: [roomId] } } });
+    assert.equal(openedScene.kind, 'stored');
+
+    const firstAct = { actId: uuid(738), title: 'Primer acto', sceneIds: [newSceneId] };
+    const setActs = (operationId: number, idempotencyKey: number, expectedWorldRevision: number, expectedStructureRevision: number, title: string) =>
+      journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId, operationId: uuid(operationId),
+        idempotencyKey: uuid(idempotencyKey), expectedWorldRevision, expectedStructureRevision,
+        command: { kind: 'setEpisodeActs', episodeId: uuid(734), acts: [{ ...firstAct, title }] } });
+    assert.equal(setActs(738, 739, 3, 3, firstAct.title).kind, 'stored');
+    const firstActCut = journal.readDramaticStructureAtCut({ runId, worldRevision: 4, worldSeq: 0 });
+    assert.ok(firstActCut);
+    assert.equal(firstActCut.commitIndex, 4);
+    assert.equal(firstActCut.structure.episodes[0]?.acts[0]?.title, 'Primer acto');
+    assert.equal(setActs(740, 741, 4, 4, 'Acto revisado').kind, 'stored', 'un agrupamiento editorial puede reemplazarse sin alterar la ficción');
+    const revisedActCut = journal.readDramaticStructureAtCut({ runId, worldRevision: 5, worldSeq: 0 });
+    assert.ok(revisedActCut);
+    assert.equal(revisedActCut.structure.episodes[0]?.acts[0]?.title, 'Acto revisado');
+    assert.equal(journal.readDramaticStructureEvents({ runId, throughCommitIndex: 4 })?.structureRevision, 4,
+      'el registro de cambios se limita al commit histórico solicitado');
+
+    const closedScene = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(742), idempotencyKey: uuid(743), expectedWorldRevision: 5, expectedStructureRevision: 5,
+      command: { kind: 'closeScene', sceneId: newSceneId, reason: 'Cierre sintético de prueba.' } });
+    assert.equal(closedScene.kind, 'stored');
+    assert.ok(journal.loadWorld({ runId })?.entities.filter((entity) => entity.kind === 'character')
+      .every((entity) => entity.presence.kind === 'absent'), 'una escena cerrada no conserva personajes presentes en ella');
+    const closedEpisode = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(744), idempotencyKey: uuid(745), expectedWorldRevision: 6, expectedStructureRevision: 6,
+      command: { kind: 'closeEpisode', episodeId: uuid(734), consequenceEventIds: [], openLines: [] } });
+    assert.equal(closedEpisode.kind, 'stored');
+
+    const structure = journal.readDramaticStructure({ runId });
+    assert.ok(structure);
+    assert.equal(structure.structureRevision, 7);
+    assert.equal(structure.activeEpisodeId, null);
+    assert.equal(structure.activeSceneId, null);
+    assert.deepEqual(structure.unassignedLegacyScenes.map((scene) => scene.id), [sceneId]);
+    assert.equal(structure.unassignedLegacyScenes[0]?.lifecycle.kind, 'closed');
+    assert.equal(structure.episodes.length, 1);
+    assert.equal(structure.episodes[0]?.lifecycle, 'closed');
+    assert.deepEqual(structure.episodes[0]?.acts.map((act) => act.title), ['Acto revisado']);
+    assert.deepEqual(structure.episodes[0]?.sceneIds, [newSceneId]);
+    assert.deepEqual(structure.episodes[0]?.openLines, []);
+    assert.deepEqual(structure.episodes[0]?.consequenceEventIds, []);
+    const finalCut = journal.readDramaticStructureAtCut({ runId, worldRevision: 7, worldSeq: 0 });
+    assert.ok(finalCut);
+    assert.equal(finalCut.structure.episodes[0]?.lifecycle, 'closed');
+    assert.equal(finalCut.structure.unassignedLegacyScenes[0]?.lifecycle.kind, 'closed');
+    const events = journal.readDramaticStructureEvents({ runId });
+    assert.ok(events);
+    assert.deepEqual(events.events.map((event) => event.structureRevision), [1, 2, 3, 4, 5, 6, 7]);
+    assert.equal(journal.loadWorld({ runId })?.seq, 0, 'estructura editorial/escénica no inventa eventos de ficción');
+
+    const inspect = new DatabaseSync(path);
+    try {
+      assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM world_events').get()?.count, 0);
+      assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM world_perceptions').get()?.count, 0);
+      assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM structure_events').get()?.count, 7);
+      assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(), []);
+    } finally { inspect.close(); }
+
+    journal.close();
+    const reopened = openJournal({ path });
+    try {
+      assert.deepEqual(reopened.readDramaticStructure({ runId }), structure);
+      assert.deepEqual(reopened.applyDramaticStructureCommand(openEpisode), { ...opened, kind: 'existing' });
+      const replayedEvents = reopened.readDramaticStructureEvents({ runId });
+      assert.ok(replayedEvents);
+      assert.equal(replayedEvents.events.length, 7);
+    } finally { reopened.close(); }
+  });
+});
+
+test('start abre episodio 1 y asocia la escena configurada en la misma transición durable', async () => {
+  const prepared = await setupContinuistaFixture();
+  const directory = mkdtempSync(join(tmpdir(), 'personajes-dramatic-start-'));
+  const path = join(directory, 'world.sqlite');
+  const journal = openJournal({ path });
+  try {
+    const created = journal.createRunConfigurationDraft({ principalId: dramaticStructurePrincipalId,
+      idempotencyKey: uuid(750), patch: draftPatchFromReadyConfiguration(prepared.configuration) });
+    assert.equal(created.kind, 'created');
+    if (created.kind !== 'created') assert.fail('No se creó el borrador Ready sintético');
+    const promoted = journal.validateRunConfigurationDraft({ principalId: dramaticStructurePrincipalId,
+      idempotencyKey: uuid(751), runId: created.draft.runId, expectedRevision: created.draft.revision });
+    assert.equal(promoted.kind, 'ready');
+    if (promoted.kind !== 'ready') assert.fail('No se promovió el escenario a Ready');
+    const initial = journal.readWorldLifecycle({ runId: created.draft.runId });
+    assert.ok(initial);
+    const structureBeforeStart = journal.readDramaticStructure({ runId: created.draft.runId });
+    assert.ok(structureBeforeStart);
+    assert.deepEqual(structureBeforeStart.episodes, []);
+    assert.deepEqual(structureBeforeStart.unassignedLegacyScenes.map((scene) => scene.id), [prepared.configuration.worldSnapshot.activeSceneId]);
+
+    const preflight = journal.createRunPreflightJob({ principalId: dramaticStructurePrincipalId, idempotencyKey: uuid(752),
+      runId: created.draft.runId, expectedConfigurationRevision: initial.configRevision, expectedWorldRevision: initial.worldRevision });
+    assert.equal(preflight.kind, 'created');
+    if (preflight.kind !== 'created') assert.fail('No se creó el preflight de inicio');
+    const lease = { ownerToken: uuid(753), claimToken: uuid(754) };
+    const claimed = journal.claimRunPreflightJob({ runId: created.draft.runId, jobId: preflight.job.jobId, expectedRevision: 0, ...lease });
+    assert.equal(claimed.kind, 'claimed');
+    if (claimed.kind !== 'claimed') assert.fail('No se reclamó el preflight de inicio');
+    const frozen = journal.readRunPreflightJobInput({ runId: created.draft.runId, jobId: preflight.job.jobId, lease });
+    assert.equal(frozen.kind, 'found');
+    if (frozen.kind !== 'found') assert.fail('No se congeló el corte Ready');
+
+    const access = journal.createPiAccessJob({ principalId: dramaticStructurePrincipalId, idempotencyKey: uuid(755), profile: DEFAULT_INFERENCE_PROFILE });
+    assert.equal(access.kind, 'created');
+    if (access.kind !== 'created') assert.fail('No se creó la comprobación sintética de acceso');
+    const accessLease = { ownerToken: uuid(756), claimToken: uuid(757) };
+    const accessClaim = journal.claimPiAccessJob({ jobId: access.job.jobId, expectedRevision: 0, ...accessLease });
+    assert.equal(accessClaim.kind, 'claimed');
+    if (accessClaim.kind !== 'claimed') assert.fail('No se reclamó la comprobación sintética de acceso');
+    const checkedAt = new Date(Date.now() - 2_000).toISOString();
+    const expiresAt = new Date(Date.now() + 120_000).toISOString();
+    const profileFingerprint = fingerprintInferenceProfile(DEFAULT_INFERENCE_PROFILE);
+    const accountFingerprint = 'a'.repeat(64);
+    const accessResult = {
+      provider: DEFAULT_INFERENCE_PROFILE.provider, requestedProfile: DEFAULT_INFERENCE_PROFILE,
+      profileFingerprint, accountFingerprint, kind: 'passed' as const,
+      effectiveProfile: { provider: DEFAULT_INFERENCE_PROFILE.provider, api: DEFAULT_INFERENCE_PROFILE.api,
+        model: DEFAULT_INFERENCE_PROFILE.model, providerThinkingLevel: DEFAULT_INFERENCE_PROFILE.reasoningEffort,
+        reasoningEvidence: 'sdk-payload-and-response' as const },
+      measuredUsage: { input: 19, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 20 },
+    };
+    const accessCompleted = journal.completePiAccessJob({ jobId: access.job.jobId, expectedRevision: accessClaim.job.revision,
+      lease: accessLease, result: accessResult, checkedAt, expiresAt });
+    assert.equal(accessCompleted.kind, 'updated');
+    const accessReceipt = { jobId: access.job.jobId, provider: DEFAULT_INFERENCE_PROFILE.provider, profileFingerprint,
+      accountFingerprint, resultKind: 'passed' as const, checkedAt, expiresAt };
+    const checkIds = ['configuration', 'configuration-version', 'world-snapshot', 'prepared-contexts', 'catalog-eligibility',
+      'inference-profile', 'pi-sdk', 'pi-profile', 'provider-authentication', 'pi-runtime', 'icm-memory', 'budget',
+      'provider-access-check', 'participant-availability', 'voice'] as const;
+    const evaluatedAt = new Date().toISOString();
+    const completed = journal.completeRunPreflightJob({ runId: created.draft.runId, jobId: preflight.job.jobId,
+      expectedRevision: claimed.job.revision, lease, evaluation: {
+        fence: frozen.fence,
+        result: { kind: 'passed', checkedAt: evaluatedAt, checks: checkIds.map((checkId) => ({ kind: 'passed' as const, checkId, code: `${checkId}-passed` })) },
+        evidence: { provider: DEFAULT_INFERENCE_PROFILE.provider, profileFingerprint, accountFingerprint, accessReceipt },
+      } });
+    assert.equal(completed.kind, 'updated');
+    const command = { principalId: dramaticStructurePrincipalId, idempotencyKey: uuid(758), runId: created.draft.runId,
+      expectedLifecycleRevision: initial.lifecycleRevision, expectedConfigRevision: initial.configRevision,
+      expectedWorldRevision: initial.worldRevision, command: { kind: 'start' as const }, preflightJobId: preflight.job.jobId };
+    const started = journal.applyRunLifecycleCommand(command);
+    assert.equal(started.kind, 'updated');
+    if (started.kind !== 'updated') assert.fail('La representación no inició');
+    assert.equal(started.state.lifecycle, 'running');
+    assert.equal(started.state.worldRevision, initial.worldRevision + 1);
+    const structure = journal.readDramaticStructure({ runId: created.draft.runId });
+    assert.ok(structure);
+    assert.equal(structure.structureRevision, 1);
+    assert.equal(structure.episodes.length, 1);
+    assert.equal(structure.episodes[0]?.ordinal, 1);
+    assert.equal(structure.episodes[0]?.lifecycle, 'open');
+    assert.deepEqual(structure.episodes[0]?.sceneIds, [prepared.configuration.worldSnapshot.activeSceneId]);
+    assert.equal(structure.activeSceneId, prepared.configuration.worldSnapshot.activeSceneId);
+    assert.equal(structure.activeEpisodeId, structure.episodes[0]?.episodeId);
+    assert.equal(journal.loadWorld({ runId: created.draft.runId })?.seq, prepared.configuration.worldSnapshot.seq,
+      'abrir el episodio no agrega eventos de ficción ni altera el reloj');
+    const staleStructureControl = journal.applyRunLifecycleCommand({ principalId: dramaticStructurePrincipalId, idempotencyKey: uuid(759), runId: created.draft.runId,
+      expectedLifecycleRevision: started.state.lifecycleRevision, expectedConfigRevision: started.state.configRevision,
+      expectedWorldRevision: started.state.worldRevision, expectedStructureRevision: 0, command: { kind: 'pause' } });
+    assert.equal(staleStructureControl.kind, 'stale', 'el CAS de lifecycle también incluye la revisión estructural');
+    assert.equal(journal.readWorldLifecycle({ runId: created.draft.runId })?.lifecycle, 'running');
+    assert.deepEqual(journal.applyRunLifecycleCommand(command), { kind: 'updated', state: started.state });
+    const startEvents = journal.readDramaticStructureEvents({ runId: created.draft.runId });
+    assert.ok(startEvents);
+    assert.equal(startEvents.events.length, 1,
+      'reintentar start no duplica el episodio');
+  } finally {
+    try { journal.close(); } catch { /* El caso puede haber cerrado el journal al simular un reinicio. */ }
+    prepared.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 async function createQueuedHumanIntentFixture(journal: ReturnType<typeof openJournal>, texts: string[], configuration?: Record<string, unknown>) {
   const profile = {
     identity: {
@@ -211,6 +466,54 @@ async function createQueuedHumanIntentFixture(journal: ReturnType<typeof openJou
   if (queued.length !== texts.length) throw new Error('La cantidad de intenciones entregadas no coincide');
   return { profile, perceptions: queued.map((item) => item.perceptionId) };
 }
+
+test('metaindicaciones se versionan aparte del mundo y el actor conserva el corte al recuperar', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-direction-ledger-'));
+  const path=join(directory,'world.sqlite');
+  let journal=openJournal({path});
+  try{
+    await createQueuedHumanIntentFixture(journal,['Activar turno para probar Dirección.']);
+    const worldBefore=journal.loadWorld({runId});
+    if(worldBefore===undefined)assert.fail('Falta el Escenario');
+    const firstCommand={runId,principalId:'director-test',operationId:uuid(9_800),idempotencyKey:uuid(9_801),
+      expectedDirectionRevision:0,payload:{kind:'metaIndication',recipients:[maxId],text:'Mantén una reserva antes de confiar en el informe.',scope:{kind:'scene',sceneId}}};
+    const indication=journal.applyDirectionCommand(firstCommand);
+    assert.equal(indication.kind,'stored');
+    assert.equal(journal.applyDirectionCommand(firstCommand).kind,'existing','el retry exacto devuelve el receipt durable sin incrementar revisión');
+    assert.deepEqual(journal.loadWorld({runId}),worldBefore,'Dirección no crea un hecho, percepción ni revisión del Escenario');
+    journal.configureRun({runId,maxCalls:5});
+    const pulseId=PulseIdSchema.parse(uuid(9_802));journal.configurePulse({runId,pulseId,maxCalls:2});
+    const scheduled=journal.scheduleActorTurnJob({runId,actorId:maxId,pulseId});
+    if(scheduled.kind!=='scheduled')assert.fail('No se programó el turno actoral');
+    const claim=journal.claimActorTurnJob({runId,actorId:maxId,jobId:scheduled.job.jobId,generation:scheduled.job.generation,
+      ownerToken:uuid(9_803),claimToken:uuid(9_804)});
+    if(claim.kind!=='claimed')assert.fail('No se congeló el turno actoral');
+    assert.equal(claim.job.frozenDirectionRevision,1);
+    assert.equal(claim.job.frozenWorldCut?.activeSceneId,sceneId);
+    const visible=journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:claim.job.frozenDirectionRevision!,activeSceneId:sceneId});
+    assert.equal(visible.indications.length,1);
+    assert.equal(visible.indications[0]?.text,'Mantén una reserva antes de confiar en el informe.');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:agentId,directionRevision:1,activeSceneId:sceneId}).indications.length,0,
+      'el destinatario no recibe indicaciones dirigidas a otro actor');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:1,activeSceneId:uuid(9_807)}).indications.length,0,
+      'la indicación de escena vence fuera del alcance de esa escena');
+    const late=journal.applyDirectionCommand({runId,principalId:'director-test',operationId:uuid(9_805),idempotencyKey:uuid(9_806),
+      expectedDirectionRevision:1,payload:{kind:'metaIndication',recipients:[maxId],text:'Pregunta por el origen del informe.',scope:{kind:'run'}}});
+    assert.equal(late.kind,'stored');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:claim.job.frozenDirectionRevision!,activeSceneId:sceneId}).indications.length,1,
+      'una indicación posterior al claim no cambia una sesión actoral ya iniciada');
+    journal.close();
+    journal=openJournal({path});
+    const page=journal.readDirectionEvents({runId,afterDirectionRevision:0,limit:10});
+    assert.equal(page?.events.length,2);
+    assert.equal(page?.directionRevision,2);
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:1,activeSceneId:sceneId}).indications.length,1,
+      'el ledger y el corte sobreviven al reinicio');
+  }finally{
+    try{journal.close();}catch{/* La prueba pudo cerrar el journal antes del reinicio. */}
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
 
 test('world run fija configuración/continuidad, CAS de conocimiento y cortes durables', () => {
   withJournal((journal) => {
@@ -444,7 +747,7 @@ test('jobs actorales coalescen intenciones, serializan claims y recuperan identi
     journal.close();
     const beforeV9 = new DatabaseSync(path);
     try {
-      beforeV9.exec('DROP TABLE actor_turn_job_inputs; DROP TABLE actor_turn_jobs; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28)');
+      beforeV9.exec('DROP TABLE actor_turn_job_inputs; DROP TABLE actor_turn_jobs; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30)');
     } finally { beforeV9.close(); }
     journal = openJournal({ path });
     assert.deepEqual(journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId), perceptions,
@@ -900,7 +1203,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
       });
       assert.deepEqual(expectedSnapshots.map((row) => row.commit_index), [1, 2, 3]);
       assert.equal(beforeMigration.prepare('SELECT COUNT(*) AS n FROM world_commits').get()?.n, 3);
-      beforeMigration.exec('DROP TABLE world_commits; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28)');
+      beforeMigration.exec('DROP TABLE world_commits; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30)');
       assert.equal(beforeMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 5);
     } finally { beforeMigration.close(); }
 
@@ -920,7 +1223,10 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
         SELECT run_id,origin_kind,origin_id,payload_json,payload_hash,commit_index,world_revision,last_seq,created_at
         FROM world_resolutions ORDER BY commit_index
       `).all(), legacyRows, 'world_resolutions actorAttempt permanece idéntico');
-      assert.equal(afterMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 28);
+      assert.equal(afterMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 30);
+      assert.equal(afterMigration.prepare('SELECT COUNT(*) AS count FROM episodes').get()?.count, 0,
+        'v29 no backfillea episodios para corridas heredadas');
+      assert.equal(afterMigration.prepare('SELECT structure_revision FROM world_runs WHERE run_id=?').get(runId)?.structure_revision, 0);
     } finally { afterMigration.close(); }
 
     assert.equal(journal.loadWorld({ runId, throughWorldSeq: 0 })?.revision, 0);
@@ -929,7 +1235,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
 
     journal.close();
     const removeVersionMarker = new DatabaseSync(path);
-    try { removeVersionMarker.exec('DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28)'); }
+    try { removeVersionMarker.exec('DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30)'); }
     finally { removeVersionMarker.close(); }
     journal = openJournal({ path });
     const idempotent = new DatabaseSync(path);
@@ -1516,7 +1822,7 @@ test('bloqueo durable libera asignaciones sin consumo y retry explícito conserv
           FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation));
         INSERT INTO actor_inputs_v12 SELECT * FROM actor_turn_job_inputs;
         DROP TABLE actor_turn_job_inputs; ALTER TABLE actor_inputs_v12 RENAME TO actor_turn_job_inputs;
-        DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28); COMMIT;`);
+        DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30); COMMIT;`);
     } finally { legacy.close(); }
     journal = openJournal({ path });
     assert.deepEqual(journal.scheduleActorTurnJob({ runId, actorId: maxId, pulseId }).kind, 'blocked', 'un job legado sin época demostrable se bloquea');
@@ -1641,7 +1947,7 @@ test('coordinador conserva causa y cuota compartida, asigna destinatarios tardí
     await createDeliverWorldWorker({ journal, runId, actorId: maxId }).drain();
     journal.close();
     const legacy = new DatabaseSync(path);
-    try { legacy.exec('DROP TABLE coordinator_pulses; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(14,15,16,17,18,19,20,21,22,23,24,25,26,27,28);'); } finally { legacy.close(); }
+    try { legacy.exec('DROP TABLE coordinator_pulses; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30);'); } finally { legacy.close(); }
     journal = openJournal({ path });
     const begun = journal.beginCoordinatorPulse({ runId });
     if (begun.kind !== 'started') assert.fail('No se creó pulso');
@@ -1785,7 +2091,7 @@ test('ledger Continuista v15 exige terminal completo, comparte cuota y acepta re
   try{
     // Restore an actual populated v14 database before introducing administrative tables.
     const legacy=new DatabaseSync(join(fixture.directory,'journal.sqlite'));
-    try{legacy.exec(`DROP TABLE continuista_receipts;DROP TABLE continuista_candidates;DROP TABLE continuista_checkpoints;DROP TABLE continuista_request_leases;DROP TABLE continuista_sessions;DROP TABLE continuista_jobs;DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(15,16,17,18,19,20,21,22,23,24,25,26,27,28);`);}finally{legacy.close();}
+    try{legacy.exec(`DROP TABLE continuista_receipts;DROP TABLE continuista_candidates;DROP TABLE continuista_checkpoints;DROP TABLE continuista_request_leases;DROP TABLE continuista_sessions;DROP TABLE continuista_jobs;DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30);`);}finally{legacy.close();}
     const migrated=openJournal({path:join(fixture.directory,'journal.sqlite')});migrated.close();
     const actor=continuistaActorFactory(fixture);let reviewed=false;
     const worker=createActorTurnWorker({journal:fixture.journal,runtime:fixture.runtime,ids:fixture.ids,sessionFactory:actor.factory,
@@ -1905,7 +2211,7 @@ test('v16 reconcilia terminal y admin aceptado de v15 con nuevo claim sin reescr
     const path=join(fixture.directory,'journal.sqlite');const before=new DatabaseSync(path);
     let candidates:unknown[];let checkpoints:unknown[];
     try{candidates=before.prepare('SELECT canonical_payload,payload_hash FROM actor_pi_candidates ORDER BY candidate_id').all();checkpoints=before.prepare('SELECT payload_json,checkpoint_hash FROM actor_job_checkpoints ORDER BY checkpoint_hash').all();
-      before.exec('DROP TABLE actor_turn_reconciliations;DROP TABLE actor_terminal_proposals;DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(16,17,18,19,20,21,22,23,24,25,26,27,28);');}finally{before.close();}
+      before.exec('DROP TABLE actor_turn_reconciliations;DROP TABLE actor_terminal_proposals;DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(16,17,18,19,20,21,22,23,24,25,26,27,28,29,30);');}finally{before.close();}
     reopened=openJournal({path});const recoveredJournal=reopened;const newLease={ownerToken:uuid(42_002),claimToken:uuid(42_003)};
     assert.equal(reopened.recoverAbandonedActorTurnJobClaims({ownerToken:newLease.ownerToken}),1);
     const claim=reopened.claimActorTurnJob({runId:originalExecution.runId,actorId:originalExecution.actorId,jobId:originalExecution.jobId,generation:originalExecution.generation,...newLease});if(claim.kind!=='claimed')assert.fail('Sin nuevo claim');

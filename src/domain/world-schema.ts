@@ -326,7 +326,7 @@ function uniqueBy<T>(items: readonly T[], key: (item: T) => string): boolean {
 }
 
 export const WorldSnapshotSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   runId: RunIdSchema,
   revision: RevisionSchema,
   seq: WorldSeqSchema,
@@ -339,7 +339,7 @@ export const WorldSnapshotSchema = z.strictObject({
   entities: z.array(WorldEntitySchema).min(1).max(100_000),
   inventory: z.array(InventoryEntrySchema).max(100_000),
   scenes: z.array(WorldSceneSchema).min(1).max(10_000),
-  activeSceneId: SceneIdSchema,
+  activeSceneId: SceneIdSchema.nullable(),
   offers: z.array(WorldOfferSchema).max(100_000),
   actionDurations: ActionDurationsSchema,
 }).superRefine((world, context) => {
@@ -440,8 +440,21 @@ export const WorldSnapshotSchema = z.strictObject({
     }
     for (const [placeIndex, id] of scene.placeIds.entries()) if (!places.has(id)) issue(['scenes', index, 'placeIds', placeIndex], 'Escena refiere un lugar desconocido');
   }
-  const activeScene = scenes.get(world.activeSceneId);
-  if (activeScene === undefined || activeScene.lifecycle.kind !== 'open') issue(['activeSceneId'], 'La escena activa debe existir y estar abierta');
+  if (world.schemaVersion === 1) {
+    const activeScene = world.activeSceneId === null ? undefined : scenes.get(world.activeSceneId);
+    if (activeScene === undefined || activeScene.lifecycle.kind !== 'open') {
+      issue(['activeSceneId'], 'La escena activa debe existir y estar abierta');
+    }
+  } else if (world.activeSceneId === null) {
+    if (world.scenes.some((scene) => scene.lifecycle.kind === 'open')) {
+      issue(['activeSceneId'], 'Sin escena activa, todas las escenas deben estar cerradas');
+    }
+  } else {
+    const activeScene = scenes.get(world.activeSceneId);
+    if (activeScene === undefined || activeScene.lifecycle.kind !== 'open') {
+      issue(['activeSceneId'], 'La escena activa debe existir y estar abierta');
+    }
+  }
   for (const [index, offer] of world.offers.entries()) {
     if (entities.get(offer.objectEntityId)?.kind !== 'object') issue(['offers', index, 'objectEntityId'], 'Oferta refiere objeto desconocido');
     if (entities.get(offer.ownerEntityId)?.kind !== 'character') issue(['offers', index, 'ownerEntityId'], 'Oferta refiere dueño desconocido');
