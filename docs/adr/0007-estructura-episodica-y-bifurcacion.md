@@ -42,3 +42,7 @@ El corte del 15 de octubre pasó `npm run verify` con 554 pruebas aprobadas, cer
 ## Avance del corte 43
 
 El journal v34 registra cortes privados exactos para nuevas confirmaciones, prerrequisito de bifurcación fiel. No se habilitó fork ni restauración como fork. [Evidencia y límites](../auditoria/cortes-privados.md). Las descripciones anteriores conservan el estado del corte que auditaron.
+
+## Avance del corte 44
+
+La [preparación interna de bifurcación](../auditoria/preparacion-de-bifurcacion.md) ya lee una fuente exacta completa, remapea mundo/conocimiento y materializa recuerdos con procedencia, con un gate ICM real separado. No publica el destino ni sustituye el contrato de job durable, configuración Ready, API y GUI. La nueva historia comienza en revisión cero conservando la secuencia causal del estado importado; así no se invalida el catálogo de objetos aparecidos.

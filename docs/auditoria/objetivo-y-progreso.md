@@ -39,3 +39,7 @@ El handoff conserva los ocho pasos de este objetivo. El checkout se actualizó a
 ## Avance del corte 43 — 15 de octubre de 2026
 
 Cortes privados exactos implementados en journal v34 e inspector histórico paginado; no hay reconstrucción del pasado con conocimiento/ICM actuales. Ver [evidencia, revisión y límites](cortes-privados.md). TypeScript, build y 713 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux; recorrido Chromium sintético verificado. Fork y aceptación integral de los 77 requisitos siguen pendientes.
+
+## Corte 44 — fuente exacta y preparación de bifurcación
+
+Implementados lector de fuente exacta de SQLite, remapeo tipado de mundo/conocimiento, registro de identidades restaurable y recuerdos con procedencia. Se verificó proyección a ICM real separado sin modificar origen. [Evidencia y brechas](preparacion-de-bifurcacion.md). TypeScript, build y 737 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux. Falta configuración Ready derivada, job durable, publicación y API/GUI del fork; el objetivo integral y la aceptación de los 77 requisitos siguen activos y pendientes.

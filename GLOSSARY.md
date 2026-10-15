@@ -15,6 +15,9 @@ _Evitar_: investigación del corpus como si fuera una representación ya ocurrid
 
 **Continuidad de la representación**: Conjunto de antecedentes y acontecimientos que se admiten como ocurridos en una representación determinada.
 
+**Bifurcación**: Nueva representación que parte de un momento confirmado de otra, conserva su procedencia y continúa con historia y memorias independientes. No incorpora información aprendida después del momento elegido.
+_Evitar_: copiar el presente como si fuera el pasado.
+
 **Situación de la representación**: Circunstancias de fecha, lugar, relaciones y condiciones materiales desde las que se desarrolla la acción.
 
 **Identidad**: Continuidad reconocible de valores, disposiciones, contradicciones y formas de relacionarse de un personaje. Puede evolucionar mediante experiencias significativas.

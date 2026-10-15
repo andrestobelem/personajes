@@ -1979,6 +1979,57 @@ export function openJournal(input: { path: string }) {
     } catch { return {kind:'unavailable',reason:'invalid-cut'}; }
   }
 
+  const ForkSourceRequestSchema = z.strictObject({
+    runId:RunIdSchema,commitIndex:RevisionSchema,worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,
+  });
+  const ForkSourceReadResultSchema = z.discriminatedUnion('kind',[
+    z.strictObject({kind:z.literal('found'),snapshot:WorldSnapshotSchema,configuration:ReadyRunConfigurationSchema,cuts:z.array(ActorStateCutSchema)}),
+    z.strictObject({kind:z.literal('missing')}),
+    z.strictObject({kind:z.literal('unavailable'),reason:z.enum(['invalid-cut','checkpoint-not-recorded','configuration-not-ready'])}),
+  ]);
+
+  /** Host-only, coherent historical source. Never reconstructs private state from current memory. */
+  function readForkSource(input: unknown): z.infer<typeof ForkSourceReadResultSchema> {
+    const request = ForkSourceRequestSchema.parse(input);
+    database.exec('BEGIN');
+    try {
+      const read = (): z.infer<typeof ForkSourceReadResultSchema> => {
+        const value = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+        if (value === undefined) return {kind:'missing'};
+        const run = parseWorldRun(value);
+        const exact = exactActorCutSource(run,request.commitIndex);
+        if (exact.source.worldRevision !== request.worldRevision || exact.source.worldSeq !== request.worldSeq)
+          return {kind:'unavailable',reason:'invalid-cut'};
+        const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
+        if (!configuration.success) return {kind:'unavailable',reason:'configuration-not-ready'};
+        if (configuration.data.runId !== request.runId || configuration.data.configRevision !== exact.source.configurationRevision
+          || canonicalJson(configuration.data.worldSnapshot) !== canonicalJson(run.initialSnapshot)
+          || run.fence.atWorldSeq !== run.initialSnapshot.seq)
+          return {kind:'unavailable',reason:'invalid-cut'};
+        for (const context of run.fence.contexts) {
+          const prepared = configuration.data.roster.preparedCharacters.find(actor=>actor.characterId===context.actorId);
+          if (prepared === undefined || prepared.identityVersion !== context.identityVersion || hashJson(prepared).hash !== context.preparedContextHash
+            || prepared.continuity.continuityId !== context.continuityId || prepared.continuity.revision !== context.continuityRevision
+            || prepared.continuity.contentHash !== context.continuityContentHash)
+            return {kind:'unavailable',reason:'invalid-cut'};
+        }
+        const cuts: z.infer<typeof ActorStateCutSchema>[] = [];
+        for (const actor of exact.snapshot.entities.filter(entity=>entity.kind==='character').sort((left,right)=>left.characterId < right.characterId ? -1 : left.characterId > right.characterId ? 1 : 0)) {
+          const result = readActorStateCut({...request,actorId:actor.characterId});
+          if (result.kind !== 'found') return {kind:'unavailable',reason:result.kind==='unavailable' && result.reason==='checkpoint-not-recorded' ? 'checkpoint-not-recorded' : 'invalid-cut'};
+          cuts.push(result.cut);
+        }
+        return {kind:'found',snapshot:exact.snapshot,configuration:configuration.data,cuts};
+      };
+      const result = read();
+      database.exec('COMMIT');
+      return result;
+    } catch {
+      try { database.exec('ROLLBACK'); } catch { /* A read failure must never publish a partial source. */ }
+      return {kind:'unavailable',reason:'invalid-cut'};
+    }
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -4828,6 +4879,7 @@ export function openJournal(input: { path: string }) {
     },
 
     readActorStateCut,
+    readForkSource,
     registerWorldRun(input:unknown):'stored'|'existing'{return transact(()=>registerWorldRunWithinTransaction(input));},
 
     setWorldLifecycle(input: unknown): 'updated' | 'stale' {

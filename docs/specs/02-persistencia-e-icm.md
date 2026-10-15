@@ -189,3 +189,7 @@ Una aplicación física confirma snapshot, mundo, historial, percepciones y reci
 ## Cortes privados exactos — journal v34
 
 La implementación registra lotes y cortes privados por commit en la misma transacción, con fuente exacta y manifiesto de todos los personajes. Conserva reconocimiento y la unión verificable de experiencias propias aceptadas y mente del snapshot, con cierre de referencias y fechas no futuras. No hace backfill ni reconstruye memoria pasada con ICM actual. La preparación editable reemplaza sólo su corte inicial. Ver [ADR 0010](../adr/0010-cortes-privados-exactos.md) y [evidencia](../auditoria/cortes-privados.md). El fork durable sigue pendiente.
+
+## Preparación interna del fork — corte 44
+
+El paquete prepared-fork-state reúne mundo remapeado, estados privados y manifiesto restaurable desde una fuente exacta completa. Cada memoria propia materializada conserva forkOrigin con ID/hash del payload y commit/revisión/secuencia/hash del snapshot padre; se recalcula el envelope congelado. Los antecedentes externos curados siguen scoped a su origen. Mantener worldSeq conserva validez del estado adquirido; revision de snapshot destino comienza en cero. No se inventan eventos locales para sus referencias históricas. La publicación del target Ready y el job durable siguen pendientes. [Evidencia y brechas](../auditoria/preparacion-de-bifurcacion.md).

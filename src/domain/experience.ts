@@ -5,6 +5,14 @@ import {
   RunIdSchema, SourceRefIdSchema, WorldSeqSchema,
 } from './values.ts';
 
+/** Immediate parent cut of an imported memory; older lineage remains verifiable through its source payload. */
+export const ForkExperienceOriginSchema = z.strictObject({
+  kind:z.literal('fork'), sourceRunId:RunIdSchema, sourceActorId:CharacterIdSchema,
+  sourceExperienceId:ExperienceIdSchema, sourcePayloadHash:HashSchema,
+  sourceCommitIndex:RevisionSchema, sourceWorldRevision:RevisionSchema,
+  sourceWorldSeq:WorldSeqSchema, sourceSnapshotHash:HashSchema,
+});
+
 const fields = {
   schemaVersion: z.literal(1),
   experienceId: ExperienceIdSchema,
@@ -12,6 +20,7 @@ const fields = {
   actorId: CharacterIdSchema,
   content: z.string().min(1).max(16_384).refine((text) => !text.includes('\0'), 'NUL inválido'),
   sourceRefs: z.array(SourceRefIdSchema).max(1_000),
+  forkOrigin: ForkExperienceOriginSchema.optional(),
   fictitiousAt: FictionalInstantSchema,
   receivedAt: FictionalInstantSchema,
   worldSeq: WorldSeqSchema,

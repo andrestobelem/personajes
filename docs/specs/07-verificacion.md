@@ -184,3 +184,7 @@ El [corte 42](../auditoria/audio-preparacion-y-admision.md) verifica editores in
 ## Gate de cortes privados — corte 43
 
 Verificar captura inicial y por commit dentro de la misma transacción, rollback ante memoria inválida, entregas tardías con igual secuencia, commits estructurales sin evento, manifiesto completo/tamper, fechas y referencias, antecedente externo autorizado, migración sin backfill, HTTP privado y paginación. El navegador debe mostrar 55 experiencias antes y 56 después de una entrega tardía, sin fuga hacia atrás ni respuesta actual obsoleta. Estos gates parciales no acreditan fork ni aceptación integral. [Resultados ejecutados](../auditoria/cortes-privados.md).
+
+## Gate del remapeo de fork — corte 44
+
+Verificar fuente exacta completa, todos los personajes, unión privada sin información futura, referencias y colisiones entre actores/antecedentes, handles por propietario, IDs de mundo/inventario/ofertas/plantillas, escenas cerradas sin reabrir, contenido literal intacto y repetición del manifiesto. El gate con ICM real comprueba bases separadas, replay de proyección y bytes de origen intactos. Estos gates no equivalen a un job durable publicado, Ready/start entre escenas ni recorrido de GUI. [Evidencia](../auditoria/preparacion-de-bifurcacion.md).

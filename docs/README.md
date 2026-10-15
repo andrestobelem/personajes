@@ -96,3 +96,5 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 - [ADR 0008: circunstancias físicas y percepción](adr/0008-circunstancias-fisicas-y-percepcion.md), [entrevista delegada](auditoria/dialogo-circunstancias.md) y [respuestas del custodio](auditoria/circunstancias-respuestas.md).
 
 - [Cortes privados exactos: implementación y evidencia](auditoria/cortes-privados.md), [ADR 0010](adr/0010-cortes-privados-exactos.md), [entrevista](auditoria/dialogo-cortes-privados.md) y [respuestas](auditoria/cortes-privados-respuestas.md).
+
+- [Preparación de bifurcación: fuente exacta, identidades y recuerdos](auditoria/preparacion-de-bifurcacion.md): transformación interna e ICM separado; publicación durable pendiente.
