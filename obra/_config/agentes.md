@@ -7,7 +7,7 @@ La [decisión posterior del usuario](../../docs/adr/0003-perfiles-de-inferencia-
 | Perfil seleccionable | Proveedor / API Pi | Esfuerzo | Autenticación |
 |---|---|---|---|
 | `gpt-6.1-sol` | `openai-codex` / `openai-codex-responses` | `low` | OAuth Codex |
-| `claude-opus-5-5` | `anthropic` / `anthropic-messages` | `medium` | Credencial propia de Anthropic admitida por el SDK |
+| `claude-opus-5-5` | `anthropic` / `anthropic-messages` | `medium` | Login OAuth de Anthropic en el host |
 
 Antes de una inferencia, comprobar el perfil efectivo y el acceso por proveedor. La incompatibilidad produce un diagnóstico visible; la selección no habilita fallback. Los registros Luna/xhigh se conservan para historia y recuperación sin nuevas inferencias. La ausencia de un perfil en un snapshot histórico conserva su significado anterior; elegir otro modelo requiere editar y validar explícitamente una preparación editable.
 

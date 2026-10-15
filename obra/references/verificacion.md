@@ -53,7 +53,7 @@ Los supuestos siguientes son fixtures conceptuales; no se agregan a la continuid
 30. **Versiones de voz en off:** `nar-…/v1` queda pendiente o se devuelve; sólo `v2` permitida y admitida puede publicarse. Reintentar la publicación no duplica la unidad, no crea un `evt-…` y no entrega palabras al reparto.
 31. **Narración ausente:** la voz en off está deshabilitada, no es necesaria o sigue pendiente. La escena sigue siendo válida y puede observarse sin narración; los hechos confirmados no se rehacen ni se finge una publicación.
 32. **Guías de ElevenLabs:** los 27 dossiers y la guía central proporcionan borradores de diseño. Leerlos o enlazarlos no asigna un `voice_id`, no genera audio y no añade una voz humana a Fang, cuya guía usa señales animales/SFX. El narrador se configura aparte y no cuenta como personaje 28.
-33. **Proveedor y perfil cerrados:** Pi usa el proveedor correspondiente al perfil elegido: `openai-codex` por OAuth para Sol/low o `anthropic` con su propia credencial para Opus/medium. Si no hay autenticación o acceso válido, se registra esa carencia; no se cambia de proveedor, modelo o esfuerzo ni se afirma que ya hubo una sesión.
+33. **Proveedor y perfil cerrados:** Pi usa el proveedor correspondiente al perfil elegido: `openai-codex` por login OAuth de OpenAI para Sol/low o `anthropic` por login OAuth de Anthropic para Opus/medium. Ambos usan las credenciales del host; no hay un login por personaje ni se admite sustituir OAuth por una API key. Si no hay autenticación o acceso válido, se registra esa carencia; no se cambia de proveedor, modelo o esfuerzo ni se afirma que ya hubo una sesión.
 
 ## Instancias, pulso y proyección gráfica
 

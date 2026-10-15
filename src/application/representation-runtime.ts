@@ -7,6 +7,7 @@ import type { IcmActorMemoryReader, IcmMemoryAdapter } from '../adapters/icm.ts'
 import { PiRuntime } from '../adapters/pi.ts';
 import type { CreatePiSessionInput, PiSessionHandle } from '../adapters/pi.ts';
 import { CharacterIdSchema, RunIdSchema } from '../domain/values.ts';
+import type { InferenceProvider } from '../domain/inference-profile.ts';
 import type { WorldIdSource } from '../domain/world.ts';
 import { createActorTurnWorker } from './actor-turn-worker.ts';
 import { createNarratorPiWorker } from './narrator-pi-worker.ts';
@@ -105,7 +106,13 @@ export async function createRepresentationRuntime(input: {
   let admissionSuspended=false;
   let closing: Promise<void> | undefined;
   const projectionController = new AbortController();
-  const oauthPort = createPiOAuthPort({ modelRuntime: runtime.modelRuntime, signal: projectionController.signal, loginOptions: { agentName: 'Personajes' } });
+  const oauthPorts = {
+    'openai-codex': createPiOAuthPort({ modelRuntime: runtime.modelRuntime, signal: projectionController.signal, loginOptions: { agentName: 'Personajes' } }),
+    anthropic: createPiOAuthPort({ provider: 'anthropic', modelRuntime: runtime.modelRuntime, signal: projectionController.signal, loginOptions: { agentName: 'Personajes' } }),
+  };
+  function oauthFor(provider: InferenceProvider) {
+    return oauthPorts[provider];
+  }
   const adapters = new Map<string, Promise<MemoryResources>>();
   const projectionUnavailable = new Set<string>();
   const inFlightOperations = new Set<Promise<void>>();
@@ -501,9 +508,15 @@ export async function createRepresentationRuntime(input: {
 
   return Object.freeze({
     oauth: Object.freeze({
-      status: () => trackOperation(() => oauthPort.status()),
-      login: (interaction: Parameters<typeof oauthPort.login>[0]) => trackOperation(() => oauthPort.login(interaction)),
-      logout: (options?: Parameters<typeof oauthPort.logout>[0]) => trackOperation(() => oauthPort.logout(options)),
+      status: (provider:InferenceProvider) => trackOperation(() => oauthFor(provider).status()),
+      login: (
+        provider: InferenceProvider,
+        interaction: Parameters<(typeof oauthPorts)['openai-codex']['login']>[0],
+      ) => trackOperation(() => oauthFor(provider).login(interaction)),
+      logout: (
+        provider: InferenceProvider,
+        options?: Parameters<(typeof oauthPorts)['openai-codex']['logout']>[0],
+      ) => trackOperation(() => oauthFor(provider).logout(options)),
     }),
     scheduleDelivery,
     scheduleRun,

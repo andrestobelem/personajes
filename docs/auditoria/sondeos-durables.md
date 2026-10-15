@@ -21,7 +21,7 @@ GET status liga su evidencia al job exacto, proveedor, perfil, huella actual y v
 - GET `/api/v1/integrations/pi/access-check/jobs/:id`: job actual y ETag fuerte `pi-access:<id>:r<revision>`.
 - DELETE de ese job: petición cooperativa con CSRF, CAS y clave propia; no finge rollback de una ejecución ya confirmada.
 
-La GUI consulta y recupera trabajos, sigue estados y solicita cancelación. Una respuesta perdida conserva el mismo intento y clave; un 4xx confirmado se distingue de un resultado incierto. Al salir del panel se cancelan las lecturas del navegador, no el trabajo durable. El panel de OAuth sigue siendo específico de OpenAI; no configura credenciales Anthropic.
+La GUI consulta y recupera trabajos, sigue estados y solicita cancelación. Una respuesta perdida conserva el mismo intento y clave; un 4xx confirmado se distingue de un resultado incierto. Al salir del panel se cancelan las lecturas del navegador, no el trabajo durable. En el corte v20, el panel OAuth todavía administraba sólo OpenAI y no configuraba Anthropic; el corte dual posterior corrigió esa limitación (ver [OAuth dual](oauth-dual.md)).
 
 ## Verificación
 

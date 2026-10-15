@@ -28,6 +28,15 @@ export function createRunInspectorApplication(input:{journal:Journal}) {
       const snapshot=WorldSnapshotSchema.parse(selected.snapshot);
       const actor=snapshot.entities.find(entity=>entity.kind==='character'&&entity.characterId===request.characterId);
       if(actor?.kind!=='character')return {kind:'missing'} as const;
+      const inventory=snapshot.inventory.flatMap(entry=>{
+        if(entry.location.kind!=='heldBy'||entry.location.entityId!==actor.entityId)return [];
+        const object=snapshot.entities.find(entity=>entity.kind==='object'&&entity.entityId===entry.objectEntityId);
+        if(object?.kind!=='object')throw new Error('Validated inventory entry has no world object');
+        const knowledge=actor.mind.inventoryKnowledge?.find(item=>item.objectEntityId===object.entityId);
+        return [{objectEntityId:object.entityId,label:object.label,description:object.description,portable:object.portable,
+          ...(object.quantity===undefined?{}:{quantity:object.quantity}),...(object.condition===undefined?{}:{condition:object.condition}),
+          subjectiveKnowledge:knowledge===undefined?null:{...(knowledge.name===undefined?{}:{name:knowledge.name}),description:knowledge.description}}];
+      });
       const knowledge=historical?undefined:input.journal.readActorKnowledge({runId:request.runId,actorId:request.characterId,throughWorldSeq:cut});
       const privateCut=historical?ActorStateCutReadResultSchema.parse(input.journal.readActorStateCut(ActorStateCutRequestSchema.parse({runId:request.runId,actorId:request.characterId,worldRevision:snapshot.revision,worldSeq:snapshot.seq,commitIndex:selected.commitIndex}))):undefined;
       if(privateCut?.kind==='found'&&(privateCut.cut.source.runId!==request.runId||privateCut.cut.actorId!==request.characterId||privateCut.cut.source.worldRevision!==snapshot.revision||privateCut.cut.source.worldSeq!==snapshot.seq||privateCut.cut.source.commitIndex!==selected.commitIndex))throw new Error('Actor checkpoint scope mismatch');
@@ -36,7 +45,7 @@ export function createRunInspectorApplication(input:{journal:Journal}) {
       const offset=checkpoint===undefined?0:Math.min(request.memoryOffset,checkpoint.experiences.length);
       const items=checkpoint?.experiences.slice(offset,offset+request.memoryLimit)??[];
       const view=InspectorViewSchema.parse({kind:'private-character-inspector',runId:request.runId,characterId:request.characterId,label:actor.trueDisplayName,
-        atWorldSeq:snapshot.seq,currentWorldSeq,worldRevision:snapshot.revision,commitIndex:selected.commitIndex,ambiguousSequence:selected.ambiguousSeq,cutKind:historical?(request.worldRevision===undefined?'causal-boundary':'exact-revision'):'current',fictitiousAt:snapshot.clock.instant,source:'committed-world-snapshot',mind:actor.mind,
+        atWorldSeq:snapshot.seq,currentWorldSeq,worldRevision:snapshot.revision,commitIndex:selected.commitIndex,ambiguousSequence:selected.ambiguousSeq,cutKind:historical?(request.worldRevision===undefined?'causal-boundary':'exact-revision'):'current',fictitiousAt:snapshot.clock.instant,source:'committed-world-snapshot',mind:actor.mind,inventory,
         recognitionKnowledge:historical?(checkpoint?.knowledge.kind==='recorded'?{kind:'checkpoint',source:'actor-state-cut',knowledge:checkpoint.knowledge.value,revision:checkpoint.knowledge.revision,atWorldSeq:checkpoint.knowledge.atWorldSeq}:{kind:'unavailable',reason:checkpoint?.knowledge.kind==='unavailable'?checkpoint.knowledge.reason:unavailableReason}):knowledge===undefined?{kind:'unavailable',reason:'current-knowledge-not-recorded'}:{kind:'current',source:'current-actor-knowledge',knowledge:knowledge.knowledge},
         memorySearch:!historical?{kind:'unavailable',reason:'live-memory-search-not-supported'}:checkpoint===undefined?{kind:'unavailable',reason:unavailableReason}:{kind:'checkpoint',source:'admitted-experience-archive',checkpointSource:checkpoint.source,recordedAt:checkpoint.recordedAt,items,offset,limit:request.memoryLimit,total:checkpoint.experiences.length,hasMore:offset+items.length<checkpoint.experiences.length}});
       return {kind:'found' as const,view};

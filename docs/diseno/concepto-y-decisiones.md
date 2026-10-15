@@ -37,7 +37,7 @@ La persona usuaria podrá observar el Escenario gráfico, seguir conversaciones 
 | Persistencia | Guardar cada investigación en su documento Markdown, con fuentes y límites. |
 | ICM | Carpeta obra con organización de contexto y trabajo de agentes en Markdown, incluido el Escenario; investigación y paper guardados en docs. |
 | Runtime | Cada personaje usa una instancia Pi Coding Agent distinta, con SDK, system prompt, contexto, historial, tools y memoria propios. No se intercambian personajes dentro de una sola sesión. |
-| Conexión | Sol/low usa OpenAI Codex por login OAuth; Opus/medium usa Anthropic con acceso propio. Ninguna cuenta está autenticada todavía. |
+| Conexión | Sol/low requiere login OAuth de OpenAI Codex; Opus/medium requiere login OAuth de Anthropic. El acceso se configura por proveedor en el host de Pi y se comparte con las sesiones, no entre sus contextos. Cada personaje mantiene su propia sesión Pi. Una API key no reemplaza el login. Ninguna cuenta está autenticada todavía. |
 | Pulso | Puede existir un coordinador que active instancias, ordene turnos y encamine la confirmación de efectos, sin decidir por los personajes. |
 | Memoria persistente | Investigar e integrar como candidata Infinite Context Memory con SQLite; se distingue del ICM de carpetas. |
 | Modelo | Perfil elegido por representación: GPT-6.1 Sol low predeterminado o Claude Opus 5.5 medium; sin sustitución silenciosa. Luna/xhigh queda sólo para leer registros históricos. |

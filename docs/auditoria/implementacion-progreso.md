@@ -4,6 +4,37 @@ El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 s
 
 Actualización de autenticación: las menciones históricas de este registro a que faltaba conectar Anthropic desde la GUI quedaron superadas por el [corte de OAuth dual](oauth-dual.md), que implementa login OAuth para OpenAI Codex y Anthropic. El login con cuentas reales y su acceso live siguen sin acreditarse.
 
+## C61: navegación de escenas a cortes estructurales exactos
+
+El índice episódico enlaza cada escena con los commits locales exactos de apertura y cierre, y ambos controles saltan a la historia inmutable mediante `commitIndex`. La escena inicial se vincula al evento de apertura del episodio cuando éste la registra. El cliente pagina toda la historia estructural y rechaza páginas incompletas o que cambien durante la lectura. Escenas heredadas o anteriores al journal sin evento local muestran que no hay corte verificable, sin reutilizar cortes de origen como si fueran locales. Una prueba React comprueba los cuatro saltos exactos y la ausencia de enlaces inventados; otra verifica la paginación.
+
+Verificación: TypeScript, build (473 módulos) y **1.173 pruebas aprobadas, cero fallidas y una omitida por ser exclusiva de Linux** (1.174 totales), con ICM 0.11.4 real. `git diff --check` pasó. Este corte acredita la navegación del índice estructural y el cliente paginado; la aceptación visual integral y de escena siguen pendientes.
+
+## C60: sincronización SSE de la vista de representación
+
+La vista React montada se suscribe a `run.refresh`. Cuando cambia el fence de revisión, vuelve a consultar Escenario, conversación, eventos, trabajos y observaciones del Director. Se agregó una prueba con DOM JSDOM, `EventSource` y API controlados: emite dos invalidaciones, verifica la recarga de todas las proyecciones y demora una respuesta vieja hasta después de aceptar el corte nuevo; la respuesta tardía no puede revertir lo visible. No se inicia el servidor del usuario ni se contactan proveedores.
+
+Verificación: la prueba focal `node --import tsx --test tests/run-stage-sse-ui.test.tsx` aprobó **1/1**. Con `TMPDIR=/private/tmp` e ICM 0.11.4 real, `npm run verify` pasó TypeScript y **1.171 pruebas**, cero fallidas y una omitida exclusivamente por requerir Linux (1.172 totales); `npm run build` pasó con 473 módulos y `git diff --check` quedó limpio. La prueba acredita el comportamiento de `RunStageWorkspace`, no una aceptación Chromium, la actualización de otros paneles ni recuperación integral con trabajos en curso; esas verificaciones siguen pendientes.
+
+## Corte C58: intervención HTTP hasta respuesta actoral
+
+La prueba integrada atraviesa la sesión interlocutora autenticada, el endpoint HTTP, el commit durable del testimonio, la entrega al personaje, el runtime Pi/Continuista y la publicación en la conversación. Verifica que reintentar la misma operación idempotente no duplica la respuesta. Usa SQLite/ICM reales y el SDK Pi con transporte de modelo controlado; no hace login ni afirma inferencia de OpenAI/Anthropic. El host sólo expone el seam de scheduling de test cuando se inyecta explícitamente ese transporte; no se configura por HTTP ni por entorno.
+
+Verificación global C58: `npm run verify` pasó con TypeScript correcto y **1.169 pruebas aprobadas, cero fallidas y una omitida por requerir Linux** (1.170 totales), con ICM 0.11.4 real. `npm run build` pasó y transformó 473 módulos; `git diff --check` pasó. El recorrido integrado usa transporte controlado y no acredita login ni inferencia live.
+
+
+## Corte C57: selección explícita de proveedor OAuth
+
+El puerto OAuth del runtime de representación exige ahora el proveedor en cada lectura de estado, login y desconexión. OpenAI Codex y Anthropic usan el mismo ModelRuntime y almacén privado de credenciales del host; las sesiones Pi de cada personaje siguen separadas. Se elimina así el default implícito a Codex que podía ocultar una consulta Anthropic hecha a través de la API interna. No permite API keys ni acredita login real.
+
+Verificación global con ICM 0.11.4 real: TypeScript correcto; **1.168 pruebas aprobadas, cero fallidas y una omitida por requerir Linux**. `npm run build` transformó 473 módulos. La auditoría de los hashes de catálogo descubrió que esta edición de la investigación cambiaba su hash registrado; el manifiesto se actualizó y las 12 pruebas focales de catálogo y después la suite global pasaron. Login real, acceso live y aceptación integral de los 77 requisitos siguen pendientes.
+
+## Corte C56: posesiones en el Escenario y el Inspector
+
+El productor del Stage ahora incluye objetos en posesión de personajes presentes en la escena y en lugares visibles, sin inventar coordenadas; los portadores ausentes no filtran sus objetos. El Inspector opt-in reconstruye las pertenencias desde el snapshot confirmado exacto y presenta por separado los atributos materiales y el conocimiento subjetivo del personaje. Una prueba integra un cambio durable de ubicación en SQLite con el corte histórico/anterior, corte actual, proyección pública y vista privada. Ver [auditoría C56](inspector-posesiones.md).
+
+Gate: TypeScript y **1.168 pruebas aprobadas, cero fallidas y una omitida por requerir Linux**. Build: 473 módulos. El objetivo sigue abierto; no se cierra ESC-02, MEM-02 ni UI-05 porque falta aceptación visual integral y permanecen otras brechas de producto.
+
 ## Corte 42: preparación sonora, configuración efectiva y admisión
 
 El editor inicial reemplaza la sección de audio sin controles; el panel de voces ahora edita modo, slots y cuotas, y ofrece conciliación explícita cuando cambia la preparación base. Referencias opacas se conservan sin presumir vigencia y guardar no genera audio. El navegador verificó Ready r1, configuración sonora r1, edición de base r2, conciliación sonora r2 y reapertura/apagado en r3 conservando cuota 2.
@@ -461,3 +492,9 @@ La prueba con ICM real publica un corte histórico, exporta backup `.pba`, elimi
 ## Corte 54 — edición integral de expedientes
 
 Implementados formulario completo, fuente parental exacta, preview persistente con diferencias, autor/fecha/motivo del host y confirmación que crea adaptación independiente sin mutar originales ni actores preparados. Reinicio/reapertura verificados gráficamente. La revisión detectó y permitió corregir un replay que omitía verificar el import; ahora ambos sellos y el linaje se verifican. Autorías heredadas se presentan como declaraciones. TypeScript/build correctos; **1.160 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.161 totales), con ICM real. Revisión independiente: 18 focales sin bloqueantes tras corrección. Objetivo completo y 77 requisitos continúan pendientes de aceptación integral. [Evidencia y límites](edicion-de-expedientes.md).
+
+## Corte 59 — agotamiento de presupuesto durante actuación activa
+
+La prueba integrada entrega una intervención a una instancia Pi en una obra activa con SQLite/ICM reales y transporte controlado. Con una llamada permitida, la petición siguiente se deniega antes del transporte, el runtime pausa la representación y RunView conserva perfil, estado agotado y saldo exactos; el render de controles muestra pausa, agotamiento y ausencia de sustitución de modelo. El Escenario no gana un hecho por la solicitud denegada. La revisión documental alinea el alcance del ledger Pi común con los cinco roles que infieren y distingue las cuotas durables de audio, que se proyectan desde un ledger separado. [Evidencia y límites](presupuesto-representacion.md).
+
+Verificación: TypeScript y build aprobados (473 módulos); **1.170 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux** (1.171 totales), con ICM 0.11.4 e incluyendo C59. No hubo login ni inferencia live de proveedor; no se atribuyen mediciones de tokens/costo ni audio remoto. El objetivo y la aceptación integral de los 77 requisitos siguen abiertos.

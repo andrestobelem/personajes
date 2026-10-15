@@ -21,7 +21,7 @@ import {
 } from "../src/web/stage-format.ts";
 import { stageFixture, conversationFixture } from "./fixtures/run-stage.ts";
 
-test("public SVG and accessible index preserve confirmed geometry and held inventory without fabricated positions", () => {
+test("stage renderer displays confirmed held inventory without fabricating object positions", () => {
   const stage = stageFixture();
   const data = stageMapData(stage);
   const html = renderToStaticMarkup(React.createElement(StageMap, { data }));

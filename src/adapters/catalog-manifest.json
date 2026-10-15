@@ -289,7 +289,7 @@
       "title": "Get Smart: ritmo y YouTube",
       "kind": "research",
       "path": "docs/investigaciones/get-smart-ritmo-youtube.md",
-      "sha256": "0a904246fdaf1523721fe1c967ee53d8ca249f4c9139f7afd92bac6b36ae191e"
+      "sha256": "bfe5cdc3852f8e10c28bddb69403ca76e69ecb83a4d8eba4ebd1621278c3deab"
     },
     {
       "id": "research-icm-contexto",
@@ -317,7 +317,7 @@
       "title": "Pi Coding Agent runtime",
       "kind": "research",
       "path": "docs/investigaciones/pi-coding-agent-runtime.md",
-      "sha256": "7a37ea6553a663b27d2e8ab6bdc299992fcb3a5cd3144b5634f2d7c090976d53"
+      "sha256": "2cfd56f5597f34f480bd54ae1abab894a9045640349581144049362f497495ca"
     },
     {
       "id": "research-propp-greimas",
@@ -387,7 +387,7 @@
       "title": "Inventario de videos de Get Smart",
       "kind": "external-material-inventory",
       "path": "docs/fuentes/youtube-get-smart/inventario.csv",
-      "sha256": "93c94fe8eea374b4d411fc6a71f169393c5ade8f296e88ff2e77573661974d26"
+      "sha256": "8ae42dce607d1e478525dce5b6700dfe56a4509e00413a370434aa5b140fd4f7"
     }
   ],
   "avatarManifestPath": "docs/assets/avatars/get-smart/manifest.json",

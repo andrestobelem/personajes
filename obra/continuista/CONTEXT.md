@@ -31,4 +31,6 @@ Una revisión en [decisiones](../stages/03-moderacion/output/revisiones-respuest
 
 La revisión identifica propuesta, versión exacta, estado y, cuando está completa, decisión. Sólo **permitir** habilita la resolución y posible publicación de esa versión, junto con la admisión del Regidor. Reformular devuelve trabajo al mismo actor; rechazar no sustituye su voz por texto del continuista.
 
-Esta es una especificación en Markdown. No se ha implementado enforcement en un runtime ni demostrado que un LLM detecte todos los errores. Se usa la misma [configuración de modelo](../_config/agentes.md): el perfil elegido por representación, Sol bajo u Opus medio.
+## Estado de implementación
+
+El runtime ya coordina la revisión de una versión exacta con la admisión mecánica del Regidor antes de publicar; el host mantiene autoridad sobre origen, canal, capabilities, allowlist y efectos. Ver la [auditoría del Regidor mecánico](../../docs/auditoria/regidor-mecanico.md) y la [trazabilidad de aceptación](../../docs/auditoria/trazabilidad-prd.md#act-07). Las pruebas locales no demuestran que un LLM detecte todos los errores ni sustituyen evaluación semántica adversarial con cuentas reales. Se usa la misma [configuración de modelo](../_config/agentes.md): el perfil elegido por representación, Sol bajo u Opus medio.

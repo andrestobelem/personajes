@@ -12,6 +12,7 @@ import { createRunInspectorApplication } from '../src/application/run-inspector.
 import { SessionCreatedSchema } from '../src/domain/http.ts';
 import { InspectorViewSchema } from '../src/domain/run-inspector.ts';
 import { WorldSnapshotSchema,ActorKnowledgeSchema } from '../src/domain/world-schema.ts';
+import { projectRunStage } from '../src/application/run-observation.ts';
 import { createLocalHttpServer } from '../src/server/http.ts';
 import { InspectorPanel,PrivateMindView } from '../src/web/InspectorPanel.tsx';
 import { buildInspectorPreferenceRequest } from '../src/web/run-inspector-client.ts';
@@ -30,6 +31,48 @@ test('historical inspector reads committed snapshot only, never latest recogniti
     assert.equal(application.inspect({runId:fixture.claim.runId,characterId:'nonexistent'}).kind,'missing');
     assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.claim.runId})?.lifecycle,'running');
   } finally {fixture.close();}
+});
+
+test('inspector shows only selected character possessions at the selected durable cut; public stage projects possessions of visible holders',async()=>{
+  const fixture=await setup();const directory=mkdtempSync(join(tmpdir(),'personajes-inspector-inventory-'));const journal=openJournal({path:join(directory,'world.sqlite')});
+  try {
+    const original=fixture.configuration.worldSnapshot;
+    const actor=original.entities.find(entity=>entity.kind==='character'&&entity.characterId===actorId);assert.ok(actor?.kind==='character');
+    const other=original.entities.find(entity=>entity.kind==='character'&&entity.characterId==='oculto-prueba');assert.ok(other?.kind==='character');
+    const prepared=fixture.configuration.roster.preparedCharacters.find(character=>character.characterId===actorId);assert.ok(prepared);
+    const initialObjectId=randomUUID();const otherObjectId=randomUUID();const floorObjectId=randomUUID();
+    const initial=WorldSnapshotSchema.parse({...original,revision:0,seq:0,
+      entities:[...original.entities.map(entity=>entity===actor?{...actor,capabilities:[...actor.capabilities,'take' as const],mind:{...actor.mind,inventoryKnowledge:[{objectEntityId:initialObjectId,name:'Sobre azul',description:'El personaje lo reconoce por una marca propia.'} ]}}:entity===other?{...other,mind:{...other.mind,inventoryKnowledge:[{objectEntityId:otherObjectId,name:'Objeto ajeno',description:'Conocimiento privado de otro personaje.'}]}}:entity),
+        {kind:'object',entityId:initialObjectId,label:'Sobre',description:'Sobre de papel.',collisionRadius:0,blocksMovement:false,portable:true,quantity:2,condition:'usable'},
+        {kind:'object',entityId:otherObjectId,label:'Objeto de otra persona',description:'No pertenece al personaje inspeccionado.',collisionRadius:0,blocksMovement:false,portable:true},
+        {kind:'object',entityId:floorObjectId,label:'Reloj en el suelo',description:'Reloj de bolsillo.',collisionRadius:0,blocksMovement:false,portable:true,condition:'damaged'}],
+      inventory:[{objectEntityId:initialObjectId,location:{kind:'heldBy',entityId:actor.entityId},revision:0},
+        {objectEntityId:otherObjectId,location:{kind:'heldBy',entityId:other.entityId},revision:0},
+        {objectEntityId:floorObjectId,location:{kind:'atPlace',placeId:'sala',position:{x:2,y:2}},revision:0}]});
+    journal.registerWorldRun({initialSnapshot:initial,configurationRevision:fixture.configuration.configRevision,configuration:{synthetic:true},
+      continuityFence:{kind:'prepared-contexts',atWorldSeq:initial.seq,contexts:[{actorId,continuityId:prepared.continuity.continuityId,continuityRevision:prepared.continuity.revision,continuityContentHash:prepared.continuity.contentHash,identityVersion:prepared.identityVersion,preparedContextHash:'a'.repeat(64)}]},lifecycle:'running'});
+    const privateKnowledge=ActorKnowledgeSchema.parse({runId:initial.runId,actorId,bindings:[{kind:'entity',handle:'reloj-en-el-suelo',entityId:floorObjectId}]});
+    assert.deepEqual(journal.compareAndSwapActorKnowledge({kind:'actor-knowledge-cas',runId:initial.runId,actorId,expectedWorldRevision:initial.revision,expectedWorldSeq:initial.seq,
+      expectedContinuity:{continuityId:prepared.continuity.continuityId,revision:prepared.continuity.revision,contentHash:prepared.continuity.contentHash},expectedKnowledgeRevision:0,knowledge:privateKnowledge}),{kind:'stored',knowledgeRevision:1});
+    const proposalId=randomUUID();const attempt={kind:'take' as const,attemptId:randomUUID(),runId:initial.runId,actorId,expectedRevision:initial.revision,objectHandle:'reloj-en-el-suelo'};
+    assert.equal(journal.registerWorldProposal({runId:initial.runId,proposalId,version:1,jobId:randomUUID(),generation:0,proposalSlot:0,attempt}),'stored');
+    const committed=journal.commitWorldAttempt({runId:initial.runId,proposalId,version:1,ids:fixture.ids});assert.equal(committed.resolution.kind,'applied');
+    const application=createRunInspectorApplication({journal});
+    const past=application.inspect({runId:initial.runId,characterId:actorId,atWorldSeq:initial.seq});
+    const current=application.inspect({runId:initial.runId,characterId:actorId});
+    assert.equal(past.kind,'found');assert.equal(current.kind,'found');if(past.kind!=='found'||current.kind!=='found')assert.fail('Missing inventory cut');
+    assert.deepEqual(past.view.inventory.map(item=>item.objectEntityId),[initialObjectId]);
+    assert.equal(past.view.inventory[0]?.label,'Sobre');assert.deepEqual(past.view.inventory[0]?.subjectiveKnowledge,{name:'Sobre azul',description:'El personaje lo reconoce por una marca propia.'});
+    assert.deepEqual(current.view.inventory.map(item=>item.objectEntityId),[initialObjectId,floorObjectId]);
+    assert.equal(current.view.inventory[1]?.condition,'damaged');assert.equal(current.view.inventory[1]?.subjectiveKnowledge,null);
+    assert.doesNotMatch(JSON.stringify(current.view),/Objeto de otra persona|Conocimiento privado de otro personaje/);
+    const stage=projectRunStage({snapshot:WorldSnapshotSchema.parse(journal.loadWorld({runId:initial.runId})),configuration:fixture.configuration,lifecycle:'running'});
+    const publicObjects=stage.entities.filter(entity=>entity.kind==='object');assert.deepEqual(publicObjects.map(item=>item.entityId),[initialObjectId,floorObjectId]);
+    assert.ok(publicObjects.every(item=>item.kind==='object'&&item.placeId===null&&item.position===null&&item.holderEntityId===actor.entityId));
+    assert.doesNotMatch(JSON.stringify(stage),/Objeto de otra persona|Conocimiento privado de otro personaje/);
+    const html=renderToStaticMarkup(React.createElement(PrivateMindView,{view:current.view}));
+    assert.match(html,/Objetos en posesión en este corte/);assert.match(html,/Conocimiento subjetivo del personaje/);assert.match(html,/Reloj en el suelo/);
+  } finally {journal.close();fixture.close();rmSync(directory,{recursive:true,force:true});}
 });
 
 test('current inspector includes zero-event subjective revision; explicit same sequence stays causal and never reads latest knowledge',async()=>{

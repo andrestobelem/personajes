@@ -14,7 +14,7 @@ import { resolveConfiguredSessionMode } from '../application/production-prefligh
 import { projectHumanInteractionContext } from '../domain/interaction.ts';
 import { HumanParticipantProfilesSchema } from '../domain/production.ts';
 import { createWorldDeliverySupervisor } from '../application/world-delivery-supervisor.ts';
-import { createRepresentationRuntime } from '../application/representation-runtime.ts';
+import { createRepresentationRuntime, type ControlledPiTestTransport } from '../application/representation-runtime.ts';
 import { createRunLifecycleApplication } from '../application/run-lifecycle.ts';
 import { PiRuntime, type CreatePiSessionInput, type PiSessionHandle } from '../adapters/pi.ts';
 import { createPiOAuthPort } from '../application/pi-oauth.ts';
@@ -54,6 +54,8 @@ export async function createProductionHost(input:{
  configureRestorePort?:(forkPort:BackupRestorePort)=>BackupRestorePort;
  /** Trusted composition seam for controlled local SDK integration; never read from HTTP or environment. */
  configuratorSessionFactory?:(input:CreatePiSessionInput)=>Promise<PiSessionHandle>;
+ /** Explicit controlled transport for production-host integration tests; never read from HTTP or environment. */
+ testPiTransport?:ControlledPiTestTransport;
 }){
  const catalog=input.catalog;
  const diagnosticSink=(diagnostic:unknown)=>{try{input.onDiagnostic?.(diagnostic);}catch{/* Observers do not control workers. */}};
@@ -142,6 +144,7 @@ try {
     forks = createForkRuntime({host, binaryPath: input.icmBinaryPath});
     representation = await createRepresentationRuntime({
       host, piRuntime, icmBinaryPath: input.icmBinaryPath,
+      ...(input.testPiTransport === undefined ? {} : { testTransport: input.testPiTransport }),
       onDiagnostic: (diagnostic) => diagnosticSink({ kind: 'representationDiagnostic', diagnostic }),
       onWorldCommitted: event => voices?.onWorldCommitted({runId:event.runId,eventIds:event.eventIds}),
       onNarrationPublished: event => voices?.onNarrationPublished(event),
@@ -179,6 +182,9 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
     ...(preflightJobs === undefined ? {} : { preflights: preflightJobs }),
     ...(representation === undefined ? {} : { runtime: representation }),
     ...(configuredVoices===undefined?{}:{readVoiceBudget:(runId:string)=>configuredVoices.service.budget(runId),readVoiceReadiness:(request:{runId:string;configRevision:number})=>configuredVoices.readPreflightReadiness(request)}),
+  });
+  const testOnly=input.testPiTransport===undefined||representation===undefined?undefined:Object.freeze({
+    scheduleRun:(runId:string)=>representation!.scheduleRun({runId}),
   });
   const httpOptions={
     admissionBarrier:input.admissionBarrier,
@@ -247,7 +253,8 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
  // A successfully reopened host may outlive that operation; later close receives
  // a fresh capability explicitly or acquires the ordinary ownership gate.
  closeOptions=undefined;
- return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,httpOptions,recover,close});
+ return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,httpOptions,recover,close,
+  ...(testOnly===undefined?{}:{testOnly})});
 } catch (error) {
   try { await close(); } catch (closeError) { throw new AggregateError([error,closeError], 'Production setup and cleanup failed'); }
   throw error;

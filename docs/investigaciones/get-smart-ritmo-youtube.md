@@ -1,10 +1,10 @@
 # Get Smart: ritmo de diálogo, doblaje y conversación interactiva
 
-Investigación realizada el 14 de octubre de 2026. Alcance: la serie original de 1965–1970. Pedido del usuario: los personajes hablan doblados al español y la longitud de sus respuestas y conversaciones debe seguir el ritmo de un episodio de *El Superagente 86*; investigar en YouTube.
+Investigación iniciada el 14 de octubre de 2026; actualización de fuentes el 15 de octubre. Alcance: la serie original de 1965–1970. Pedido del usuario: los personajes hablan doblados al español y la longitud de sus respuestas y conversaciones debe seguir el ritmo de un episodio de *El Superagente 86*; investigar en YouTube.
 
 ## Resultado y límite de la evidencia
 
-Se localizaron y abrieron cuatro videos en YouTube, se comprobaron títulos, canales, duración visible y disponibilidad de texto, y se inspeccionaron fotogramas de tres de ellos. **Los cuatro mostraron “Subtítulos no disponibles”; la exportación de transcripción confirmó que no había una disponible.** No se obtuvo audio interpretable por el modelo en esta sesión. Reproducir brevemente un video durante la navegación no equivale a haberlo escuchado ni analizado.
+En la búsqueda inicial se localizaron cuatro videos; se comprobaron títulos, canales, duración visible y disponibilidad de texto, y se inspeccionaron fotogramas de tres. Los cuatro mostraron “Subtítulos no disponibles” y la exportación confirmó que no tenían transcripción. El 15/10 se abrió una quinta carga: su reproductor también indicó que no había subtítulos. **Esta quinta carga dura 3:04, así que no es un episodio completo aunque el título incluya “1965”.** No se obtuvo audio interpretable por el modelo en esta sesión. Reproducir brevemente un video durante la navegación no equivale a haberlo escuchado ni analizado.
 
 Por tanto, hay un corpus localizado y una propuesta de diseño, pero **no una medición audiovisual terminada de longitud de turnos**. No se presentan medias de palabras, segundos por intervención, pausas, interrupciones ni velocidad de habla. Tampoco se afirma haber analizado veinte intervenciones. Las duraciones del reproductor son datos verificables de las cargas concretas; no son duraciones de conversación ni de episodio original sin editar.
 
@@ -18,6 +18,7 @@ El idioma español es una decisión expresa del usuario. Usar como referencia el
 | [L15b96NGuWw — Superagente 86 Siegfried por primera vez](https://www.youtube.com/watch?v=L15b96NGuWw) | gastontube; 07/06/2008, según la página indexada | 3:53 | La descripción anuncia la primera aparición. Fotograma 00:30: Max y Siegfried en un banco de exterior nocturno. Asociación documental con *A Spy for a Spy*; no se verificaron todos los cortes. |
 | [-tlo3MWcp9Q — Lo Mejor Del Super Agente 86 7 Jaime](https://www.youtube.com/watch?v=-tlo3MWcp9Q) | Gabriel Munera; 05/09/2018, fecha de la descripción expandida | 13:38 | Compilación que identifica a Jaime como Hymie. Fotograma 00:06: Hymie, Max y otro personaje con guardapolvo en un entorno de laboratorio. No atribuir toda la compilación a un episodio ni considerar sus cortes continuidad original. |
 | [VyvNuxrNBNE — Super Agente 86 (Capítulo 1 - Temporada 1)](https://www.youtube.com/watch?v=VyvNuxrNBNE) | Estacion 789; estreno de la carga 19/10/2025, descripción expandida | 25:35 | Presentado por el canal como el piloto. Se inspeccionaron página y controles; no se visionó completo. Es candidato para estudiar ritmo de episodio, condicionado al cotejo de integridad y audio. |
+| [_9wEAFpQ5BM — SUPER AGENTE 86 1965 (Español Latino)](https://www.youtube.com/watch?v=_9wEAFpQ5BM) | Generación Retro; 23/04/2017, datos visibles en la página al consultar el 15/10/2026 | 3:04 | El reproductor muestra “Subtítulos no disponibles”. La duración descarta que sea un episodio completo; no se identificó el fragmento ni se autenticó la pista de audio. No se midieron turnos ni se inspeccionó un fotograma concreto. |
 
 En la carga de Siegfried, la lista de resultados anunciaba 3:54 y el reproductor ya cargado, 3:53; para el inventario se usa este último dato. La selección de Hymie aparecía como 13:39 en recomendaciones y como 13:38 en el reproductor. Estas diferencias de presentación son otra razón para no deducir tiempos de diálogo de las miniaturas.
 
@@ -41,10 +42,10 @@ La [introducción en español latino de RetroPedia Ar](https://www.youtube.com/w
 
 | Dimensión | Evidencia obtenida | Estado |
 |---|---|---|
-| Disponibilidad de cuatro cargas | Páginas abiertas, títulos y reproductores | Verificado al consultar; puede cambiar |
+| Disponibilidad de cinco cargas | Páginas abiertas, títulos y reproductores | Verificado al consultar; puede cambiar |
 | Duración de cada carga | Contador visible del reproductor | Verificada, resolución de segundos |
 | Presencia visual en tres puntos | 00:20 del cono, 00:30 de Siegfried, 00:06 de Hymie | Fotogramas inspeccionados, no escenas completas |
-| Transcripción temporal | Cuatro intentos de exportación y control de subtítulos | No disponible |
+| Transcripción temporal | Cuatro exportaciones sin resultado; la quinta carga mostró subtítulos no disponibles en el reproductor | No disponible |
 | Número de palabras y turnos | Requiere texto o escucha contrastable | No medido |
 | Silencios, risas y solapamientos | Requiere audio y continuidad temporal | No medido |
 | Acento y edición de doblaje | Requiere escucha e identificación de versión | No autenticado |
@@ -130,4 +131,4 @@ Un episodio íntegro permitirá contrastar exposición, escenas de acción, comp
 - Se distingue una pausa escénica de la latencia técnica, y la noche no cierra automáticamente el conflicto.
 - Ningún umbral se presenta como empírico hasta disponer del corpus anotado que lo sustenta.
 
-**Estado final:** investigación de fuentes y criterios de diseño guardada; cuatro cargas verificadas y tres puntos visuales inspeccionados. La escucha del doblaje, la medición de turnos y la validación de ritmo sobre un episodio completo quedan expresamente pendientes por falta de audio/transcripción interpretable en las herramientas usadas.
+**Estado al 15/10/2026:** investigación de fuentes y criterios de diseño guardada; cinco cargas verificadas y tres puntos visuales inspeccionados. La quinta es un fragmento de 3:04, no un episodio. La escucha del doblaje, la medición de turnos y la validación de ritmo sobre un episodio completo quedan expresamente pendientes por falta de audio/transcripción interpretable en las herramientas usadas.

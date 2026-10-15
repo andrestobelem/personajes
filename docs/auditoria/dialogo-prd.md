@@ -2,7 +2,7 @@
 
 Ronda de diseño solicitada para convertir el concepto de la obra en un PRD completo y comprobable. Este registro distingue compromisos expresos, reglas derivadas, propuestas de agentes y falta de información. Las respuestas del custodio no se atribuyen al usuario. No se inicia una representación ni se declara implementado lo que los documentos describen como futuro.
 
-**Nota de vigencia:** este diálogo conserva el perfil de modelo que estaba vigente al realizar la entrevista. El pedido posterior de Sol 6.1 `low` u Opus 5.5 `medium` quedó registrado en [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) y reemplaza esas menciones para representaciones nuevas. Las preguntas y respuestas siguientes son un registro histórico del proceso, no la configuración normativa actual.
+**Nota de vigencia:** este diálogo conserva el perfil y alcance de autenticación que estaban vigentes al realizar la entrevista. El pedido posterior de Sol 6.1 `low` u Opus 5.5 `medium` quedó registrado en [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) y reemplaza esas menciones para representaciones nuevas. La decisión vigente exige login OAuth del proveedor elegido —OpenAI Codex o Anthropic— a nivel del host; una API key no lo sustituye y cada personaje conserva su sesión Pi separada. Ver [auditoría OAuth dual](oauth-dual.md). Las preguntas y respuestas siguientes son un registro histórico del proceso, no la configuración normativa actual.
 
 ## Alcance y fuentes revisadas
 

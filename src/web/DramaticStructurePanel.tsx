@@ -2,12 +2,12 @@ import React from 'react';
 import { z } from 'zod';
 import type { RunStageView } from '../domain/run-observation.ts';
 import type { DramaticEpisodeViewSchema, DramaticStructureEventSchema } from '../domain/dramatic-structure.ts';
-import { createRunDramaticStructureClient, type DramaticStructureDocument, type StructureMutation, type StructureMutationIntent } from './run-dramatic-structure-client.ts';
+import { createRunDramaticStructureClient, type DramaticStructureDocument, type RunDramaticStructureClient, type StructureMutation, type StructureMutationIntent } from './run-dramatic-structure-client.ts';
 
-const client = createRunDramaticStructureClient();
+const defaultClient = createRunDramaticStructureClient();
 type StructureEvent = z.infer<typeof DramaticStructureEventSchema>;
 type ConfirmedEvent = { eventId: string; summary: string };
-type SceneOptions = Awaited<ReturnType<typeof client.sceneOptions>>;
+type SceneOptions = Awaited<ReturnType<typeof defaultClient.sceneOptions>>;
 type HistoricalCut = { worldRevision: number; worldSeq: number };
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; document: DramaticStructureDocument; events: StructureEvent[]; options: SceneOptions | null };
 type Pending = StructureMutationIntent & { bodyLabel: string };
@@ -17,6 +17,28 @@ function sceneName(event: StructureEvent): { id: string; label: string } | undef
   if (event.kind !== 'sceneOpened') return undefined;
   const scene = z.object({ id: z.string().uuid(), label: z.string().min(1).max(200) }).safeParse(payload['scene']);
   return scene.success ? scene.data : undefined;
+}
+type SceneCuts = { openingCommitIndex?: number; closingCommitIndex?: number };
+function sceneCutsById(events: readonly StructureEvent[]): Map<string, SceneCuts> {
+  const cuts = new Map<string, SceneCuts>();
+  function record(sceneId: string, cut: 'openingCommitIndex' | 'closingCommitIndex', commitIndex: number) {
+    const current = cuts.get(sceneId) ?? {};
+    if (current[cut] === undefined) current[cut] = commitIndex;
+    cuts.set(sceneId, current);
+  }
+  for (const event of events) {
+    if (event.kind === 'episodeOpened') {
+      const initialSceneId = z.string().uuid().safeParse(event.payload['associatedInitialSceneId']);
+      if (initialSceneId.success) record(initialSceneId.data, 'openingCommitIndex', event.commitIndex);
+    } else if (event.kind === 'sceneOpened') {
+      const scene = sceneName(event);
+      if (scene !== undefined) record(scene.id, 'openingCommitIndex', event.commitIndex);
+    } else if (event.kind === 'sceneClosed') {
+      const sceneId = z.string().uuid().safeParse(event.payload['sceneId']);
+      if (sceneId.success) record(sceneId.data, 'closingCommitIndex', event.commitIndex);
+    }
+  }
+  return cuts;
 }
 const eventNames: Record<StructureEvent['kind'], string> = {
   episodeOpened: 'Se abrió un episodio', episodeClosed: 'Se cerró un episodio',
@@ -39,7 +61,7 @@ export function EpisodeForkOrigins({ episode }: { episode: z.infer<typeof Dramat
 }
 
 export function DramaticStructurePanel({
-  runId, lifecycle, active, refreshToken, confirmedEvents, historicalCut, onSelectCommit, derivedPreparation = false, sceneLabels = [],
+  runId, lifecycle, active, refreshToken, confirmedEvents, historicalCut, onSelectCommit, derivedPreparation = false, sceneLabels = [], structureClient = defaultClient,
 }: {
   runId: string;
   lifecycle: RunStageView['lifecycle'];
@@ -50,6 +72,7 @@ export function DramaticStructurePanel({
   sceneLabels?: readonly { id: string; label: string }[];
   historicalCut?: HistoricalCut;
   onSelectCommit?: (commitIndex: number) => void;
+  structureClient?: RunDramaticStructureClient;
 }) {
   const [state, setState] = React.useState<State>({ kind: 'loading' });
   const [message, setMessage] = React.useState<string | null>(null);
@@ -73,12 +96,12 @@ export function DramaticStructurePanel({
     const controller = new AbortController();
     setState({ kind: 'loading' });
     const load = historicalCut === undefined
-      ? Promise.all([client.read(runId, controller.signal), client.events(runId, controller.signal), client.sceneOptions(runId, controller.signal)])
-        .then(([document, page, options]) => ({ document, events: page.events, options }))
-      : client.read(runId, controller.signal, historicalCut).then(async (document) => {
+      ? Promise.all([structureClient.read(runId, controller.signal), structureClient.allEvents(runId, controller.signal), structureClient.sceneOptions(runId, controller.signal)])
+        .then(([document, history, options]) => ({ document, events: history.events, options }))
+      : structureClient.read(runId, controller.signal, historicalCut).then(async (document) => {
         if (document.value.commitIndex === undefined) throw new Error('El corte histórico no informó commitIndex.');
-        const page = await client.events(runId, controller.signal, document.value.commitIndex);
-        return { document, events: page.events, options: null };
+        const history = await structureClient.allEvents(runId, controller.signal, document.value.commitIndex);
+        return { document, events: history.events, options: null };
       });
     void load.then(({ document, events, options }) => {
         if (!controller.signal.aborted) setState({ kind: 'ready', document, events, options });
@@ -87,7 +110,7 @@ export function DramaticStructurePanel({
         if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : 'No se pudo leer la estructura de la obra.' });
       });
     return () => controller.abort();
-  }, [runId, active, refreshToken, structureRefresh, historicalCut?.worldRevision, historicalCut?.worldSeq]);
+  }, [runId, active, refreshToken, structureRefresh, structureClient, historicalCut?.worldRevision, historicalCut?.worldSeq]);
 
   const structure = state.kind === 'ready' ? state.document.value : undefined;
   const currentEpisode = structure?.episodes.find((episode) => episode.episodeId === structure.activeEpisodeId);
@@ -105,6 +128,7 @@ export function DramaticStructurePanel({
   }
   for (const scene of structure?.unassignedLegacyScenes ?? []) labels.set(scene.id, scene.label);
   const allScenes = currentEpisode?.sceneIds ?? [];
+  const sceneCuts = state.kind === 'ready' ? sceneCutsById(state.events) : new Map<string, SceneCuts>();
 
   async function submit(mutation: StructureMutation, bodyLabel: string, reuse?: Pending) {
     if (state.kind !== 'ready') return;
@@ -114,7 +138,7 @@ export function DramaticStructurePanel({
     setMessage(null);
     const controller = new AbortController();
     try {
-      const result = await client.mutate(intent, controller.signal);
+      const result = await structureClient.mutate(intent, controller.signal);
       if (result.kind === 'stored' || result.kind === 'existing') {
         setPending(null);
         setMessage(result.kind === 'existing' ? `La operación «${bodyLabel}» ya estaba confirmada; se recuperó el mismo recibo.` : `La operación «${bodyLabel}» quedó confirmada en la historia estructural.`);
@@ -161,12 +185,29 @@ export function DramaticStructurePanel({
         <EpisodeForkOrigins episode={episode} />
         <p className="muted">{(episode.forkOrigins?.length ?? 0) > 0 ? 'Base local heredada: commit ' : 'Apertura: commit '}{episode.openingCut.commitIndex} · secuencia {episode.openingCut.worldSeq}
           {episode.closingCut === null ? ' · sin corte de cierre' : ` · ${(episode.forkOrigins?.length ?? 0) > 0 && episode.closingCut.commitIndex === 0 ? 'cierre de base heredada' : 'cierre'}: commit ${episode.closingCut.commitIndex} · secuencia ${episode.closingCut.worldSeq}`}</p>
-        {episode.sceneIds.length === 0 ? <p>Sin escenas registradas.</p> : <ul>{episode.sceneIds.map((id) => <li key={id}>{labels.get(id) ?? `Escena ${id}`}{id === structure.activeSceneId ? ' · abierta' : ''}</li>)}</ul>}
+        {episode.sceneIds.length === 0 ? <p>Sin escenas registradas.</p> : <ul>{episode.sceneIds.map((id) => {
+          const label = labels.get(id) ?? `Escena ${id}`;
+          const cuts = sceneCuts.get(id);
+          return <li key={id}><strong>{label}</strong>{id === structure.activeSceneId ? ' · abierta' : ''}
+            <ul aria-label={`Cortes de ${label}`}>
+              <li>{cuts?.openingCommitIndex === undefined
+                ? 'Apertura: sin evento local verificable'
+                : onSelectCommit === undefined
+                  ? `Apertura: commit ${cuts.openingCommitIndex}`
+                  : <button type="button" aria-label={`Ver apertura de ${label} (commit ${cuts.openingCommitIndex})`} onClick={() => onSelectCommit(cuts.openingCommitIndex!)}>Ver apertura · commit {cuts.openingCommitIndex}</button>}</li>
+              <li>{cuts?.closingCommitIndex !== undefined
+                ? onSelectCommit === undefined
+                  ? `Cierre: commit ${cuts.closingCommitIndex}`
+                  : <button type="button" aria-label={`Ver cierre de ${label} (commit ${cuts.closingCommitIndex})`} onClick={() => onSelectCommit(cuts.closingCommitIndex!)}>Ver cierre · commit {cuts.closingCommitIndex}</button>
+                : id === structure.activeSceneId ? 'Cierre: escena abierta' : 'Cierre: sin evento local verificable'}</li>
+            </ul>
+          </li>;
+        })}</ul>}
         {episode.acts.length > 0 && <p>Actos editoriales: {episode.acts.map((act) => act.title).join(' · ')}</p>}
         {episode.consequenceEventIds.length > 0 && <details><summary>Consecuencias vinculadas ({episode.consequenceEventIds.length})</summary><ul>{episode.consequenceEventIds.map((eventId) => <li key={eventId}><code>{eventId}</code></li>)}</ul></details>}
         {episode.openLines.map((line) => <details key={line.lineId}><summary>Línea abierta: {line.lineId}</summary><ul>{line.evidenceEventIds.map((eventId) => <li key={eventId}><code>{eventId}</code></li>)}</ul></details>)}
       </li>)}</ol>
-      {structure.unassignedLegacyScenes.length > 0 && <details><summary>Escenas históricas sin episodio asignado ({structure.unassignedLegacyScenes.length})</summary><ul>{structure.unassignedLegacyScenes.map((scene) => <li key={scene.id}>{scene.label} · {scene.lifecycle.kind === 'open' ? 'abierta' : 'cerrada'}</li>)}</ul></details>}
+      {structure.unassignedLegacyScenes.length > 0 && <details><summary>Escenas históricas sin episodio asignado ({structure.unassignedLegacyScenes.length})</summary><ul>{structure.unassignedLegacyScenes.map((scene) => <li key={scene.id}>{scene.label} · {scene.lifecycle.kind === 'open' ? 'abierta' : 'cerrada'} · sin episodio local ni cortes estructurales</li>)}</ul></details>}
       {!historical && <div className="dramatic-structure-actions">
         {structure.activeEpisodeId === null && structure.activeSceneId === null && <form onSubmit={(event) => { event.preventDefault(); void submit({ kind: 'openEpisode', ...(episodeTitle.trim() === '' ? {} : { title: episodeTitle.trim() }) }, 'El episodio'); }}>
           <h3>Abrir episodio</h3><label>Título opcional<input value={episodeTitle} maxLength={200} onChange={(event) => setEpisodeTitle(event.target.value)} /></label>

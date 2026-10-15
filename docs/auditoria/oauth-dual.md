@@ -9,6 +9,7 @@ Corte local del 15 de octubre de 2026. El producto exige que el operador pueda i
 - El código manual se entrega una sola vez al trabajo de login que lo solicitó. El desafío tiene vencimiento, UUID y alcance de sesión local; el endpoint de respuesta exige CSRF. Una segunda sesión no puede leer ni responder ese desafío. Cancelar el trabajo aborta la espera y elimina el desafío.
 - El código no se incluye en el DTO del job, recibos idempotentes, journal, SQLite ni logs de contenido. El navegador lo limpia al enviarlo o al cambiar el desafío y no usa almacenamiento persistente. Las claves API no forman parte del flujo de conexión de producto.
 - Estado, inicio y desconexión conservan el proveedor elegido. El perfil de acceso mostrado corresponde a Codex/Sol 6.1 low o Anthropic/Opus 5.5 medium. Preflight y la comprobación de acceso exigen OAuth para ambos; una API key del entorno o del SDK no reemplaza el login. Un bloqueo de ejecución OAuth es global porque ambos proveedores comparten el archivo de credenciales del ModelRuntime.
+- El operador inicia sesión una vez por proveedor en el host. Cada personaje conserva una instancia/sesión Pi propia y usa la credencial OAuth del proveedor que indique su perfil; las instancias no comparten conversación, historial Pi ni contexto de sesión. El SDK y el ModelRuntime del host comparten el almacén de credenciales, por lo que no se repite el flujo OAuth por personaje.
 
 ## Persistencia y compatibilidad
 

@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream, type AssistantMessage } from '@earendil-works/pi-ai';
 import { test } from 'node:test';
+import React from 'react';
 import { DatabaseSync } from 'node:sqlite';
 import { openLocalHost } from '../src/application/local-host.ts';
 import { createRepresentationRuntime } from '../src/application/representation-runtime.ts';
 import { createBudgetedStreamFunction, PiRuntime } from '../src/adapters/pi.ts';
 import type { CreatePiSessionInput, PiPromptInput, PiRequestReference } from '../src/adapters/pi.ts';
-import { ReadyRunConfigurationSchema } from '../src/application/production-preflight.ts';
+import { ReadyRunConfigurationSchema, validateReadyConfiguration } from '../src/application/production-preflight.ts';
+import type { RunBudget } from '../src/domain/production.ts';
 import { validateContinuistaReviewContext } from '../src/application/continuista-review-context.ts';
 import { RevisionSchema, RunIdSchema, WorldSeqSchema } from '../src/domain/values.ts';
 import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
@@ -20,6 +22,12 @@ import { controlledDirectorSessionFactory } from './fixtures/director-session.ts
 import { WorldActorActionSchema, type WorldClock } from '../src/domain/world-schema.ts';
 import { createCircumstanceApplication } from '../src/application/direction-circumstances.ts';
 import { createRunObservationApplication } from '../src/application/run-observation.ts';
+import { createHostRequestBarrier } from '../src/application/host-request-barrier.ts';
+import { createProductionHost } from '../src/server/production-host.ts';
+import { createLocalHttpServer } from '../src/server/http.ts';
+import { loadCatalog } from '../src/adapters/catalog.ts';
+import { RunStatusView } from '../src/web/RunControlsPanel.tsx';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { canonical, responseFor, setup, actorId, type Fixture } from './fixtures/continuista.ts';
 
 const realIcmBinary = process.env.PERSONAJES_ICM_TEST_BINARY;
@@ -27,6 +35,121 @@ const realIcmOptions = {
   skip: realIcmBinary === undefined ? 'Definí PERSONAJES_ICM_TEST_BINARY para integrar el runtime con ICM real.' : false,
 };
 const actorRecallSource = 'Mensaje sintético recibido por el personaje.';
+
+test('intervención HTTP compone host de producción, runtime Pi e intercambio actoral hasta la conversación',realIcmOptions,async()=>{
+  assert.ok(realIcmBinary);
+  const fixture=await setup();
+  const host=hostFromFixture(fixture);
+  const runId=registerAdditionalRun(fixture,host,false,false,undefined,false,undefined,true);
+  assert.deepEqual(validateReadyConfiguration(ReadyRunConfigurationSchema.parse(host.journal.readWorldConfiguration({runId}))),[]);
+  const stats={requests:0,recallResults:0,disposed:0};
+  const diagnostics:unknown[]=[];
+  const production=await createProductionHost({host,catalog:await loadCatalog({repositoryRoot:process.cwd()}),
+    admissionBarrier:createHostRequestBarrier(),icmBinaryPath:realIcmBinary,
+    onDiagnostic:diagnostic=>diagnostics.push(diagnostic),
+    testPiTransport:{...controlledTransport({fixture,host,runId,stats,actionForPrompt(){
+      const snapshot=host.journal.loadWorld({runId});assert.ok(snapshot);
+      const knowledge=host.journal.readActorKnowledge({runId,actorId,throughWorldSeq:snapshot.seq});assert.ok(knowledge);
+      const channel=knowledge.knowledge.bindings.find(binding=>binding.kind==='channel'
+        &&binding.channelId==='00000000-0000-4000-8000-000000000105');assert.ok(channel);
+      return WorldActorActionSchema.parse({kind:'communicate',channelHandle:channel.handle,audienceHandles:[],
+        content:{kind:'speech',text:'Respuesta actoral integrada.'}});
+    }}),kind:'controlled-test-transport',name:'production-http-roundtrip'}});
+  const server=createLocalHttpServer({...production.httpOptions,catalog:await loadCatalog({repositoryRoot:process.cwd()}),
+    shellHtml:'<!doctype html><html><head></head><body></body></html>',staticAssets:new Map()});
+  try{
+    await production.recover();
+    assert.ok(production.testOnly,'el runtime de producción expone un seam sólo al inyectar el transporte controlado');
+    assert.equal(await production.testOnly.scheduleRun(runId),true);
+    const {origin}=await server.listen(0);
+    const originHeaders={Origin:origin,'Sec-Fetch-Site':'same-origin'};
+    const page=await fetch(origin+'/',{headers:originHeaders});assert.equal(page.status,200);
+    const nonce=(await page.text()).match(/<meta name="personajes-bootstrap" content="([A-Za-z0-9_-]{43})">/)?.[1];assert.ok(nonce);
+    const created=await fetch(origin+'/api/v1/session',{method:'POST',headers:{...originHeaders,'Content-Type':'application/json'},
+      body:JSON.stringify({bootNonce:nonce})});assert.equal(created.status,200,await created.clone().text());
+    const sessionBody=await created.json() as {csrfToken:string};
+    const cookieHeader=created.headers.get('set-cookie');assert.ok(cookieHeader);
+    const cookie=cookieHeader.split(';',1)[0];assert.ok(cookie?.startsWith(`personajes_session_${new URL(origin).port}=`));
+    const privateHeaders={...originHeaders,Cookie:cookie!};
+    const selected=await fetch(origin+'/api/v1/session/mode',{method:'PUT',headers:{...privateHeaders,'Content-Type':'application/json',
+      'X-CSRF-Token':sessionBody.csrfToken,'If-Match':created.headers.get('etag')!,'Idempotency-Key':randomUUID()},
+      body:JSON.stringify({kind:'interlocutor',runId,participantId:'visitante-prueba'})});
+    assert.equal(selected.status,200,await selected.clone().text());
+    const context=await fetch(`${origin}/api/v1/runs/${runId}/intervention-context`,{headers:privateHeaders});
+    assert.equal(context.status,200,await context.clone().text());
+    const contextBody=await context.json() as {worldRevision:number;recipients:Array<{characterId:string}>};
+    assert.deepEqual(contextBody.recipients.map(item=>item.characterId),[actorId]);
+    const body={kind:'speech',recipientCharacterIds:[actorId],channelId:'00000000-0000-4000-8000-000000000104',
+      content:{kind:'speech',text:'Max, ¿conoces Fibonacci?'}};
+    const key=randomUUID();
+    const sent=await fetch(`${origin}/api/v1/runs/${runId}/interventions`,{method:'POST',headers:{...privateHeaders,
+      'Content-Type':'application/json','X-CSRF-Token':sessionBody.csrfToken,'If-Match':`"world:${runId}:r${contextBody.worldRevision}"`,
+      'Idempotency-Key':key},body:JSON.stringify(body)});
+    assert.equal(sent.status,202,await sent.clone().text());
+    const observation=createRunObservationApplication({journal:host.journal});
+    const deadline=Date.now()+10_000;let actorLine:string|undefined;
+    while(actorLine===undefined&&Date.now()<deadline){
+      const page=observation.readConversations({runId,limit:50});
+      if(page.kind==='found'&&page.value.kind==='conversation-page'){
+        const found=page.value.items.find(item=>item.speaker.kind==='character'&&item.content.kind==='speech'
+          &&item.content.text==='Respuesta actoral integrada.');
+        if(found?.content.kind==='speech')actorLine=found.content.text;
+      }
+      if(actorLine===undefined)await new Promise<void>(resolve=>setTimeout(resolve,25));
+    }
+    assert.equal(stats.requests,3,JSON.stringify(diagnostics));
+    assert.equal(actorLine,'Respuesta actoral integrada.',`la respuesta del actor debe llegar a la conversación publicada: ${JSON.stringify(observation.readConversations({runId,limit:50}))}; diagnóstico=${JSON.stringify(diagnostics)}`);
+    assert.equal(stats.requests,3,'el actor respondió mediante el transporte SDK controlado');
+    // Replaying the same HTTP command must not create a second actor response.
+    const replay=await fetch(`${origin}/api/v1/runs/${runId}/interventions`,{method:'POST',headers:{...privateHeaders,
+      'Content-Type':'application/json','X-CSRF-Token':sessionBody.csrfToken,'If-Match':`"world:${runId}:r${contextBody.worldRevision}"`,
+      'Idempotency-Key':key},body:JSON.stringify(body)});
+    assert.equal(replay.status,202,await replay.clone().text());
+    await new Promise<void>(resolve=>setTimeout(resolve,300));
+    assert.equal(stats.requests,3);
+    const finalPage=observation.readConversations({runId,limit:50});
+    assert.equal(finalPage.kind,'found');if(finalPage.kind!=='found'||finalPage.value.kind!=='conversation-page')assert.fail('Conversación ausente');
+    assert.equal(finalPage.value.items.filter(item=>item.speaker.kind==='character'&&item.content.kind==='speech'
+      &&item.content.text==='Respuesta actoral integrada.').length,1);
+  }finally{await server.close();await production.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});
+
+test('presupuesto agotado durante actuación pausa el runtime y el estado visible conserva perfil y saldo exactos',realIcmOptions,async()=>{
+  assert.ok(realIcmBinary);
+  const fixture=await setup();
+  const host=hostFromFixture(fixture);
+  const runId=registerAdditionalRun(fixture,host,true,false,undefined,false,undefined,false,
+    {maxPiCallsPerRun:1,maxPiCallsPerPulse:1,maxConcurrentPiRequests:1});
+  const before=host.journal.loadWorld({runId});assert.ok(before);
+  const stats={requests:0,recallResults:0,disposed:0};
+  const runtime=await createRepresentationRuntime({host,icmBinaryPath:realIcmBinary,
+    testTransport:controlledTransport({fixture,host,runId,stats})});
+  try{
+    assert.equal(await runtime.scheduleRun({runId}),true);
+    runtime.scheduleDelivery({runId,actorIds:[actorId]});
+    await runtime.waitForIdle();
+    assert.equal(stats.requests,1,'la segunda solicitud Pi se bloquea antes de llegar al transporte');
+    const lifecycle=host.journal.readWorldLifecycle({runId});assert.ok(lifecycle);
+    assert.equal(lifecycle.lifecycle,'paused','el ledger pausa la corrida al reservar la solicitud posterior al límite');
+    const after=host.journal.loadWorld({runId});assert.ok(after);
+    assert.equal(after.seq,before.seq,'el intento de agotar presupuesto no publica un hecho ni parlamento');
+    const persisted=host.journal.readRunModelTimeBudget({runId});assert.ok(persisted);
+    assert.equal(persisted.runCallsUsed,1);
+    assert.equal(persisted.status,'known');
+    const {createRunLifecycleApplication}=await import('../src/application/run-lifecycle.ts');
+    const application=createRunLifecycleApplication({journal:host.journal,runtime});
+    const view=application.readRunView({runId});assert.ok(view);
+    assert.equal(view.lifecycle.kind,'paused');
+    assert.equal(view.budget.status,'exhausted');
+    assert.deepEqual(view.config.inferenceProfile,fixture.configuration.inferenceProfile);
+    const visible=renderToStaticMarkup(React.createElement(RunStatusView,{view}));
+    assert.match(visible,/Estado: En pausa/);
+    assert.match(visible,/Agotado/);
+    assert.match(visible,/1 usadas/);
+    assert.match(visible,/0 disponibles/);
+    assert.match(visible,/Sin sustitución automática de modelo/);
+  }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});
 
 test('la composición comparte el runtime de autenticación del host y rechaza otra raíz privada', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'personajes-shared-auth-'));
@@ -41,9 +164,15 @@ test('la composición comparte el runtime de autenticación del host y rechaza o
   t.mock.method(sharedRuntime.modelRuntime, 'listCredentials', async () => { reads += 1; return readCredentials(); });
   const representation = await createRepresentationRuntime({ host, piRuntime: sharedRuntime, icmBinaryPath: join(root, 'icm') });
   try {
-    const status = await representation.oauth.status();
-    assert.equal(status.kind, 'status');
-    assert.equal(reads, 1, 'la consulta usa el ModelRuntime compartido, no otro cache de autenticación');
+    const anthropicStatus = await representation.oauth.status('anthropic');
+    assert.equal(anthropicStatus.kind, 'status');
+    if (anthropicStatus.kind !== 'status') assert.fail('Falta estado Anthropic');
+    assert.equal(anthropicStatus.value.provider, 'anthropic');
+    const codexStatus = await representation.oauth.status('openai-codex');
+    assert.equal(codexStatus.kind, 'status');
+    if (codexStatus.kind !== 'status') assert.fail('Falta estado Codex');
+    assert.equal(codexStatus.value.provider, 'openai-codex');
+    assert.equal(reads, 2, 'ambas consultas usan el ModelRuntime compartido, no caches por personaje');
     assert.equal(host.journal.listRunConfigurationDrafts().length, 0);
   } finally { await representation.close(); }
   const reopened = openLocalHost({ privateDataRoot: root });
@@ -86,11 +215,12 @@ function hostFromFixture(fixture: Fixture) {
 
 function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true, withInitialGoal = false,
   routineWindows?: readonly (readonly [number,number])[], broadcast=false,
-  dailySchedule?: { routine: unknown; maxAdvanceMs: number; dayNight?: NonNullable<WorldClock['dayNight']> }) {
+  dailySchedule?: { routine: unknown; maxAdvanceMs: number; dayNight?: NonNullable<WorldClock['dayNight']> },actorBroadcast=false,
+  budgetOverride?: Partial<RunBudget>) {
   const freshRunId = RunIdSchema.parse(randomUUID());
   const configuration = ReadyRunConfigurationSchema.parse({
     ...fixture.configuration,
-    budget:{...fixture.configuration.budget,maxPiCallsPerPulse:8},
+    budget:{...fixture.configuration.budget,maxPiCallsPerPulse:8,...budgetOverride},
     circadianPolicy:dailySchedule!==undefined?{kind:'advance-while-running',maxAdvanceMs:dailySchedule.maxAdvanceMs}:
       routineWindows===undefined?fixture.configuration.circadianPolicy:{kind:'advance-while-running',maxAdvanceMs:1_000},
     runId: freshRunId,
@@ -98,7 +228,9 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
       ...fixture.configuration.worldSnapshot,
       runId: freshRunId,
       ...(dailySchedule?.dayNight === undefined ? {} : { clock: { ...fixture.configuration.worldSnapshot.clock, dayNight: dailySchedule.dayNight } }),
-      channels:fixture.configuration.worldSnapshot.channels.map((channel)=>routineWindows===undefined&&!broadcast?channel:{...channel,scope:'broadcast'}),
+      channels:actorBroadcast?[...fixture.configuration.worldSnapshot.channels,{
+        ...fixture.configuration.worldSnapshot.channels[0]!,id:'00000000-0000-4000-8000-000000000105',label:'Voz de escena',scope:'broadcast',
+      }]:fixture.configuration.worldSnapshot.channels.map((channel)=>routineWindows===undefined&&!broadcast?channel:{...channel,scope:'broadcast'}),
       entities: fixture.configuration.worldSnapshot.entities.map((entity) => entity.kind === 'character'
         ? { ...entity,
           routine:dailySchedule!==undefined?dailySchedule.routine:routineWindows===undefined?entity.routine:{kind:'windows',defaultState:'unavailable',
@@ -111,6 +243,11 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
           experiences: entity.mind.experiences.map((experience) => ({ ...experience, runId: freshRunId })) } }
         : entity),
     },
+    preparedActorFences: fixture.configuration.roster.preparedCharacters.map((prepared)=>({
+      characterId:prepared.characterId,identityVersion:prepared.identityVersion,dossierRevision:prepared.dossierRevision,
+      dossierHash:prepared.dossierHash,continuity:{continuityId:prepared.continuity.continuityId,
+        revision:prepared.continuity.revision,contentHash:prepared.continuity.contentHash},
+    })),
     snapshotFence: { ...fixture.configuration.snapshotFence, runId: freshRunId },
   });
   const contexts = configuration.roster.activeCharacterIds.map((characterId) => {

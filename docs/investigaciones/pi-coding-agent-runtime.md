@@ -1,6 +1,6 @@
 # Pi Coding Agent como runtime de los actores
 
-Cambio posterior del usuario: las referencias originales a Luna/xhigh en esta investigación son un corte histórico, no la configuración vigente. Las representaciones nuevas guardan el perfil seleccionado: Sol 6.1 bajo por defecto o Opus 5.5 medio, con acceso propio por proveedor, según [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md). Los ejemplos y comprobaciones específicas de Luna sólo documentan la investigación inicial; el runtime debe resolver el perfil durable elegido por la representación.
+Cambio posterior del usuario: las referencias originales a Luna/xhigh en esta investigación son un corte histórico, no la configuración vigente. Las representaciones nuevas guardan el perfil seleccionado: Sol 6.1 bajo por defecto o Opus 5.5 medio, con login OAuth del proveedor elegido en el host de Pi, según [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) y la [auditoría OAuth dual](../auditoria/oauth-dual.md). El host puede compartir esa autenticación entre sesiones, pero no comparte conversaciones: cada personaje conserva su instancia y contexto Pi. Una API key no reemplaza el login. Los ejemplos y comprobaciones específicas de Luna sólo documentan la investigación inicial; el runtime debe resolver el perfil durable elegido por la representación.
 
 
 Fecha de investigación: **14 de octubre de 2026**. Estado: investigación documental y revisión de código; ejemplo de integración propuesto, **sin instalar ni ejecutar Pi, ICM o un modelo**.
@@ -41,7 +41,7 @@ Los posibles forks locales del usuario no fueron elegidos ni auditados como sust
 
 ## 3. Decisión inicial de conexión y perfil: Codex, Luna 6 y `xhigh` (histórica)
 
-Esta sección registra la elección original del usuario y las fuentes técnicas de ese corte. Para nuevas representaciones, el perfil vigente es Sol/low o Opus/medium, según ADR0003. La fila Luna no habilita nuevas inferencias ni fallback. Codex OAuth es la ruta del perfil Sol; Opus usa acceso propio de Anthropic.
+Esta sección registra la elección original del usuario y las fuentes técnicas de ese corte. Para nuevas representaciones, el perfil vigente es Sol/low o Opus/medium, según ADR0003. La fila Luna no habilita nuevas inferencias ni fallback. La descripción original de Codex OAuth para Sol y “acceso propio de Anthropic” para Opus es histórica: hoy ambos proveedores requieren login OAuth, según la [auditoría OAuth dual](../auditoria/oauth-dual.md).
 
 | Estado en este proyecto | Proveedor Pi | Modelo | API registrada | Esfuerzo verificado en el catálogo |
 | --- | --- | --- | --- | --- |

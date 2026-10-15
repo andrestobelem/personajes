@@ -78,7 +78,7 @@ Propuesta de defensa por capas:
 - Permitir al mundo y a otros personajes resolver consecuencias; el actor no decide unilateralmente éxito, persuasión o recepción.
 - Registrar revisión y publicación para poder explicar por qué se reformuló una respuesta.
 
-Una carpeta Markdown, un prompt extenso o una base SQLite por actor no constituyen por sí solos una prueba de seguridad. Este es el diseño del límite; su efectividad necesitará verificación cuando exista runtime.
+Una carpeta Markdown, un prompt extenso o una base SQLite por actor no constituyen por sí solos una prueba de seguridad. El runtime aplica límites mecánicos de origen, canal, autoridad, capacidades y allowlist, conserva revisión/publicación durable y exige revisar la versión exacta de la propuesta antes de publicarla. Ver [auditoría del Regidor mecánico](../auditoria/regidor-mecanico.md). Estas pruebas acreditan esos controles, no detección semántica perfecta de prompt injection por el modelo; la evaluación adversarial live sigue pendiente.
 
 ## Pruebas de aceptación propuestas
 

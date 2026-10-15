@@ -12,7 +12,7 @@ Una aprobación exige exactamente quince gates pasados: configuración, versión
 
 El adaptador consulta journal, catálogo, SDK instalado y credencial local sin renovarla. El recibo de acceso debe corresponder al perfil y cuenta observados; un resultado posterior fallido, cancelado o incierto impide reutilizar una aprobación anterior. La lectura de memoria exige aislamiento físico y compatibilidad de lectura con el CLI, sin crear una base para convertir artificialmente una ausencia en disponibilidad.
 
-Desde v22, el host lee el ledger de tiempo real de actor y Continuista. Presupuestos con historia anterior sin medición, requests inciertas, scope desajustado o cero restante siguen bloqueando el preflight. `GET /runs/{id}/budget` y un panel en la preparación Ready muestran el estado actual; falta mantener esa vista durante una obra activa. Siguen pendientes el runtime del Director, el del narrador cuando está activado y la voz cuando se solicita audio. Una base privada todavía no provisionada se declara no disponible.
+El estado actual extiende el ledger común a todas las sesiones Pi que infieren: Actor, Continuista, Director, Narrador/revisor y Configurador. Presupuestos con historia anterior sin medición, requests inciertas, scope desajustado o cero restante bloquean el preflight. `GET /runs/{id}/budget` expone inferencia; RunView agrega las cuotas durables separadas de Voice Design/TTS/SFX y la vista se consulta durante la representación. C59 verifica con ICM real y transporte Pi controlado que agotar el ledger en una obra activa pausa el runtime y deja el perfil/saldo visibles. La aceptación live sigue pendiente. Una base privada todavía no provisionada se declara no disponible.
 
 ## Verificación
 

@@ -86,18 +86,38 @@ export function createRunDramaticStructureClient(request: typeof fetch = (url, i
     if (etag !== dramaticStructureEtag(value.runId, value.worldRevision, value.structureRevision, cut === undefined ? undefined : value.commitIndex)) throw new Error('La revisión de la estructura recibida no coincide.');
     return { value, etag };
   }
+  async function events(runId: string, signal: AbortSignal, throughCommitIndex?: number, afterStructureRevision = 0) {
+    const validRunId = RunIdSchema.parse(runId);
+    const after = RevisionSchema.parse(afterStructureRevision);
+    await bootstrap();
+    const query = new URLSearchParams({ afterStructureRevision: String(after), limit: '1000' });
+    if (throughCommitIndex !== undefined) query.set('throughCommitIndex', String(RevisionSchema.parse(throughCommitIndex)));
+    const response = await request(`/api/v1/runs/${validRunId}/structure-events?${query}`, { credentials: 'same-origin', signal });
+    const page = await parseResponse(response, StructureEventsPageSchema);
+    if (page.events.some((event, index) => event.runId !== validRunId || event.structureRevision > page.structureRevision
+      || event.structureRevision !== after + index + 1
+      || (throughCommitIndex !== undefined && event.commitIndex > throughCommitIndex))) throw new Error('La historia estructural no corresponde a esta representación.');
+    return page;
+  }
   return Object.freeze({
     read,
-    async events(runId: string, signal: AbortSignal, throughCommitIndex?: number) {
-      const validRunId = RunIdSchema.parse(runId);
-      await bootstrap();
-      const query = new URLSearchParams({ afterStructureRevision: '0', limit: '1000' });
-      if (throughCommitIndex !== undefined) query.set('throughCommitIndex', String(RevisionSchema.parse(throughCommitIndex)));
-      const response = await request(`/api/v1/runs/${validRunId}/structure-events?${query}`, { credentials: 'same-origin', signal });
-      const page = await parseResponse(response, StructureEventsPageSchema);
-      if (page.events.some((event) => event.runId !== validRunId || event.structureRevision > page.structureRevision
-        || (throughCommitIndex !== undefined && event.commitIndex > throughCommitIndex))) throw new Error('La historia estructural no corresponde a esta representación.');
-      return page;
+    events,
+    async allEvents(runId: string, signal: AbortSignal, throughCommitIndex?: number) {
+      const all: z.infer<typeof DramaticStructureEventSchema>[] = [];
+      let after = 0;
+      let structureRevision: number | undefined;
+      for (;;) {
+        const page = await events(runId, signal, throughCommitIndex, after);
+        if (structureRevision !== undefined && page.structureRevision !== structureRevision) throw new Error('La estructura cambió mientras se leía su historia. Actualizá la vista antes de elegir un corte.');
+        structureRevision = page.structureRevision;
+        all.push(...page.events);
+        if (!page.hasMore) break;
+        const last = page.events.at(-1)?.structureRevision;
+        if (last === undefined || last <= after) throw new Error('La paginación de la historia estructural no avanzó.');
+        after = last;
+      }
+      if ((all.at(-1)?.structureRevision ?? 0) !== structureRevision) throw new Error('La historia estructural está incompleta.');
+      return { events: all, structureRevision: structureRevision ?? RevisionSchema.parse(0) };
     },
     async sceneOptions(runId: string, signal: AbortSignal) {
       const validRunId = RunIdSchema.parse(runId);

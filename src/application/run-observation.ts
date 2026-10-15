@@ -47,6 +47,9 @@ export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unkn
     places:[],entities:[],connections:[],doors:[],channels:[],humanParticipants:[]});
   const places=world.places.filter((place)=>scene.placeIds.includes(place.id));
   const visiblePlaces=new Set(places.map((place)=>place.id));
+  const visibleCharacterEntityIds=new Set(world.entities.flatMap(entity=>entity.kind==='character'
+    &&entity.presence.kind==='present'&&entity.presence.sceneId===scene.id&&scene.participantIds.includes(entity.characterId)&&visiblePlaces.has(entity.placeId)
+    ?[entity.entityId]:[]));
   const entities:z.infer<typeof StageEntitySchema>[]=[];
   for (const entity of world.entities) {
     switch(entity.kind) {
@@ -63,6 +66,12 @@ export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unkn
         break;
       case 'object': {
         const entry=world.inventory.find((item)=>item.objectEntityId===entity.entityId);
+        if(entry?.location.kind==='heldBy'){
+          if(!visibleCharacterEntityIds.has(entry.location.entityId))break;
+          entities.push(StageEntitySchema.parse({kind:'object',entityId:entity.entityId,label:entity.label,placeId:null,position:null,holderEntityId:entry.location.entityId,
+            ...(entity.quantity===undefined?{}:{quantity:entity.quantity}),...(entity.condition===undefined?{}:{condition:entity.condition})}));
+          break;
+        }
         if (entry?.location.kind!=='atPlace'||!visiblePlaces.has(entry.location.placeId)) break;
         entities.push(StageEntitySchema.parse({kind:'object',entityId:entity.entityId,label:entity.label,
           placeId:entry.location.placeId,position:entry.location.position,holderEntityId:null,
