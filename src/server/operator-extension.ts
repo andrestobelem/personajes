@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Readable } from 'node:stream';
 import { ApiProblemErrorSchema, type SessionMode } from '../domain/http.ts';
 
 const SafeHeaderSchema = z.string().max(500).refine(value => !/[\r\n\0]/.test(value));
@@ -10,10 +11,14 @@ const JsonValueSchema = z.json();
 export const OperatorResponseSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('json'), status: z.union([z.literal(200), z.literal(201), z.literal(202)]), body: JsonValueSchema, headers: HeadersSchema.default({}) }),
   z.strictObject({ kind: z.literal('binary'), status: z.literal(200),
-    mimeType: z.enum(['audio/mpeg', 'audio/wav', 'audio/ogg', 'application/json', 'application/zip']),
+    mimeType: z.enum(['audio/mpeg', 'audio/wav', 'audio/ogg', 'application/json', 'application/zip','application/octet-stream']),
     bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength <= 32 * 1024 * 1024),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     filename: z.string().min(1).max(150).regex(/^[A-Za-z0-9_.-]+$/).optional(),
+  }),
+  z.strictObject({kind:z.literal('stream'),status:z.literal(200),mimeType:z.literal('application/octet-stream'),
+    bytesLength:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),sha256:z.string().regex(/^[a-f0-9]{64}$/),
+    filename:z.string().min(1).max(150).regex(/^[A-Za-z0-9_.-]+$/),stream:z.instanceof(Readable),
   }),
   z.strictObject({ kind: z.literal('problem'), status: z.number().int().min(400).max(599), error: ApiProblemErrorSchema }),
 ]);

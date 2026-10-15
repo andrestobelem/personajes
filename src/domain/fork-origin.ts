@@ -12,4 +12,4 @@ export const RunForkOriginSchema=z.strictObject({
 });
 
 /** Public, path-free identity of the verified bundle used as a parent source. */
-export const BackupOriginSchema=z.strictObject({backupId:z.string().uuid(),lineageId:z.string().uuid(),manifestHash:HashSchema,journalHash:HashSchema});
+export const BackupOriginSchema=z.strictObject({backupId:z.string().uuid(),lineageId:z.string().uuid(),manifestHash:HashSchema,journalHash:HashSchema,externalRegistration:z.strictObject({registrationId:z.uuid(),archiveSha256:HashSchema,originAssurance:z.literal('operator-upload-unverified-origin')}).optional()});

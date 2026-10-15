@@ -107,10 +107,15 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
   }
   throw new Error('EXCHANGE_ROUTE_NOT_FOUND');
  }
- return {name:'exchange',maxBodyBytes:22*1024*1024,close:()=>db.close(),matches:({path})=>['imports','exports','backups'].includes(path[0]??''),async handle(request){
+ function receiptTransaction<T>(work:()=>T):T{
+  db.exec('BEGIN IMMEDIATE');try{const result=work();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}
+ }
+ const pending=new Map<string,Promise<z.infer<typeof OperatorResponseSchema>>>();
+ return {name:'exchange',maxBodyBytes:22*1024*1024,close(){if(pending.size>0)throw new Error('EXCHANGE_OPERATIONS_ACTIVE');db.close();},matches:({path})=>['imports','exports','backups'].includes(path[0]??''),async handle(request){
   try {
    if(request.kind==='read')return await dispatch(request);
    const requestHash=digest(canonical({method:request.method,path:request.path,body:request.body}));const kind=operationKind(request);
+   const identity=JSON.stringify([request.principalId,request.idempotencyKey]);
    const previous=db.prepare('SELECT request_hash,response_json,operation_kind FROM exchange_http_operations WHERE principal_id=? AND operation_id=?').get(request.principalId,request.idempotencyKey);
    if(previous){
     integrity.verify('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
@@ -122,20 +127,32 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
     const legacyCached=old.operation_kind==='unclassified'&&old.response_json!==null;
     if(old.operation_kind!==kind&&!legacyCached)throw new Error('EXCHANGE_IDEMPOTENCY_REUSE');
     if(old.response_json!==null)return OperatorResponseSchema.parse(JSON.parse(old.response_json));
+    const active=pending.get(identity);if(active!==undefined)return await active;
     // Only restore operations have a sealed service intent/idempotent preview.
     // Other interrupted mutations retain their conservative explicit failure.
     const recoverable=request.method==='POST'&&request.path.length===3&&request.path[0]==='backups'&&['restore','restore-preview'].includes(request.path[2]??'');
     if(!recoverable)throw new Error('EXCHANGE_OPERATION_INTERRUPTED');
    }else{
-    db.prepare('INSERT INTO exchange_http_operations(principal_id,operation_id,request_hash,response_json,operation_kind) VALUES(?,?,?,NULL,?)').run(request.principalId,request.idempotencyKey,requestHash,kind);
-    integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+    receiptTransaction(()=>{
+     db.prepare('INSERT INTO exchange_http_operations(principal_id,operation_id,request_hash,response_json,operation_kind) VALUES(?,?,?,NULL,?)').run(request.principalId,request.idempotencyKey,requestHash,kind);
+     integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+    });
    }
-   let result;
-   try {result=await dispatch(request);}catch(error){
-    db.prepare('DELETE FROM exchange_http_operations WHERE principal_id=? AND operation_id=? AND response_json IS NULL').run(request.principalId,request.idempotencyKey);throw error;
-   }
-   db.prepare('UPDATE exchange_http_operations SET response_json=? WHERE principal_id=? AND operation_id=?').run(JSON.stringify(result),request.principalId,request.idempotencyKey);
-   integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);return result;
+   // Register the promise before dispatch can enter any asynchronous host port.
+   // A concurrent identical request shares this exact durable result; a NULL
+   // receipt with no live promise still follows the restart recovery whitelist.
+   const work=Promise.resolve().then(async()=>{
+    // Any failure retains the sealed NULL intent. The effect may already exist;
+    // releasing the key would permit a different request to acquire its identity.
+    const result=await dispatch(request);const response=JSON.stringify(result);
+    receiptTransaction(()=>{
+     integrity.verify('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+     db.prepare('UPDATE exchange_http_operations SET response_json=? WHERE principal_id=? AND operation_id=?').run(response,request.principalId,request.idempotencyKey);
+     integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+    });return result;
+   });
+   pending.set(identity,work);
+   try{return await work;}finally{if(pending.get(identity)===work)pending.delete(identity);}
   }catch(error){
    const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,79}$/.test(error.message)?error.message:'EXCHANGE_VALIDATION_FAILED';
    const missing=code.endsWith('NOT_FOUND');const precondition=code.includes('IF_MATCH')||code.includes('IF_NONE_MATCH');const dependency=code.includes('UNAVAILABLE')||code==='RESTORE_BLOCKED';

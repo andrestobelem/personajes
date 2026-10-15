@@ -137,3 +137,13 @@ test('transporte sintético: ack exacto y GET misma configuración aceptan promo
   assert.equal(result.document.view.state.lifecycle, 'ready');
   assert.equal(call, 2);
 });
+
+test('una configuración derivada publicada explica su validación sin reclamar promoción de borrador ni aprobar ejecución',async()=>{
+  const {RunDraftValidationResult}=await import('../src/web/RunDraftWorkspace.tsx');
+  const {RunConfigurationDraftViewSchema}=await import('../src/domain/http.ts');
+  const view=RunConfigurationDraftViewSchema.parse({kind:'run-configuration-draft',configuration:empty(),state:{lifecycle:'ready',configurationRevision:0,worldRevision:0,editability:'fork-published'},validation:{kind:'valid',promotion:'not-promoted'}});
+  const html=renderToStaticMarkup(React.createElement(RunDraftValidationResult,{validation:view.validation,state:view.state}));
+  assert.match(html,/Configuración válida/);assert.match(html,/Configuración derivada publicada/);assert.match(html,/sólo lectura/);assert.match(html,/requisitos de ejecución se comprueban por separado/);assert.doesNotMatch(html,/Preparación sin promover|Completá los puntos pendientes|validá la puesta guardada|<button|<input/);
+  const promoted=renderToStaticMarkup(React.createElement(RunDraftValidationResult,{validation:{kind:'valid',promotion:'promoted'},state:{...view.state,editability:'editable'}}));assert.match(promoted,/Promoción durable confirmada/);assert.doesNotMatch(promoted,/derivada publicada/);
+  const invalid=renderToStaticMarkup(React.createElement(RunDraftValidationResult,{validation:{kind:'invalid',promotion:'not-promoted',issues:[{code:'draft-field-empty',field:'fictionalAt',detail:'Fecha pendiente'}]},state:view.state}));assert.match(invalid,/Preparación sin promover/);assert.match(invalid,/Fecha pendiente/);assert.doesNotMatch(invalid,/derivada publicada/);
+});

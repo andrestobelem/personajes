@@ -152,3 +152,6 @@ _Avoid_: Memoria actual filtrada, recuerdo retrospectivo supuesto
 
 **Recuperación de la representación**: Restablecimiento de una representación conservando su identidad, continuidad, acontecimientos y memorias confirmadas, sin reemplazar cambios posteriores por una versión anterior.
 _Evitar_: recuperación como sinónimo de bifurcación o de reinicio de la historia.
+
+**Admisión de un respaldo externo**: Incorporación identificada y verificada de un respaldo recibido para consultarlo o continuar su obra como una representación nueva, conservando su procedencia y los datos existentes.
+_Evitar_: verificar integridad como sinónimo de autenticar al autor o admitir como sinónimo de sobrescribir.

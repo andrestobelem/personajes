@@ -26,14 +26,14 @@ export const RestoreSelectionSchema=z.discriminatedUnion('mode',[
   z.strictObject({mode:z.literal('recover')}),
   z.strictObject({mode:z.literal('fork'),sourceRunId:RunIdSchema,name:z.string().trim().min(1).max(120),reason:z.string().trim().min(1).max(4000)}),
 ]);
-export const RestoreIntentSchema=z.strictObject({operationId:OperationIdSchema,principalId:z.string().trim().min(1).max(200),selection:RestoreSelectionSchema,idempotencyKey:z.uuid()});
+export const RestoreIntentSchema=z.strictObject({operationId:OperationIdSchema,principalId:z.string().trim().min(1).max(200),selection:RestoreSelectionSchema,idempotencyKey:z.uuid(),externalRegistrationId:z.uuid().optional()});
 export const RestorePreviewRequestSchema=z.discriminatedUnion('mode',[
- z.strictObject({backupId:BackupIdSchema,principalId:RestoreIntentSchema.shape.principalId,idempotencyKey:z.uuid().optional(),...RestoreSelectionSchema.options[0].shape}),
- z.strictObject({backupId:BackupIdSchema,principalId:RestoreIntentSchema.shape.principalId,idempotencyKey:z.uuid().optional(),...RestoreSelectionSchema.options[1].shape}),
+ z.strictObject({backupId:BackupIdSchema,externalRegistrationId:z.uuid().optional(),principalId:RestoreIntentSchema.shape.principalId,idempotencyKey:z.uuid().optional(),...RestoreSelectionSchema.options[0].shape}),
+ z.strictObject({backupId:BackupIdSchema,externalRegistrationId:z.uuid().optional(),principalId:RestoreIntentSchema.shape.principalId,idempotencyKey:z.uuid().optional(),...RestoreSelectionSchema.options[1].shape}),
 ]);
-export const RestoreApplyRequestSchema=z.strictObject({previewToken:z.uuid(),confirmDiffHash:HashSchema,principalId:RestoreIntentSchema.shape.principalId,backupId:BackupIdSchema.optional()});
+export const RestoreApplyRequestSchema=z.strictObject({previewToken:z.uuid(),confirmDiffHash:HashSchema,principalId:RestoreIntentSchema.shape.principalId,backupId:BackupIdSchema.optional(),externalRegistrationId:z.uuid().optional()});
 
-export const RestorePreviewSchema = z.strictObject({ backupId: BackupIdSchema, previewToken: z.uuid(), expiresAt: count,
+export const RestorePreviewSchema = z.strictObject({ backupId: BackupIdSchema, externalRegistrationId:z.uuid().optional(), previewToken: z.uuid(), expiresAt: count,
   manifestHash: HashSchema, diffHash: HashSchema, mode: z.enum(['recover','fork']),
   differences: z.array(z.string()).max(500), blockers: z.array(z.string()).max(500),
   operationId:OperationIdSchema.optional(),sourceRunId:RunIdSchema.optional(),name:z.string().trim().min(1).max(120).optional(),reason:z.string().trim().min(1).max(4000).optional(),

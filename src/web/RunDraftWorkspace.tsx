@@ -1,5 +1,5 @@
 import React from 'react';
-import { RunConfigurationDraftSummarySchema, type CatalogPage, type RunConfigurationDraftPage } from '../domain/http.ts';
+import { RunConfigurationDraftSummarySchema, type CatalogPage, type RunConfigurationDraftPage, type RunConfigurationDraftView } from '../domain/http.ts';
 import { createEmptyRunConfigurationDraft, type RunConfigurationDraft } from '../domain/production.ts';
 import { DRAFT_SECTIONS, changedDraftSections, describeDraftSection, reconcileDraft, type DraftSection } from './draft-form.ts';
 import { RunDraftEditor } from './RunDraftEditor.tsx';
@@ -17,6 +17,18 @@ type Saving = { kind: 'idle' } | { kind: 'saving'; intent: DraftSaveIntent }
   | { kind: 'validating'; document: DraftDocument; key: string } | { kind: 'validation-uncertain'; document: DraftDocument; key: string; message: string }
   | { kind: 'conflict'; local: RunConfigurationDraft; remote: DraftDocument; keepLocal: DraftSection[]; message: string };
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'No pudimos completar esta operación.'; }
+
+export function RunDraftValidationResult({validation,state}:{validation:RunConfigurationDraftView['validation'];state:RunConfigurationDraftView['state']}) {
+  const derivedPublished=validation.kind==='valid'&&state.editability==='fork-published'&&state.worldRevision!==null;
+  const detail=derivedPublished
+    ? 'Configuración derivada publicada y conservada como preparación de sólo lectura. Los requisitos de ejecución se comprueban por separado; la obra no se inicia automáticamente.'
+    : validation.promotion==='promoted'
+      ? 'Promoción durable confirmada. La obra no se inicia automáticamente.'
+      : validation.kind==='valid'
+        ? 'Datos válidos. Esta revisión todavía no fue promovida; validá la puesta guardada para confirmar su promoción.'
+        : 'Preparación sin promover. Completá los puntos pendientes y validá la puesta guardada.';
+  return <section className="draft-validation" aria-label="Resultado de validación"><h3>{validation.kind==='valid'?'Configuración válida':validation.kind==='invalid'?'Configuración incompatible':'Preparación pendiente'}</h3><p>{detail}</p>{validation.kind!=='valid'&&<ul>{validation.issues.map((issue,index)=><li key={`${issue.field}:${index}`}><a href={`#draft-${issue.field.split(/[.\[]/)[0]}`}>{DRAFT_SECTIONS.find(([field])=>field===issue.field.split(/[.\[]/)[0])?.[1]??issue.field}: {issue.detail}</a></li>)}</ul>}</section>;
+}
 
 export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRequest?: {runId:string} }) {
   const [voiceOpened, setVoiceOpened] = React.useState(false);
@@ -147,7 +159,7 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <><nav className="run-view-nav" aria-label="Vista de la representación"><button aria-current={runView === 'preparation' ? 'page' : undefined} onClick={() => setRunView('preparation')}>Preparación y requisitos</button><button aria-current={runView === 'stage' ? 'page' : undefined} onClick={() => setRunView('stage')}>Escenario, conversación e historia</button><button aria-current={runView === 'voice' ? 'page' : undefined} onClick={() => { setVoiceOpened(true); setRunView('voice'); }}>Voces y sonido</button></nav><RunControlsPanel runId={screen.document.view.configuration.runId} onRead={acceptRun} disabled={dirty || saving.kind !== 'idle'} /></>}
       <div hidden={runView !== 'preparation'}>
       {draft && <RunDraftEditor key={`${draft.runId}:${screen.kind === 'editing' || screen.kind === 'new' || screen.kind === 'reconciled' ? screen.epoch : 0}`} draft={draft} catalog={props.catalog} saving={saving.kind !== 'idle'} {...(screen.kind === 'editing' ? { lifecycle: screen.document.view.state.lifecycle, readOnly: screen.document.view.state.editability === 'fork-published' || !['draft', 'ready'].includes(currentRun?.view.runId === draft.runId ? currentRun.view.lifecycle.kind : screen.document.view.state.lifecycle), ...(screen.document.view.state.editability === 'fork-published' ? { readOnlyReason: 'fork-published' as const } : {}) } : {})} {...(message ? { message } : {})} initialDirty={screen.kind === 'new' || screen.kind === 'reconciled'} onDirty={setDirtyState} onSave={save} onValidate={() => void validate()} />}
-      {validation && <section className="draft-validation" aria-label="Resultado de validación"><h3>{validation.kind === 'valid' ? 'Configuración válida' : validation.kind === 'invalid' ? 'Configuración incompatible' : 'Preparación pendiente'}</h3><p>{validation.promotion === 'promoted' ? 'Promoción durable confirmada. La obra no se inicia automáticamente.' : 'Preparación sin promover. Completá los puntos pendientes y validá la puesta guardada.'}</p>{validation.kind !== 'valid' && <ul>{validation.issues.map((issue, index) => <li key={`${issue.field}:${index}`}><a href={`#draft-${issue.field.split(/[.\[]/)[0]}`}>{DRAFT_SECTIONS.find(([field]) => field === issue.field.split(/[.\[]/)[0])?.[1] ?? issue.field}: {issue.detail}</a></li>)}</ul>}</section>}
+      {validation && (screen.kind==='editing'||screen.kind==='reconciled') && <RunDraftValidationResult validation={validation} state={screen.document.view.state}/>}
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && <RunPreflightPanel key={screen.document.view.configuration.runId} document={screen.document} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { currentRun } : {})} disabled={dirty || saving.kind !== 'idle'} />}
       </div>
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <div hidden={runView !== 'stage'}><RunStageWorkspace key={screen.document.view.configuration.runId} runId={screen.document.view.configuration.runId} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { knownLifecycle: currentRun.view.lifecycle.kind } : {})} active={runView === 'stage'} derivedPreparation={screen.document.view.state.editability === 'fork-published'} onOpenRun={(id) => void open(id)} /></div>}

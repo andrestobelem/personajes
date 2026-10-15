@@ -1,0 +1,47 @@
+# Diálogo sobre transporte y admisión de backups externos — corte 49
+
+Intercambio real entre `/root/restore_interviewer` y `/root/restore_custodian`, coordinado por el integrador según [grill-with-docs](../../.agents/skills/grill-with-docs/SKILL.md), [grilling](../../.agents/skills/grilling/SKILL.md), [domain-modeling](../../.agents/skills/domain-modeling/SKILL.md) y el [procedimiento delegado](../diseno/procedimiento-grill-with-docs.md). Las respuestas de agentes no son elecciones expresas del usuario ni prueban capacidades ejecutadas.
+
+Fuentes contrastadas: [PRD](../PRD.md) UI-10/MEM-07/MEM-08/P14/P24; [S02](../specs/02-persistencia-e-icm.md), [S04](../specs/04-api-y-autoridad.md), [restauración como bifurcación](restauracion-como-bifurcacion.md), [recuperación offline](recuperacion-offline.md), `backup-service.ts`, `backup-fork-source.ts`, `src/domain/backup.ts`, `src/server/operator-extension.ts` y `src/server/http.ts`.
+
+## Ronda 1 — identidad externa, procedencia y privacidad
+
+**Pregunta efectivamente enviada.** Se propone descargar el backup privado completo y admitirlo gráficamente en otro host, sólo para crear un fork. ¿Conviene una identidad de registro host diferente de `manifest.backupId`, vinculada a lineage y hashes originales, para evitar colisiones? ¿Qué significa procedencia sin firma? ¿Cómo distinguir este paquete de una exportación pública y listar fuentes sin confiar en el host original vivo?
+
+**Respuesta del custodio.** Los requisitos de perspectiva y Pi privados, UI-10/MEM-07/MEM-08/P14/P24 y S04 preservan originales, importación como datos, exclusión de credenciales, nuevas memorias/sesiones al bifurcar y exportación portable distinta del backup. El paquete privado contiene memorias, JSONL, medios y metadatos de rutas y operador; la GUI debe explicarlo al descargar o subir, sin convertirlo en publicación ni agregar una confirmación ritual. Checksums prueban integridad, no autenticidad; el contenido no pasa a ser canon ni instrucciones administrativas por importarse.
+
+La propuesta es `registrationId` o `importId` generado por el host, separado del `manifest.backupId` original. Se conservan ambas identidades, hashes de manifiesto y bytes recibidos, principal y fecha, sin reescribir el manifiesto. Rechazar cualquier colisión de backupId sería seguro pero impediría históricos válidos coincidentes. La procedencia del destino debe incluir el backup original y una referencia distinta a la admisión local. Un replay exacto de la misma operación y principal recupera la misma admisión; deduplicar entre principales no puede otorgar ACL ni revelar existencia.
+
+Sólo se listan cortes públicos tras validar y registrar la fuente. El fork congela journal, configuración, estructura y cortes privados del bundle; no requiere que exista una corrida homónima en el host vivo. Recover de fuente extranjera se bloquea; no se debilitan las exigencias de mismo root y lineage del corte 48. No falta preferencia humana material para estas reglas.
+
+## Hallazgos previos a la segunda ronda
+
+El transporte actual limita el cuerpo de extensiones a 24 MiB y respuestas binarias a 32 MiB, mientras los archivos de backup admiten 256 MiB. Un único JSON/base64 no cubre ese contrato. `readBackupForkSource` abre una copia con `openJournal`, que aplica SQL y migraciones: copia privada por sí sola no valida un SQLite externo no confiable. Además, el locator actual supone `backups/manifest.backupId`; identidades separadas necesitan un locator registrado por el host, nunca una ruta aportada por el cliente.
+
+## Ronda 2 — transporte acotado, cuarentena y SQLite
+
+**Pregunta efectivamente enviada.** ¿Un transporte versionado con índice y chunks, límites por archivo y total, offsets e integridad permite conservar archivos de 256 MiB sin chocar con los límites HTTP actuales? Se propone cuarentena durable sin unpack de rutas libres, estados receiving/validating/registered/failed y reanudación de partes. ¿Cómo se valida SQLite antes de `openJournal`, sin ejecutar esquema importado? ¿Qué se exige antes y después de registrar y cómo se tratan versiones anteriores?
+
+**Respuesta del custodio.** Índice y chunks acotados, Blob/streaming sin base64 global, índices/offsets validados por host, contenido contiguo, hashes y CAS/idempotencia son propuestas compatibles. Un total inicial de 1 GiB sería un límite técnico explícito, no soporte de todos los backups que hoy permite crear el productor. Hay que alinear productor, admisión y descarga y explicar el rechazo de paquetes históricos sobredimensionados, o ampliar el transporte; no truncar ni declarar soporte universal.
+
+La validación de bytes, esquema y versión debe preceder a `openJournal` en una copia privada. `trusted_schema=OFF`, extensiones deshabilitadas y límites complementan la defensa; no sustituyen la validación de catálogo. El journal puede exigir catálogo cerrado sin vistas, triggers, tablas virtuales o elementos desconocidos. Esa prohibición no puede aplicarse indiscriminadamente a memorias ICM: la versión real incluye FTS y vec0. Debe verificarse su catálogo exacto y backing tables sin ejecutar extensiones, como en assessment del corte 48; el fork reconstruye nuevas memorias desde envelopes validados del journal. No abre paths heredados ni adopta sesiones JSONL.
+
+Se propone admitir inicialmente la versión actual con esquema cerrado aprobado. Versiones anteriores requieren catálogo permitido y migración host probada sobre copia; no se promete soporte sin evidencia. Antes del registro la cuarentena puede mostrar errores, versión, hashes y metadatos públicos obtenidos de forma segura, pero no se adopta como fuente ni habilita fork. Registered exige inventario, hashes, SQLite, fences, cortes privados y configuración completos más ACL local. No se completa una fuente incompleta desde la corrida viva. Los JSONL forman parte del backup privado transportado, pero no se convierten en sesiones de los nuevos actores.
+
+## Ronda 3 — admisión, confirmación y prueba del paquete completo
+
+**Pregunta efectivamente enviada.** ¿CAS e identidad durable permiten finalizar y registrar una carga íntegra automáticamente, sin una confirmación adicional, mientras restore-preview y confirmación del fork mantienen su contrato existente? Se proponen pruebas entre hosts, colisiones, archivo mayor de 32 MiB, partes manipuladas, caídas entre publicación y ledger, SQLite malicioso, roundtrip y GUI completa. ¿Qué falta para acreditar backup completo y no sólo el traslado del journal?
+
+**Respuesta del custodio.** Es compatible registrar automáticamente mediante upload/finalize autorizado por la acción gráfica; no hay requisito de confirmación extra porque esa admisión no aplica cambios a la obra. Registro no autentica al autor del contenido. Se conservan CAS, principal, identidad, hashes y replay de la misma admisión; GET no ejecuta. Restore-preview queda ligado a registro y hash, corte, principal, selección y diff; la confirmación conserva intención durable y recupera la misma operación/destino sin reupload. La cuarentena no reemplaza un registro ya publicado por colisión.
+
+El paquete completo exige comparar manifiesto original y todos sus archivos con bytes, tamaño y hashes: journal, memorias ICM, WAL de staging, sesiones actorales y administrativas forenses, metadata de forks incompletos y medios registrados. Un caso real con dos actores, memorias, sesiones, medios y fork staging demuestra un alcance que un journal aislado no prueba. El transporte conserva bytes privados exactos; el fork importa únicamente el corte seleccionado, experiencias permitidas y base dramática, preserva conocimiento desconocido y genera sus propios IDs de memoria. No reutiliza las bases o sesiones fuente.
+
+Las pruebas propuestas deben cubrir partes fuera de orden, duplicadas, offsets, truncado, hashes y límites; principales ajenos; caídas receiving/validating y rename antes de ledger; catálogo SQLite malicioso y recursos acotados frente a archivos deformados; FTS real; rutas prohibidas de autenticación y JSONL tratados como bytes; medios no ejecutados ni reproducidos automáticamente; descarga con ACL, `no-store` y nombre sin paths; backup original intacto; GUI upload→registro→selección→revisión→fork con ICM real y sin modelos. Recover extranjero se bloquea por la clase de registro externo, aunque el manifiesto afirme un originRootHash coincidente: una afirmación importada no equivale a una procedencia local confiable.
+
+Permitir descargar nuevamente un registro externo es compatible con ACL y bytes originales; si no se implementa, el alcance de descarga local debe declararse. No se detectaron preferencias humanas imprescindibles: límites y compatibilidad de esquema son decisiones técnicas delegadas que deben explicitarse y verificarse.
+
+## Resultado y límites
+
+Quedaron recomendados un registro host separado de la identidad de origen, transporte versionado por partes acotadas, cuarentena durable, catálogo SQLite validado antes de migraciones, procedencia que distingue integridad de autenticidad y reutilización del flujo durable de restore-fork. El contrato de recover local del corte 48 permanece sin ampliarse a backups extranjeros.
+
+El documento conserva tres rondas efectivamente intercambiadas y no afirma descarga, admisión ni fork externo ejecutados. La integración debe cotejar la capacidad real y la GUI con estas fronteras, conservar límites explícitos y no presentar un transporte parcial del journal como un backup privado completo.

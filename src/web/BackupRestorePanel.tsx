@@ -22,10 +22,11 @@ export function HostRecoveryStatus({job,onResume,busy=false,hasPreviousLock=fals
   const verified = job.state === 'succeeded' && job.phase === 'verified';
   return <div role="status"><h3>{verified ? 'Host recuperado y verificado' : job.state==='aborted' ? 'Recuperación cancelada; se conservó el host original' : job.state === 'failed' || job.state === 'interrupted' ? 'La recuperación requiere revisión' : 'Recuperación del host en curso'}</h3><p>{phases[job.phase]} · revisión {job.revision}.</p><p>Operación: <code>{job.operationId}</code> · backup <code>{job.backupId}</code>.</p>{job.safeCode !== null && <p role="alert">{job.safeCode}</p>}{!verified && <p>La consulta conserva esta operación y no vuelve a ejecutar la restauración.</p>}{onResume!==undefined&&job.state!=='succeeded'&&job.state!=='aborted'&&<button type="button" disabled={busy} onClick={onResume}>{hasPreviousLock?'Reanudar y revisar bloqueo anterior':job.state==='queued'||job.state==='running'?'Reanudar si se interrumpió':'Reanudar recuperación'}</button>}</div>;
 }
-export function BackupRestorePanel({ onOpenRun, onHostRecovered, onOriginalRetained, recoveryOnly = false, api = client, forkApi = forks }: { onOpenRun?: (runId: string) => void; onHostRecovered?:()=>void; onOriginalRetained?:()=>void; recoveryOnly?:boolean; api?: BackupClient; forkApi?: ForkClient }) {
+export function BackupRestorePanel({ onOpenRun, onHostRecovered, onOriginalRetained, onBackupAvailable, recoveryOnly = false, api = client, forkApi = forks }: { onOpenRun?: (runId: string) => void; onHostRecovered?:()=>void; onOriginalRetained?:()=>void; onBackupAvailable?:(backupId:string)=>void; recoveryOnly?:boolean; api?: BackupClient; forkApi?: ForkClient }) {
   const [restored] = React.useState(() => { if (typeof window === 'undefined') return null; try { return readStoredBackupIntent(window.sessionStorage); } catch { return null; } });
   const [backupId, setBackupId] = React.useState(restored?.backupId ?? '');
   const [backup, setBackup] = React.useState<BackupJob | null>(null);
+  React.useEffect(()=>{if(backup?.state==='succeeded')onBackupAvailable?.(backup.backupId);},[backup,onBackupAvailable]);
   const [sources, setSources] = React.useState<BackupSources | null>(null);
   const [mode, setMode] = React.useState<'fork'|'recover'>(restored?.kind === 'recover' ? 'recover' : 'fork');
   const [recovery, setRecovery] = React.useState<HostRecoveryJob|null>(null);

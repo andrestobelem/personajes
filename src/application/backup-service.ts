@@ -43,9 +43,10 @@ export type BackupQuiescePort = {
 /** Restore application is deliberately a host port: changing a live SQLite database or
  * rewriting IDs/session paths requires ownership, worker shutdown and journal contracts. */
 export type BackupRestoreContext = {
- manifest:BackupManifest;bundleRoot:string;manifestHash:string;mode:'recover'|'fork';
+ manifest:BackupManifest;bundleRoot:string;manifestHash:string;externalRegistrationId?:string;mode:'recover'|'fork';
  principalId:string;operationId:string;sourceRunId?:string;name?:string;reason?:string;
 };
+export type ExternalBackupPort={resolve(input:{registrationId:string;principalId:string}):{manifest:BackupManifest;hash:string;bundleRoot:string}};
 export type BackupRestorePort = {
  preview(input:BackupRestoreContext):{differences:string[];blockers:string[];targetFingerprint:string};
  /** Must be idempotent for operationId. A replay also reads the current durable job. */
@@ -156,6 +157,7 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
       });
       const manifest = BackupManifestSchema.parse({format:'personajes-backup',version:1,backupId:request.backupId,lineageId:lineage,originRootHash:digest(root),createdAt:now(),journalVersion:version,fences,files});
       const manifestJson = JSON.stringify(manifest);
+      if(Buffer.byteLength(manifestJson)>16*1024*1024)throw new Error('BACKUP_MANIFEST_TOO_LARGE');
       durableFile(join(stage,'manifest.json'),manifestJson);
       syncDirectory(stage);
       if (existsSync(destination)) throw new Error('BACKUP_DESTINATION_EXISTS');
@@ -174,17 +176,26 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
   }
   const StoredRestorePreviewSchema=RestorePreviewSchema.extend({intent:RestoreIntentSchema.optional()});
   const activeRestores=new Map<string,Promise<unknown>>();
-  let restorePort=input.restore;let closed=false;
+  let restorePort=input.restore;let externalBackupPort:ExternalBackupPort|undefined;let closed=false;
   function publicPreview(value:z.infer<typeof StoredRestorePreviewSchema>){const {intent,...publicValue}=value;return RestorePreviewSchema.parse(publicValue);}
   function context(bundle:ReturnType<typeof verify>,intent:z.infer<typeof RestoreIntentSchema>):BackupRestoreContext{
     return {manifest:bundle.manifest,bundleRoot:bundle.bundleRoot,manifestHash:bundle.hash,
-      principalId:intent.principalId,operationId:intent.operationId,...intent.selection};
+      principalId:intent.principalId,operationId:intent.operationId,...(intent.externalRegistrationId===undefined?{}:{externalRegistrationId:intent.externalRegistrationId}),...intent.selection};
+  }
+  function resolveBackup(request:{backupId:string;principalId:string;externalRegistrationId?:string|undefined;mode:'recover'|'fork'}):ReturnType<typeof verify>{
+    if(request.externalRegistrationId===undefined)return verify(request.backupId);
+    if(request.mode!=='fork')throw new Error('RESTORE_EXTERNAL_RECOVER_UNAVAILABLE');
+    if(externalBackupPort===undefined)throw new Error('RESTORE_EXTERNAL_SOURCE_UNAVAILABLE');
+    const registered=externalBackupPort.resolve({registrationId:request.externalRegistrationId,principalId:request.principalId});
+    const bundle=z.strictObject({manifest:BackupManifestSchema,hash:z.string().regex(/^[a-f0-9]{64}$/),bundleRoot:z.string().min(1).refine(isAbsolute)}).parse(registered);
+    if(bundle.manifest.backupId!==request.backupId)throw new Error('RESTORE_PREVIEW_TARGET_MISMATCH');
+    return bundle;
   }
   function assessmentHash(manifestHash:string,intent:z.infer<typeof RestoreIntentSchema>,assessment:{differences:string[];blockers:string[];targetFingerprint:string}){
     return digest(JSON.stringify({manifestHash,intent,...assessment}));
   }
   function preview(raw: unknown) {
-    if(closed)throw new Error('RESTORE_SERVICE_CLOSED');const request=RestorePreviewRequestSchema.parse(raw);const bundle=verify(request.backupId);
+    if(closed)throw new Error('RESTORE_SERVICE_CLOSED');const request=RestorePreviewRequestSchema.parse(raw);const bundle=resolveBackup(request);
     const selection=request.mode==='fork'?{mode:request.mode,sourceRunId:request.sourceRunId,name:request.name,reason:request.reason}:{mode:request.mode};
     const idempotencyKey=request.idempotencyKey??randomUUID();
     const previous=db.prepare("SELECT token,preview_json FROM backup_restore_previews WHERE json_extract(preview_json,'$.intent.principalId')=? AND json_extract(preview_json,'$.intent.idempotencyKey')=? LIMIT 2").all(request.principalId,idempotencyKey);
@@ -192,17 +203,17 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
     if(previous.length===1){
       const row=z.strictObject({token:z.uuid(),preview_json:z.string()}).parse(previous[0]);integrity.verify('backup_restore_previews','token=?',[row.token]);
       const existing=StoredRestorePreviewSchema.parse(JSON.parse(row.preview_json));
-      if(existing.backupId!==request.backupId||existing.intent===undefined||JSON.stringify(existing.intent.selection)!==JSON.stringify(selection))throw new Error('RESTORE_IDEMPOTENCY_REUSE');
+      if(existing.backupId!==request.backupId||existing.manifestHash!==bundle.hash||existing.externalRegistrationId!==request.externalRegistrationId||existing.intent===undefined||JSON.stringify(existing.intent.selection)!==JSON.stringify(selection))throw new Error('RESTORE_IDEMPOTENCY_REUSE');
       return publicPreview(existing);
     }
-    const intent=RestoreIntentSchema.parse({operationId:randomUUID(),principalId:request.principalId,selection,idempotencyKey});
+    const intent=RestoreIntentSchema.parse({operationId:randomUUID(),principalId:request.principalId,selection,idempotencyKey,...(request.externalRegistrationId===undefined?{}:{externalRegistrationId:request.externalRegistrationId})});
     const assessment=restorePort?.preview(context(bundle,intent))??{
       differences:bundle.manifest.fences.map(fence=>`run:${fence.runId}:seq:${fence.lastSeq}`),
       blockers:[request.mode==='fork'?'RESTORE_FORK_ID_REWRITE_UNAVAILABLE':'RESTORE_OFFLINE_OWNERSHIP_UNAVAILABLE',
         ...(bundle.manifest.files.some(file=>file.path.endsWith('.jsonl'))?['RESTORE_SESSION_PATH_RECONCILIATION_REQUIRED']:[])],targetFingerprint:'unavailable',
     };
     const diffHash=assessmentHash(bundle.hash,intent,assessment);
-    const result=StoredRestorePreviewSchema.parse({backupId:request.backupId,...intent.selection,operationId:intent.operationId,manifestHash:bundle.hash,diffHash,previewToken:randomUUID(),expiresAt:now()+5*60*1000,differences:assessment.differences,blockers:assessment.blockers,intent});
+    const result=StoredRestorePreviewSchema.parse({backupId:request.backupId,...(intent.externalRegistrationId===undefined?{}:{externalRegistrationId:intent.externalRegistrationId}),...intent.selection,operationId:intent.operationId,manifestHash:bundle.hash,diffHash,previewToken:randomUUID(),expiresAt:now()+5*60*1000,differences:assessment.differences,blockers:assessment.blockers,intent});
     // This sealed intent precedes every external effect and survives claim/apply crashes.
     db.prepare('INSERT INTO backup_restore_previews(token,preview_json,target_fingerprint) VALUES(?,?,?)').run(result.previewToken,JSON.stringify(result),assessment.targetFingerprint);
     integrity.seal('backup_restore_previews','token=?',[result.previewToken]);return publicPreview(result);
@@ -215,6 +226,8 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
     const p=StoredRestorePreviewSchema.parse(JSON.parse(record.preview_json));
     if(p.intent===undefined)throw new Error('RESTORE_LEGACY_PREVIEW_RECREATE');
     if(p.intent.principalId!==request.principalId)throw new Error('RESTORE_PREVIEW_NOT_FOUND');
+    if(p.intent.externalRegistrationId!==p.externalRegistrationId)throw new Error('RESTORE_INTENT_INVALID');
+    if(request.externalRegistrationId!==p.intent.externalRegistrationId)throw new Error('RESTORE_PREVIEW_TARGET_MISMATCH');
     if(p.intent.selection.mode!==p.mode||p.intent.operationId!==p.operationId||(p.intent.selection.mode==='fork'&&(p.intent.selection.sourceRunId!==p.sourceRunId||p.intent.selection.name!==p.name||p.intent.selection.reason!==p.reason)))throw new Error('RESTORE_INTENT_INVALID');
     if(request.backupId!==undefined&&request.backupId!==p.backupId)throw new Error('RESTORE_PREVIEW_TARGET_MISMATCH');
     if(p.diffHash!==request.confirmDiffHash)throw new Error('RESTORE_DIFF_CONFIRMATION_REQUIRED');
@@ -222,7 +235,7 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
     // Recovery mode may have an offline-only implementation with a final cached result.
     if(record.used&&record.result_json!==null&&p.mode==='recover')return z.json().parse(JSON.parse(record.result_json));
     if(!record.used&&p.expiresAt<=now())throw new Error('RESTORE_PREVIEW_EXPIRED');
-    const bundle=verify(p.backupId);
+    const bundle=resolveBackup({backupId:p.backupId,principalId:p.intent.principalId,mode:p.intent.selection.mode,...(p.intent.externalRegistrationId===undefined?{}:{externalRegistrationId:p.intent.externalRegistrationId})});
     if(p.manifestHash!==bundle.hash||p.blockers.length||!restorePort)throw new Error('RESTORE_BLOCKED');
     const selected=context(bundle,p.intent);const port=restorePort;
     if(!record.used){
@@ -248,11 +261,12 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
     const requests=rows.map(raw=>{const row=z.strictObject({token:z.uuid(),preview_json:z.string()}).parse(raw);integrity.verify('backup_restore_previews','token=?',[row.token]);const p=StoredRestorePreviewSchema.parse(JSON.parse(row.preview_json));return {row,p};});
     return await Promise.all(requests.map(async({row,p})=>{
       if(p.intent===undefined)return {previewToken:row.token,status:'legacy-preview' as const};
-      try{await restore({previewToken:row.token,confirmDiffHash:p.diffHash,principalId:p.intent.principalId,backupId:p.backupId});return {previewToken:row.token,status:'resumed' as const};}
+      try{await restore({previewToken:row.token,confirmDiffHash:p.diffHash,principalId:p.intent.principalId,backupId:p.backupId,...(p.intent.externalRegistrationId===undefined?{}:{externalRegistrationId:p.intent.externalRegistrationId})});return {previewToken:row.token,status:'resumed' as const};}
       catch(error){return {previewToken:row.token,status:'failed' as const,code:error instanceof Error&&/^RESTORE_[A-Z_]+$/.test(error.message)?error.message:'RESTORE_RECOVERY_FAILED'};}
     }));
   }
   return Object.freeze({create,get,verify,preview,restore,recoverRestores,
+    setExternalBackupPort(port:ExternalBackupPort){if(closed||externalBackupPort)throw new Error('RESTORE_EXTERNAL_SOURCE_ALREADY_CONFIGURED');externalBackupPort=port;},
     setRestorePort(port:BackupRestorePort){if(closed||restorePort)throw new Error('RESTORE_PORT_ALREADY_CONFIGURED');restorePort=port;},
     async waitForRestores(){while(activeRestores.size>0)await Promise.allSettled([...activeRestores.values()]);},
     close(){if(activeRestores.size>0)throw new Error('RESTORE_OPERATIONS_ACTIVE');if(closed)return;closed=true;db.close();},

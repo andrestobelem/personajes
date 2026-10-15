@@ -316,3 +316,25 @@ Los recursos de control sobreviven fuera del journal sustituido. La admisión co
 La reapertura invalida sesiones HTTP, CSRF y opt-ins privados; la GUI restablece autenticación local y consulta la operación conservada. No se restauran permisos de browser como identidad ficticia. Las sesiones Pi, memorias y presupuesto conservan sus contratos, sin inferencia ni TTS automáticos. Divergencia de estado completo, corrupción, tablas/archivos desconocidos, origen de otra raíz o lineage bloquean; preservar el original no autoriza rollback con pérdida desconocida. [Contrato de persistencia](02-persistencia-e-icm.md) y [evidencia/limitaciones](../auditoria/recuperacion-offline.md).
 
 `HostRecoveryJob` distingue además `aborted/original-retained`: fallo anterior al intercambio con original acreditado y reabierto, sin declarar éxito de restore. Libera la admisión; no se agenda resume ni cuenta como operación pendiente. Un fallo que no pueda demostrar esa salida conserva control offline y reanudación explícita.
+
+## Transferencia y restore de registros externos — corte 49
+
+Todas las rutas mantienen operador local, ACL por principal y CSRF/clave en escrituras. El cliente no aporta paths host ni convierte checksums en autoridad. Un backup descargable es privado y contiene memoria/sesiones/medios; la GUI lo explica, conservando su diferencia con el export portable.
+
+| Ruta | Contrato ejecutado |
+|---|---|
+| `POST /backup-exports` | `{backupId}` local registrado; 202 job de export. |
+| `GET /backup-exports/{exportId}` | Estado y ETag sin iniciar ni regenerar. |
+| `GET /backup-exports/{exportId}/download` | Sólo propietario y export succeeded; stream privado con Content-Length, SHA-256, filename seguro, backpressure y cierre del descriptor. No límite del antiguo DTO binario de 32 MiB. |
+| `POST /backup-imports` | `{fileName,bytes}` acotados; 201 import en uploading, ID host y ETag. El nombre no es una ruta. |
+| `GET /backup-imports/{importId}` | DTO uploading/validating/registered/failed/interrupted/cancelled, revisión y progreso. Sólo lectura. |
+| `PUT /backup-imports/{importId}/parts` | If-Match `"backup-import:<id>:r<revision>"`; `{offset,contentBase64,sha256}` de hasta 1 MiB decodificado. Hash/offset/CAS e idempotencia durables. |
+| `POST /backup-imports/{importId}/finalize` | Body vacío, ETag y clave; valida upload íntegro y programa validación. No aplica una obra. |
+| `POST /backup-imports/{importId}/retry` / `DELETE /backup-imports/{importId}` | Body vacío, ETag y clave; reintento o cancelación explícitos según estado. GET nunca los sustituye. |
+| `GET /backup-registrations/{registrationId}` | Registro privado admitido con sourceBackupId/lineage, hashes y fuentes públicas; autor no autenticado. ETag `"backup-registration:<id>:<manifestHash>"`. |
+| `POST /backup-registrations/{registrationId}/restore-preview` | Sólo `{mode:"fork",sourceRunId,name,reason}`, ligado a registro/principal/hash; diferencias y token estable. recover extranjero rechazado. |
+| `POST /backup-registrations/{registrationId}/restore` | If-Match del registro, clave, `{previewToken,confirmDiffHash}`; 202 ForkJobView/Location/ETag. Intención y recibos durables; no copia sesiones ni secretos y no llama modelos. |
+
+IDs de import/registro/export son host-owned e independientes del backupId original, que se conserva como procedencia. Coincidencias de ID o lineage con un backup local no lo sobrescriben ni habilitan recover extranjero. Las fuentes externas sólo se usan tras validación acotada y publicación registrada; el contenido no se interpreta como instrucciones. La finalización autorizada registra sin otra confirmación ritual; crear fork sí exige revisar/confirmar diff. El ledger de transferencia externo a la raíz y los recibos exchange conservan replays/propietario; consulta no ejecuta.
+
+Partes, archivo/agregado, espacio reservado, timeout y fuentes congeladas tienen límites explícitos en [S02](02-persistencia-e-icm.md). El flujo no promete migrar journals antiguos ni aceptar otros esquemas. [Contrato, pruebas entre dos hosts y recorrido gráfico](../auditoria/backups-externos.md).

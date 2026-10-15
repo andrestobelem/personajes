@@ -32,6 +32,12 @@ import { createHostBackupQuiesce } from '../application/host-backup-quiesce.ts';
 import type { HostDirectoryOperation } from '../adapters/host-ownership.ts';
 import type { LocalHttpOptions } from './http.ts';
 import type { BackupRestorePort } from '../application/backup-service.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
+import { openBackupTransferService } from '../application/backup-transfer-service.ts';
+import { ApprovedJournalSchemaSchema } from '../application/external-backup-validation.ts';
+import { createBackupTransferRoutes } from './backup-transfer-routes.ts';
+import { createExternalBackupRestoreRoutes } from './external-backup-restore-routes.ts';
 
 /** Reusable composition of one owned private directory. Creation does not recover,
  * begin a representation, login, probe a provider, or synthesize audio. */
@@ -66,6 +72,8 @@ export async function createProductionHost(input:{
    await settle(()=>exchange?.backups.waitForRestores());
    await settle(()=>forks?.close());
    await settle(()=>voices?.close());
+   await settle(()=>transfers?.close());
+   await settle(()=>externalRestoreRoutes?.close());
    await settle(()=>exchange?.close());
    await settle(()=>preflightJobs?.close());
    await settle(()=>accessJobs?.close());
@@ -87,10 +95,24 @@ let voices: ReturnType<typeof createVoiceRuntime> | undefined;
 let exchange: Awaited<ReturnType<typeof createExchangeRuntime>> | undefined;
 let forks: ReturnType<typeof createForkRuntime> | undefined;
 let restoreRecovery: Promise<unknown> | undefined;
+let transfers:ReturnType<typeof openBackupTransferService>|undefined;
+let externalRestoreRoutes:ReturnType<typeof createExternalBackupRestoreRoutes>|undefined;
 try {
   voices=createVoiceRuntime({host,...(input.privateAuthRoot===undefined?{}:{privateAuthRoot:input.privateAuthRoot}),onDiagnostic:diagnostic=>diagnosticSink(diagnostic)});
   const configuredExchange=await createExchangeRuntime({host,catalog});
   exchange=configuredExchange;
+  const configuredTransfers=openBackupTransferService({privateDataRoot:host.privateDataRoot,ownerToken:host.ownerToken,
+    ...(input.directoryOperation===undefined?{}:{directoryOperation:input.directoryOperation}),
+    readLocalBackup:id=>configuredExchange.backups.verify(id),
+    readApprovedJournalSchema(){
+      const reader=new DatabaseSync(join(host.privateDataRoot,'world.sqlite'),{readOnly:true});
+      try{return ApprovedJournalSchemaSchema.parse(reader.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').all());}
+      finally{reader.close();}
+    },
+  });
+  transfers=configuredTransfers;
+  configuredExchange.backups.setExternalBackupPort({resolve:request=>configuredTransfers.resolveRegistration(request)});
+  externalRestoreRoutes=createExternalBackupRestoreRoutes({transfers:configuredTransfers,backups:configuredExchange.backups,journalPath:join(host.privateDataRoot,'world.sqlite')});
   piRuntime = await PiRuntime.create({ privateDataRoot: host.privateDataRoot });
   oauthJobs = await createPiOAuthJobs({
     journal: host.journal, ownerToken: host.ownerToken,
@@ -117,7 +139,8 @@ try {
       onNarrationPublished: event => voices?.onNarrationPublished(event),
     });
   }
-  const forkRestore=createBackupForkRestorePort({host,...(forks===undefined?{}:{runtime:forks})});
+  const forkRestore=createBackupForkRestorePort({host,...(forks===undefined?{}:{runtime:forks}),
+    readExternalSource:request=>configuredTransfers.readRegisteredSource(request)});
   exchange.backups.setRestorePort(input.configureRestorePort?.(forkRestore)??forkRestore);
 worldDeliveries = representation === undefined ? createWorldDeliverySupervisor({
   journal: host.journal,
@@ -142,7 +165,8 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   const httpOptions={
     admissionBarrier:input.admissionBarrier,
     runtimeComposition:()=>({kind:representation!==undefined&&!representation.isClosed?'composed':'unavailable'}),
-    operatorExtensions:[createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),...(exchange===undefined?[]:[exchange.routes])],
+    operatorExtensions:[createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),
+      createBackupTransferRoutes({service:()=>configuredTransfers}),externalRestoreRoutes,...(exchange===undefined?[]:[exchange.routes])],
     runConfigurationDrafts: host.journal,
     forks: createForkApplication({journal:host.journal,...(forks===undefined?{}:{runtime:forks})}),
     readRunModelTimeBudget: (request) => host.journal.readRunModelTimeBudget(request),
@@ -205,7 +229,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
  // A successfully reopened host may outlive that operation; later close receives
  // a fresh capability explicitly or acquires the ordinary ownership gate.
  closeOptions=undefined;
- return Object.freeze({host,exchange:configuredExchange,httpOptions,recover,close});
+ return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,httpOptions,recover,close});
 } catch (error) {
   try { await close(); } catch (closeError) { throw new AggregateError([error,closeError], 'Production setup and cleanup failed'); }
   throw error;

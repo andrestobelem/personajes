@@ -1,5 +1,6 @@
 import React from 'react';
 import { BackupRestorePanel } from './BackupRestorePanel.tsx';
+import { BackupTransferPanel } from './BackupTransferPanel.tsx';
 import type { z } from 'zod';
 import type { CatalogPage } from '../domain/http.ts';
 import type { DossierAdaptationImport } from '../domain/catalog.ts';
@@ -12,6 +13,7 @@ function fields(dossier: z.infer<typeof DossierImportPreviewSchema>['before']) {
   const {markdown:_,...normalized}=dossier;return JSON.stringify(normalized,null,2);
 }
 export function DossierExchangePanel({catalog,onOpenRun,onHostRecovered,onOriginalRetained}:{catalog:CatalogPage['items'];onOpenRun?:(runId:string)=>void;onHostRecovered?:()=>void;onOriginalRetained?:()=>void}) {
+  const [availableBackupId,setAvailableBackupId]=React.useState<string>();
   const [character,setCharacter]=React.useState(catalog[0]?.characterId??'');
   const [imported,setImported]=React.useState<z.infer<typeof ImportViewSchema>>();
   const [preview,setPreview]=React.useState<z.infer<typeof DossierImportPreviewSchema>>();
@@ -44,7 +46,7 @@ export function DossierExchangePanel({catalog,onOpenRun,onHostRecovered,onOrigin
     await execute({kind:'import',intent:exchangeIntent('/api/v1/imports',body)});
   }
   const blocked=busy||pending!==undefined;
-  return <><BackupRestorePanel {...(onOriginalRetained === undefined ? {} : {onOriginalRetained})} {...(onHostRecovered === undefined ? {} : {onHostRecovered})} {...(onOpenRun === undefined ? {} : {onOpenRun})} /><section className="dossier-exchange" aria-label="Intercambio de expedientes">
+  return <><BackupRestorePanel onBackupAvailable={setAvailableBackupId} {...(onOriginalRetained === undefined ? {} : {onOriginalRetained})} {...(onHostRecovered === undefined ? {} : {onHostRecovered})} {...(onOpenRun === undefined ? {} : {onOpenRun})} /><BackupTransferPanel {...(availableBackupId===undefined?{}:{initialBackupId:availableBackupId})} {...(onOpenRun===undefined?{}:{onOpenRun})}/><section className="dossier-exchange" aria-label="Intercambio de expedientes">
     <h1>Importar y exportar expedientes</h1>
     <p>Conservá una copia portable o revisá un expediente importado antes de crear una adaptación. El original investigado se conserva.</p>
     <fieldset disabled={blocked}><legend>Exportar</legend><label>Personaje <select value={character} onChange={event=>setCharacter(event.target.value)}>{catalog.map(item=><option key={item.characterId} value={item.characterId}>{item.displayName}</option>)}</select></label>

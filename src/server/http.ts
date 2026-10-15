@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   CatalogAvatarReadSchema, CatalogDocumentReadSchema,
   listAvatars, listCharacters, listLibraryDocuments, loadCatalog, readAvatar,
@@ -2475,6 +2477,29 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           case 'binary': {
             if (createHash('sha256').update(result.bytes).digest('hex') !== result.sha256) throw new Error('Artifact checksum mismatch');
             noStoreBinary(res, 200, result.mimeType, result.bytes, result.sha256, result.filename); return;
+          }
+          case 'stream': {
+            const expected=result;let count=0;let pending:Uint8Array|undefined;const hash=createHash('sha256');
+            // Keep the final chunk until the digest is verified. A corrupt file
+            // must not fulfill Content-Length before the connection is destroyed.
+            const verifier=new Transform({
+              transform(chunk:unknown,_encoding,done){
+                if(!(chunk instanceof Uint8Array)){done(new Error('BACKUP_DOWNLOAD_CHUNK_INVALID'));return;}
+                count+=chunk.byteLength;
+                if(!Number.isSafeInteger(count)||count>expected.bytesLength){done(new Error('BACKUP_DOWNLOAD_SIZE_MISMATCH'));return;}
+                hash.update(chunk);const previous=pending;pending=chunk;done(null,previous);
+              },
+              flush(done){
+                if(count!==expected.bytesLength||hash.digest('hex')!==expected.sha256){done(new Error('BACKUP_DOWNLOAD_INTEGRITY_MISMATCH'));return;}
+                if(pending!==undefined)this.push(pending);done();
+              },
+            });
+            res.writeHead(200,{'Content-Type':expected.mimeType,'Content-Length':String(expected.bytesLength),
+              'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff',
+              'Content-Disposition':`attachment; filename="${expected.filename}"`,ETag:`"${expected.sha256}"`});
+            try{await pipeline(expected.stream,verifier,res);}
+            finally{expected.stream.destroy();verifier.destroy();}
+            return;
           }
           case 'problem': fail({ status: HttpFailureStatusSchema.parse(result.status), ...result.error });
           default: { const exhaustive: never = result; throw new Error(String(exhaustive)); }

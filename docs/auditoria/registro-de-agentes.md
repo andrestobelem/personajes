@@ -75,3 +75,19 @@ Se corrigió un falso positivo de la revisión técnica: `AgentSession.getAvaila
 | `actor_cut_integrity_review` | Revisión independiente, hallazgos corregidos y 31 focales finales aprobados. |
 
 La raíz integró, verificó 946 pruebas aprobadas/una omitida por plataforma, build y QA gráfico, actualizó trazabilidad y mantuvo la aceptación integral pendiente. [Detalle](recuperacion-offline.md).
+
+## Corte 49 — transferencia y admisión externa
+
+| Agente | Responsabilidad y evidencia |
+|---|---|
+| `restore_interviewer` y `restore_custodian` | Tres rondas de entrevista, respuestas, ADR 0014 y reconciliación documental. |
+| `actor_cut_journal` | Codec acotado con inventario completo y pruebas; regresiones SQLite de recibos, concurrencia, muerte de proceso y atomicidad ante errores. |
+| `fork_icm_audit` | Worker aislado, esquema del host, catálogo ICM fijado y fuentes congeladas; ocho ensayos con ICM real. |
+| `recovery_ownership` | Servicio durable de transferencia, cuotas acumulativas, publicación interrumpida, ownership y reintentos explícitos. |
+| `fork_http` | Streaming autenticado, partes con CAS, cierre del descriptor y barrera hasta terminar la descarga. |
+| `fork_backup` | Origen externo en restore, namespace durable de operaciones y correcciones de concurrencia/atomicidad de recibos. |
+| `restore_ui` y `actor_cut_inspector` | Transferencia gráfica y recuperación de intenciones; revisión de registros sucesivos, respuestas tardías y fuentes de descarga. |
+| `actor_cut_migration_tests` | Round-trip productivo entre dos hosts, archive mayor de 32 MiB, ICM/JSONL reales, colisión de ID y replay tras daño del origen. |
+| `actor_cut_integrity_review` | Revisión independiente de backend, hallazgo reproducible postefecto y comprobación de su corrección con 26 pruebas focales. |
+
+La raíz integró el launcher, el restore externo y los paneles, verificó el recorrido gráfico y mantuvo pendientes la aceptación integral y la puesta con proveedor. Los resultados globales y sus límites se registran en la [auditoría del corte](backups-externos.md).
