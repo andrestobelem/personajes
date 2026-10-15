@@ -466,7 +466,7 @@ export async function compilePrivateActorPrompt(input: {
     'El coordinador te invita a considerar tus objetivos activos desde la situación y la vista actuales. Esta convocatoria no te obliga a actuar ni prueba que haya ocurrido algo. Puedes proponer una acción, esperar, callar o no producir cambios si eso resulta coherente.',
   ].join('\n'):[
     'CONVOCATORIA TÉCNICA POR VENTANA DE RUTINA (metadato administrativo; no es percepción, testimonio, recuerdo, parlamento ni hecho del Escenario):',
-    `La ventana de rutina disponible comenzó en el instante ficticio ${request.activationContext.boundaryAt}. El reloj del Escenario y tu vista actual son la referencia; esta convocatoria no afirma que hayas percibido el cambio ni te obliga a actuar. Puedes actuar, esperar o callar según tu situación.`,
+    `La disponibilidad efectiva de tu rutina comenzó en el instante ficticio ${request.activationContext.boundaryAt}. El reloj del Escenario y tu vista actual son la referencia; esta convocatoria no afirma que hayas percibido el cambio ni te obliga a actuar. Puedes actuar, esperar o callar según tu situación.`,
   ].join('\n');
   const prompt = [
     `Eres el actor agéntico que interpreta a ${JSON.stringify(request.prepared.identity.value.selfReference)}.`,

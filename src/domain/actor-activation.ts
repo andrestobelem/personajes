@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CharacterIdSchema, FictionalInstantSchema } from './values.ts';
-import { WorldSnapshotSchema } from './world-schema.ts';
+import { AvailabilityRoutineSchema, WorldSnapshotSchema } from './world-schema.ts';
 import { characterCanReceiveAt } from './world.ts';
 import { CircadianPolicySchema } from './production.ts';
 
@@ -20,6 +20,25 @@ export const ActorActivationInvitationSchema = z.strictObject({
   ]),
 });
 
+/** Start of the currently effective available interval, excluding redundant window edges. */
+export function currentRoutineAvailabilityBoundary(input: unknown): number | undefined {
+  const {routine,instant}=z.strictObject({routine:AvailabilityRoutineSchema,instant:FictionalInstantSchema}).parse(input);
+  if(routine.kind==='always')return undefined;
+  const boundaries=new Map<number,'available'|'unavailable'>();
+  // Ends restore the default; a window beginning at the same instant takes precedence.
+  for(const window of routine.windows)boundaries.set(window.to,routine.defaultState);
+  for(const window of routine.windows)boundaries.set(window.from,window.state);
+  let state=routine.defaultState;
+  let availableFrom:number|undefined;
+  for(const [at,next] of [...boundaries].sort(([left],[right])=>left-right)){
+    if(at>instant)break;
+    if(state==='unavailable'&&next==='available')availableFrom=at;
+    if(next==='unavailable')availableFrom=undefined;
+    state=next;
+  }
+  return state==='available'?availableFrom:undefined;
+}
+
 /** Pure eligibility only. Admission, stable identity and consumption belong to the journal. */
 export function planActorActivationInvitations(input: unknown) {
   const request = ActivationPlanningSchema.parse(input);
@@ -33,13 +52,11 @@ export function planActorActivationInvitations(input: unknown) {
     if (actor.mind.goals.some(goal => goal.state === 'active')) invitations.push(ActorActivationInvitationSchema.parse({
       actorId: actor.characterId, identityVersion: actor.preparation.identityVersion, trigger: { kind: 'initial-goal' },
     }));
-    if (request.previousInstant === undefined || actor.routine.kind !== 'windows') continue;
-    for (const window of actor.routine.windows) {
-      if (window.state === 'available' && window.from > request.previousInstant
-        && window.from <= request.snapshot.clock.instant && request.snapshot.clock.instant < window.to)
-        invitations.push(ActorActivationInvitationSchema.parse({ actorId: actor.characterId,
-          identityVersion: actor.preparation.identityVersion, trigger: { kind: 'routine-boundary', boundaryAt: window.from } }));
-    }
+    if (request.previousInstant === undefined) continue;
+    const boundaryAt=currentRoutineAvailabilityBoundary({routine:actor.routine,instant:request.snapshot.clock.instant});
+    if(boundaryAt!==undefined&&boundaryAt>request.previousInstant)
+      invitations.push(ActorActivationInvitationSchema.parse({actorId:actor.characterId,
+        identityVersion:actor.preparation.identityVersion,trigger:{kind:'routine-boundary',boundaryAt}}));
   }
   return invitations;
 }

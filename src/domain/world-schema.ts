@@ -653,6 +653,7 @@ export const WorldEventSchema = z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('actor'), actorId: CharacterIdSchema, attemptId: WorldAttemptIdSchema }),
     z.strictObject({ kind: z.literal('system'), causeAttemptId: WorldAttemptIdSchema }),
     z.strictObject({ kind: z.literal('system'), causeInterventionId: HumanInterventionIdSchema }),
+    z.strictObject({ kind: z.literal('system'), causeClockAdvanceId: z.uuid() }),
   ]), kind: z.literal('offerInvalidated'), offerId: OfferIdSchema, objectEntityId: WorldEntityIdSchema, cause: z.enum(['acceptedElsewhere', 'expired', 'withdrawn', 'objectUnavailable']) }),
   z.strictObject({ ...eventCommon, kind: z.literal('deviceUsed'), deviceEntityId: WorldEntityIdSchema, operationId: DeviceOperationIdSchema, effect: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('powerChanged'), state: z.enum(['on', 'off']) }),

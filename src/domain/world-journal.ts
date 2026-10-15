@@ -404,7 +404,10 @@ export const ActorTurnJobViewSchema = z.strictObject({
   }).nullable().default(null),
 });
 
-export const CoordinatorPulseRequestSchema = z.strictObject({ runId: RunIdSchema });
+export const CoordinatorPulseRequestSchema = z.strictObject({
+  runId: RunIdSchema,
+  emptyStepPolicy: z.enum(['complete', 'defer']).default('complete'),
+});
 export const CoordinatorPulseLookupSchema = z.strictObject({ runId: RunIdSchema, pulseId: PulseIdSchema });
 export const CoordinatorPulseViewSchema = z.strictObject({
   runId: RunIdSchema, pulseId: PulseIdSchema,
@@ -432,7 +435,7 @@ export const RoutineClockAdvanceResultSchema = z.discriminatedUnion('kind', [
     worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,activationIds:z.array(ActorActivationIdSchema).max(10_000)}),
   z.strictObject({kind:z.literal('existing'),operationId:z.string().uuid(),eventId:z.string().uuid(),commitIndex:RevisionSchema,
     worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,activationIds:z.array(ActorActivationIdSchema).max(10_000)}),
-  z.strictObject({kind:z.literal('notApplicable'),reason:z.enum(['inactive','policy','no-boundary','boundary-too-far','step-bound']),
+  z.strictObject({kind:z.literal('notApplicable'),reason:z.enum(['inactive','policy','no-boundary','boundary-too-far','step-bound','work-pending']),
     worldRevision:RevisionSchema.nullable(),lifecycleRevision:RevisionSchema.nullable()}),
   z.strictObject({kind:z.literal('stale'),worldRevision:RevisionSchema,lifecycleRevision:RevisionSchema}),
 ]);

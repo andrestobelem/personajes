@@ -24,6 +24,7 @@ import {
   WorldContentApprovalReceiptSchema,
   WorldEventSchema,
   WorldPerceptionSchema,
+  WorldOfferSchema,
   WorldResolutionSchema,
   WorldSceneSchema,
   WorldSnapshotSchema,
@@ -179,7 +180,7 @@ import {
 } from '../domain/model-time-budget.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { ContinuityReferenceSchema } from '../domain/preparation.ts';
-import { nextRoutineAdvance, planActorActivationInvitations } from '../domain/actor-activation.ts';
+import { currentRoutineAvailabilityBoundary, nextRoutineAdvance, planActorActivationInvitations } from '../domain/actor-activation.ts';
 import {
   ActorActivationIdSchema, ActorActivationInvitationIdSchema, CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
   EventIdSchema, FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
@@ -3546,7 +3547,9 @@ export function openJournal(input: { path: string }) {
             || canonicalJson(candidate.inputCut) !== canonicalJson(frozenWorldCut)) {
             throw new Error('El corte Pi no coincide con el corte World e inbox congelados del job actoral');
           }
-          if (assignedPerceptionIds.length === 0 || assignedPerceptionIds.some((perceptionId) =>
+          if ((assignedPerceptionIds.length === 0 && actorActivationInvitationForJob({
+            ...candidate.scope, actorId: candidate.actorId,
+          }) === undefined) || assignedPerceptionIds.some((perceptionId) =>
             !candidate.inputCut.perceptionIds.includes(PerceptionIdSchema.parse(perceptionId)))) {
             throw new Error('El corte Pi exacto no incluye todas las percepciones asignadas al job');
           }
@@ -4098,11 +4101,10 @@ export function openJournal(input: { path: string }) {
     if(row.configuration_hash!==input.run.row.configuration_hash)return 'configuration_changed';
     const actor=input.run.snapshot.entities.find((entity)=>entity.kind==='character'&&entity.characterId===row.actor_id);
     const scene=input.run.snapshot.scenes.find((item)=>item.id===input.run.snapshot.activeSceneId);
-    const routineWindow=row.trigger_kind==='routine-boundary'&&row.boundary_at!==null&&actor?.kind==='character'&&actor.routine.kind==='windows'
-      ?actor.routine.windows.find((window)=>window.from===row.boundary_at):undefined;
+    const routineBoundary=actor?.kind==='character'
+      ?currentRoutineAvailabilityBoundary({routine:actor.routine,instant:input.run.snapshot.clock.instant}):undefined;
     const triggerMatches=row.trigger_kind===row.cause_trigger_kind&&row.boundary_at===row.cause_boundary_at
-      &&(row.trigger_kind==='initial-goal'?row.boundary_at===null:row.boundary_at!==null&&routineWindow?.state==='available'
-        &&input.run.snapshot.clock.instant>=row.boundary_at&&input.run.snapshot.clock.instant<routineWindow.to);
+      &&(row.trigger_kind==='initial-goal'?row.boundary_at===null:row.boundary_at!==null&&routineBoundary===row.boundary_at);
     if(!triggerMatches||!input.configuration.roster.activeCharacterIds.includes(row.actor_id)
       ||!input.configuration.roster.preparedCharacters.some((item)=>item.characterId===row.actor_id&&item.identityVersion===row.identity_version)
       ||actor?.kind!=='character'||actor.preparation.kind!=='prepared'||actor.preparation.identityVersion!==row.identity_version
@@ -6616,13 +6618,19 @@ export function openJournal(input: { path: string }) {
         const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         if(value===undefined)return RoutineClockAdvanceResultSchema.parse({kind:'notApplicable',reason:'inactive',worldRevision:null,lifecycleRevision:null});
         const run=parseWorldRun(value);
-        const notApplicable=(reason:'inactive'|'policy'|'no-boundary'|'boundary-too-far'|'step-bound')=>
+        const notApplicable=(reason:'inactive'|'policy'|'no-boundary'|'boundary-too-far'|'step-bound'|'work-pending')=>
           RoutineClockAdvanceResultSchema.parse({kind:'notApplicable',reason,worldRevision:run.row.world_revision,lifecycleRevision:run.row.lifecycle_revision});
         if(run.row.lifecycle!=='running')return notApplicable('inactive');
         const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
         if(configuration.circadianPolicy.kind!=='advance-while-running')return notApplicable('policy');
         const step=activeStepJob(request.runId);
         if(step?.pulseId!==undefined&&step.pulseId!==null)return notApplicable('step-bound');
+        const workPending=database.prepare(`SELECT 1 FROM coordinator_pulses WHERE run_id=? AND state='running'
+          UNION ALL SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND state IN('queued','running')
+          UNION ALL SELECT 1 FROM continuista_jobs WHERE run_id=? AND state IN('queued','running')
+          UNION ALL SELECT 1 FROM administrative_jobs WHERE run_id=? AND state='running' LIMIT 1`)
+          .get(request.runId,request.runId,request.runId,request.runId);
+        if(workPending!==undefined)return notApplicable('work-pending');
         const boundaryAt=nextRoutineAdvance({snapshot:run.snapshot,policy:configuration.circadianPolicy,lifecycle:run.row.lifecycle});
         if(boundaryAt===undefined){
           const hasFutureBoundary=run.snapshot.entities.some((actor)=>actor.kind==='character'&&actor.routine.kind==='windows'
@@ -6637,8 +6645,21 @@ export function openJournal(input: { path: string }) {
         const event=WorldEventSchema.parse({id:EventIdSchema.parse(randomUUID()),runId:request.runId,
           seq:WorldSeqSchema.parse(run.snapshot.seq+1),fictitiousAt:fromAt,durationMs,
           origin:{kind:'system',causeClockAdvanceId:operationId},kind:'clockAdvanced',fromAt,toAt});
+        const events=[event];
+        let offers=run.snapshot.offers;
+        const expiredOffers=offers.filter((offer)=>offer.state==='open'&&offer.expiresAt<=toAt)
+          .sort((left,right)=>left.expiresAt-right.expiresAt||left.id.localeCompare(right.id));
+        for(const offer of expiredOffers){
+          const invalidated=WorldEventSchema.parse({id:EventIdSchema.parse(randomUUID()),runId:request.runId,
+            seq:WorldSeqSchema.parse(run.snapshot.seq+events.length+1),fictitiousAt:offer.expiresAt,durationMs:0,
+            origin:{kind:'system',causeClockAdvanceId:operationId},kind:'offerInvalidated',
+            offerId:offer.id,objectEntityId:offer.objectEntityId,cause:'expired'});
+          events.push(invalidated);
+          offers=offers.map((current)=>current.id===offer.id&&current.state==='open'
+            ?WorldOfferSchema.parse({...current,state:'invalidated',cause:'expired',eventId:invalidated.id}):current);
+        }
         const newSnapshot=WorldSnapshotSchema.parse({...run.snapshot,revision:RevisionSchema.parse(run.snapshot.revision+1),
-          seq:WorldSeqSchema.parse(run.snapshot.seq+1),clock:{...run.snapshot.clock,instant:toAt}});
+          seq:WorldSeqSchema.parse(run.snapshot.seq+events.length),clock:{...run.snapshot.clock,instant:toAt},offers});
         const commitIndex=RevisionSchema.parse(run.row.commit_index+1);
         const snapshotPayload=hashJson(newSnapshot);
         const updated=database.prepare(`UPDATE world_runs SET world_revision=?,last_seq=?,commit_index=?,snapshot_json=?,snapshot_hash=?,updated_at=?
@@ -6650,9 +6671,11 @@ export function openJournal(input: { path: string }) {
         database.prepare(`INSERT INTO world_commits(run_id,origin_kind,origin_id,commit_index,world_revision,last_seq,snapshot_json,snapshot_hash,created_at)
           VALUES(?,'clockAdvance',?,?,?,?,?,?,?)`).run(request.runId,operationId,commitIndex,newSnapshot.revision,newSnapshot.seq,
             snapshotPayload.json,snapshotPayload.hash,timestamp);
-        const eventPayload=hashJson(event);
-        database.prepare('INSERT INTO world_events(event_id,run_id,world_seq,origin_id,payload_json,payload_hash) VALUES(?,?,?,?,?,?)')
-          .run(event.id,request.runId,event.seq,operationId,eventPayload.json,eventPayload.hash);
+        for(const confirmedEvent of events){
+          const eventPayload=hashJson(confirmedEvent);
+          database.prepare('INSERT INTO world_events(event_id,run_id,world_seq,origin_id,payload_json,payload_hash) VALUES(?,?,?,?,?,?)')
+            .run(confirmedEvent.id,request.runId,confirmedEvent.seq,operationId,eventPayload.json,eventPayload.hash);
+        }
         const committedRun=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
         const activationIds=admitRoutineBoundaryActivations(committedRun,configuration,fromAt,timestamp)
           .map((activationId)=>ActorActivationIdSchema.parse(activationId));
@@ -6733,9 +6756,11 @@ export function openJournal(input: { path: string }) {
         if (pending.length > 100_000) throw new Error('Demasiadas intenciones para coordinar un pulso');
         const cause = pending[0];
         if (cause === undefined) {
-          const activationValue=database.prepare(`SELECT activation_id FROM actor_activation_causes
-            WHERE run_id=? AND state='pending' ORDER BY created_at,activation_id LIMIT 1`).get(request.runId);
-          if(activationValue!==undefined){
+          let discardedActivation=false;
+          while(true){
+            const activationValue=database.prepare(`SELECT activation_id FROM actor_activation_causes
+              WHERE run_id=? AND state='pending' ORDER BY created_at,activation_id LIMIT 1`).get(request.runId);
+            if(activationValue===undefined)break;
             const activationId=z.strictObject({activation_id:ActorActivationIdSchema}).parse(activationValue).activation_id;
             const invitationRows=database.prepare(`SELECT invitation_id,actor_id FROM actor_activation_invitations
               WHERE activation_id=? AND state='pending' ORDER BY actor_id,invitation_id`).all(activationId)
@@ -6755,8 +6780,8 @@ export function openJournal(input: { path: string }) {
               if(remaining!==undefined)return CoordinatorPulseBeginResultSchema.parse({kind:'idle'});
               database.prepare(`UPDATE actor_activation_causes SET state='blocked',failure_reason='no-eligible-invitations',updated_at=?
                 WHERE run_id=? AND activation_id=? AND state='pending'`).run(timestamp,request.runId,activationId);
-              if(step!==undefined)finishStepJob(request.runId,'failed');
-              return CoordinatorPulseBeginResultSchema.parse({kind:'idle'});
+              discardedActivation=true;
+              continue;
             }
             const existingBudget=database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId);
             if(existingBudget===undefined)database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)')
@@ -6789,7 +6814,7 @@ export function openJournal(input: { path: string }) {
             if(pulse===undefined)throw new Error('Pulso técnico no persistido');
             return CoordinatorPulseBeginResultSchema.parse({kind:'started',pulse,jobs:pulse.jobs});
           }
-          if (step !== undefined) finishStepJob(request.runId,'succeeded');
+          if (step !== undefined && request.emptyStepPolicy === 'complete') finishStepJob(request.runId,discardedActivation?'failed':'succeeded');
           return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
         }
         const previous = database.prepare('SELECT pulse_id FROM coordinator_pulses WHERE run_id=? AND origin_kind=? AND origin_id=?')

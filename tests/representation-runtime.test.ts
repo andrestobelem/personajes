@@ -17,6 +17,8 @@ import { RevisionSchema, RunIdSchema, WorldSeqSchema } from '../src/domain/value
 import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import type { RunId } from '../src/domain/values.ts';
 import { controlledDirectorSessionFactory } from './fixtures/director-session.ts';
+import { WorldActorActionSchema } from '../src/domain/world-schema.ts';
+import { createRunObservationApplication } from '../src/application/run-observation.ts';
 import { canonical, responseFor, setup, actorId, type Fixture } from './fixtures/continuista.ts';
 
 const realIcmBinary = process.env.PERSONAJES_ICM_TEST_BINARY;
@@ -81,17 +83,24 @@ function hostFromFixture(fixture: Fixture) {
   return openLocalHost({ privateDataRoot: fixture.directory });
 }
 
-function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true, withInitialGoal = false) {
+function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true, withInitialGoal = false,
+  routineWindows?: readonly (readonly [number,number])[]) {
   const freshRunId = RunIdSchema.parse(randomUUID());
   const configuration = ReadyRunConfigurationSchema.parse({
     ...fixture.configuration,
     budget:{...fixture.configuration.budget,maxPiCallsPerPulse:8},
+    circadianPolicy:routineWindows===undefined?fixture.configuration.circadianPolicy:{kind:'advance-while-running',maxAdvanceMs:1_000},
     runId: freshRunId,
     worldSnapshot: {
       ...fixture.configuration.worldSnapshot,
       runId: freshRunId,
+      channels:fixture.configuration.worldSnapshot.channels.map((channel)=>routineWindows===undefined?channel:{...channel,scope:'broadcast'}),
       entities: fixture.configuration.worldSnapshot.entities.map((entity) => entity.kind === 'character'
-        ? { ...entity, mind: { ...entity.mind,
+        ? { ...entity,
+          routine:routineWindows===undefined?entity.routine:{kind:'windows',defaultState:'unavailable',
+            windows:routineWindows.map(([from,to])=>({from:fixture.configuration.worldSnapshot.clock.instant+from,
+              to:fixture.configuration.worldSnapshot.clock.instant+to,state:'available'}))},
+          mind: { ...entity.mind,
           goals: withInitialGoal && entity.characterId === actorId
             ? [{ kind:'durable',id:randomUUID(),description:'Considerar la situación inicial.',priority:0.7,state:'active',revision:0,history:[] }]
             : entity.mind.goals,
@@ -135,13 +144,20 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
   return freshRunId;
 }
 
-function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof openLocalHost>; runId: RunId; stats: { requests: number; recallResults: number; disposed: number } }) {
+function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof openLocalHost>; runId: RunId; stats: { requests: number; recallResults: number; disposed: number };
+  onActorPrompt?: (context:{prompt:PiPromptInput;systemPrompt:string})=>void;
+  actionForPrompt?: (prompt:PiPromptInput)=>ReturnType<typeof WorldActorActionSchema.parse>;
+}) {
   const actorSessionFactory = async (sessionInput: CreatePiSessionInput) => {
     assert.deepEqual(sessionInput.identity, { kind: 'actor', characterId: actorId });
     const cwd = join(input.fixture.directory, `controlled-sdk-${input.runId}`);
     mkdirSync(cwd, { recursive: true });
     const agentDir = join(cwd, 'agent');
-    const manager = SessionManager.create(cwd, join(cwd, 'sessions'));
+    const manager = sessionInput.checkpoint.kind==='leaf'
+      ?SessionManager.open(sessionInput.checkpoint.sessionPath,join(cwd,'sessions'),cwd)
+      :SessionManager.create(cwd, join(cwd, 'sessions'));
+    if(sessionInput.checkpoint.kind==='leaf'&&manager.getLeafId()!==sessionInput.checkpoint.committedLeafId)
+      manager.branch(sessionInput.checkpoint.committedLeafId);
     const settingsManager = SettingsManager.inMemory({
       retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
       compaction: { enabled: false }, cacheWarming: 'off', enableAnalytics: false, enableInstallTelemetry: false,
@@ -164,6 +180,7 @@ function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof 
       subscribe: () => () => undefined,
       async abortAndDispose() { await session.abort(); session.dispose(); input.stats.disposed += 1; },
       async prompt(prompt: PiPromptInput) {
+        input.onActorPrompt?.({prompt,systemPrompt:sessionInput.systemPrompt});
         const base = input.host.journal.loadActorPiSession({ runId: input.runId, actorId });
         assert.ok(base);
         assert.ok(prompt.inputCut);
@@ -171,8 +188,9 @@ function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof 
         const turnBase = { ...base, sessionRevision: RevisionSchema.parse(base.sessionRevision) };
         const turnId = randomUUID();
         let lastRequest: PiRequestReference | undefined;
+        let requestNumber=0;
         await sessionInput.requestPort.recordCheckpointCandidate({ identity: sessionInput.identity,
-          purpose: { kind: 'job-base', baseScope: prompt.scope }, snapshot: { ...checkpoint(), candidateLeafId: null } });
+          purpose: { kind: 'job-base', baseScope: prompt.scope }, snapshot: { ...checkpoint(), candidateLeafId: base.committedLeafId } });
         session.agent.streamFunction = createBudgetedStreamFunction({ clockEpochId: sessionInput.runtime.clockEpochId, requireWallTime: true,
           identity: sessionInput.identity,
           runId: input.runId,
@@ -185,11 +203,11 @@ function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof 
           original(actualModel) {
             const stream = createAssistantMessageEventStream();
             input.stats.requests += 1;
-            const requestNumber = input.stats.requests;
+            requestNumber+=1;
             const toolCall = requestNumber === 1
-              ? { type: 'toolCall' as const, id: 'local-recall', name: 'recall_memory', arguments: { query: 'mensaje recibido' } }
+              ? { type: 'toolCall' as const, id: `local-recall-${turnId}`, name: 'recall_memory', arguments: { query: 'mensaje recibido' } }
               : requestNumber === 2
-                ? { type: 'toolCall' as const, id: 'local-proposal', name: 'propose_action', arguments: { action: { kind: 'wait', durationMs: 1 } } }
+                ? { type: 'toolCall' as const, id: `local-proposal-${turnId}`, name: 'propose_action', arguments: { action: input.actionForPrompt?.(prompt)??{ kind: 'wait', durationMs: 1 } } }
                 : undefined;
             const message: AssistantMessage = {
               role: 'assistant', api: actualModel.api, provider: actualModel.provider, model: actualModel.id,
@@ -202,9 +220,11 @@ function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof 
             return stream;
           },
         });
+        const recallResultsBefore=session.messages.filter((message)=>message.role==='toolResult'
+          &&message.toolName==='recall_memory'&&!message.isError).length;
         await session.agent.prompt(prompt.text);
         input.stats.recallResults += session.messages.filter((message) => message.role === 'toolResult'
-          && message.toolName === 'recall_memory' && !message.isError).length;
+          && message.toolName === 'recall_memory' && !message.isError).length-recallResultsBefore;
         const terminal = checkpoint();
         assert.ok(terminal.candidateLeafId);
         assert.ok(lastRequest);
@@ -631,3 +651,87 @@ test('step durable compone preflight fresco, ICM y actuación SDK local; segunda
     assert.equal(stats.requests,3,'replay/entregas no despachan otra causa');
   } finally {await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
 });
+
+for(const scenario of [
+  {name:'ejecución continua cruza ventanas sin actores y publica dos actuaciones',mode:'continuous',humanReply:false,offsets:[1_000,2_000]},
+  {name:'step alcanza una rutina y vuelve a pausa tras un único pulso',mode:'step',humanReply:false,offsets:[1_000]},
+  {name:'respuesta pendiente se procesa antes de salir de la ventana disponible',mode:'continuous',humanReply:true,offsets:[1_000,1_000,2_000]},
+] as const) {
+  test(`rutina integrada: ${scenario.name}`,realIcmOptions,async()=>{
+    assert.ok(realIcmBinary);
+    const fixture=await setup();const host=hostFromFixture(fixture);
+    const runId=registerAdditionalRun(fixture,host,false,false,[[1_000,1_500],[2_000,2_500]]);
+    const initial=host.journal.loadWorld({runId});assert.ok(initial);
+    const stats={requests:0,recallResults:0,disposed:0};
+    const actingTimes:number[]=[];const actorContexts:string[]=[];const notifications:string[]=[];
+    let replied=false;
+    const runtime=await createRepresentationRuntime({host,icmBinaryPath:realIcmBinary,
+      testTransport:controlledTransport({fixture,host,runId,stats,
+        onActorPrompt({systemPrompt}){
+          const snapshot=host.journal.loadWorld({runId});assert.ok(snapshot);
+          actingTimes.push(snapshot.clock.instant);actorContexts.push(systemPrompt);
+        },
+        actionForPrompt(){
+          const snapshot=host.journal.loadWorld({runId});assert.ok(snapshot);
+          const knowledge=host.journal.readActorKnowledge({runId,actorId,throughWorldSeq:snapshot.seq});assert.ok(knowledge);
+          const channel=knowledge.knowledge.bindings.find((binding)=>binding.kind==='channel');assert.ok(channel);
+          return WorldActorActionSchema.parse({kind:'communicate',channelHandle:channel.handle,audienceHandles:[],
+            content:{kind:'speech',text:`Intervención sintética de rutina ${actingTimes.length}.`}});
+        }}),
+      onWorldCommitted(event){
+        notifications.push(...event.eventIds);
+        if(!scenario.humanReply||replied)return;
+        const snapshot=host.journal.loadWorld({runId});assert.ok(snapshot);
+        const rows=host.journal.readObservationEvents({runId,fromWorldSeq:snapshot.seq,toWorldSeq:snapshot.seq,
+          afterWorldSeq:null,limit:1,communicationsOnly:false});
+        if(rows?.[0]?.event.kind!=='communicated')return;
+        replied=true;
+        const response=host.journal.commitHumanIntervention({runId,participantId:'visitante-prueba',expectedRevision:snapshot.revision,
+          idempotencyKey:randomUUID(),request:{kind:'speech',recipientCharacterIds:[],
+            channelId:'00000000-0000-4000-8000-000000000104',content:{kind:'speech',text:'Pregunta recibida antes del descanso.'}}});
+        assert.equal(response.kind,'stored');
+        runtime.scheduleDelivery({runId,actorIds:[actorId]});
+      }});
+    try{
+      let stepJobId:string|undefined;
+      if(scenario.mode==='step'){
+        const state=host.journal.readWorldLifecycle({runId});assert.ok(state);
+        host.journal.setWorldLifecycle({runId,expectedWorldRevision:state.worldRevision,expectedConfigRevision:state.configRevision,target:'paused'});
+        const auth=await authorizeSyntheticStep(host,runId);
+        const accepted=host.journal.applyRunLifecycleCommand({principalId:auth.principalId,idempotencyKey:randomUUID(),runId,
+          expectedLifecycleRevision:auth.state.lifecycleRevision,expectedConfigRevision:auth.state.configRevision,
+          expectedWorldRevision:auth.state.worldRevision,command:{kind:'step'},preflightJobId:auth.preflightJobId});
+        assert.equal(accepted.kind,'accepted');if(accepted.kind!=='accepted')assert.fail('Paso no admitido');
+        stepJobId=accepted.job.jobId;
+      }
+      assert.equal(await runtime.scheduleRun({runId}),true);
+      await withTimeout(runtime.waitForIdle(),10_000);
+      assert.deepEqual(actingTimes,scenario.offsets.map((offset)=>initial.clock.instant+offset));
+      assert.equal(stats.requests,scenario.offsets.length*3);
+      assert.equal(stats.recallResults,scenario.offsets.length);
+      assert.match(actorContexts[0]??'',/CONVOCATORIA TÉCNICA POR/);
+      assert.ok(actorContexts.every((context)=>!context.includes('SECRET_PRIVATE_OTHER_MEMORY')));
+      const conversation=createRunObservationApplication({journal:host.journal}).readConversations({runId});
+      assert.equal(conversation.kind,'found');if(conversation.kind!=='found')assert.fail('Conversación ausente');
+      assert.equal(conversation.value.kind,'conversation-page');if(conversation.value.kind!=='conversation-page')assert.fail('Página de conversación inválida');
+      const actorLines=conversation.value.items.filter((line)=>line.speaker.kind==='character');
+      assert.equal(actorLines.length,scenario.offsets.length);
+      assert.ok(actorLines.every((line)=>line.content.kind==='speech'&&line.content.text.startsWith('Intervención sintética de rutina')));
+      const snapshot=host.journal.loadWorld({runId});assert.ok(snapshot);
+      const events=host.journal.readObservationEvents({runId,fromWorldSeq:initial.seq,toWorldSeq:snapshot.seq,
+        afterWorldSeq:null,limit:100,communicationsOnly:false});
+      const advances=events?.filter((row)=>row.event.kind==='clockAdvanced')??[];
+      assert.equal(advances.length,scenario.mode==='step'?1:4);
+      assert.ok(advances.every((row)=>notifications.includes(row.event.id)),'Cada avance confirmado invalida la vista pública');
+      if(stepJobId!==undefined){
+        const job=host.journal.readRunStepJob({runId,jobId:stepJobId});
+        assert.equal(job?.state,'succeeded');assert.ok(job?.pulseId);
+        assert.equal(host.journal.readWorldLifecycle({runId})?.lifecycle,'paused');
+      }
+      const requestsBefore=stats.requests;
+      await runtime.recover();await runtime.waitForIdle();
+      assert.equal(stats.requests,requestsBefore);
+      assert.deepEqual(host.journal.loadWorld({runId}),snapshot,'Recuperar conserva reloj, hechos y conversación');
+    }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
+  });
+}

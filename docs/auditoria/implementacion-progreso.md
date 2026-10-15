@@ -2,6 +2,16 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 37: rutina hasta conversación y avance sólo en reposo
+
+La cadena integrada usa ICM 0.11.4 local y el SDK Pi con transporte controlado: atraviesa dos ventanas consecutivas, confirma parlamentos actorales tras la revisión del Continuista y los lee desde la aplicación de conversaciones. Otro escenario recibe una respuesta humana durante la ventana y la procesa antes del descanso; un tercero solicita un paso sin estímulo, alcanza la siguiente rutina y vuelve a pausa tras un único pulso. Recuperar conserva reloj y conversación sin repetir actuación.
+
+La revisión corrigió la aceptación actoral que exigía percepciones incluso a jobs convocados por rutina o meta. El inbox vacío sólo se admite con un enlace durable de convocatoria del mismo scope. El coordinador descarta convocatorias agotadas antes de decidir que está ocioso y solicita avance sólo tras agotar el trabajo procesable. El journal impide avanzar con pulsos o jobs en vuelo. La disponibilidad considera transiciones efectivas, incluido el regreso al estado predeterminado tras una ventana no disponible, y evita convocar dos veces por intervalos disponibles contiguos.
+
+Cada avance invalida las ofertas vencidas en la misma transacción que reloj, eventos y recibo. Hay pruebas de expiración exacta, conservación de ofertas futuras/aceptadas, reapertura, replay y rollback ante una falla SQLite. La notificación de presentación incluye todos los eventos del avance.
+
+`TMPDIR=/private/tmp PERSONAJES_ICM_TEST_BINARY=/tmp/personajes-icm-0.11.4-audit/install/bin/icm npm run verify` pasó: **575 pruebas, 574 aprobadas, cero fallidas y una omitida** por requerir Linux. TypeScript, build (433 módulos) y `git diff --check` pasaron. No se contactó a proveedores reales ni se verificó un recorrido visual en navegador en este corte. Recurrencia/calendario diario, fidelidad audiovisual y aceptación integral siguen pendientes; el objetivo y los 77 requisitos permanecen abiertos.
+
 ## Corte 36: reloj ficticio durable y convocatorias por ventana (v32)
 
 El journal v32 registra avances del reloj como eventos `clockAdvanced` y commits del Escenario, en una transacción con su recibo durable. `advance-while-running` sólo avanza una corrida habilitada y en ejecución hasta un límite explícito alcanzable dentro de `maxAdvanceMs`; `manual-only`, una corrida pausada y la recuperación no hacen avanzar el tiempo. La migración amplía el ledger de convocatorias con causas e invitaciones `routine-boundary`, agrupadas e idempotentes por límite ficticio. Los commits de acciones que cruzan una ventana admiten la misma causa. La invitación llega al actor como metadato administrativo, con inbox vacío y revalidación de disponibilidad, identidad, presencia, preparación y escena abierta. La convocatoria por metas iniciales de v31 se conserva.

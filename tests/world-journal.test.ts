@@ -2068,6 +2068,178 @@ test('v32 avanza sólo con política activa, acota el salto, reintenta por recei
   });
 });
 
+test('fin de descanso vuelve a disponibilidad por defecto y admite un job con el mismo límite efectivo',()=>{
+  withJournal((journal)=>{
+    const configuration=routineConfigurationFixture({kind:'advance-while-running',maxAdvanceMs:1_000});
+    const worldSnapshot=WorldSnapshotSchema.parse({...configuration.worldSnapshot,
+      entities:configuration.worldSnapshot.entities.map((entity)=>entity.kind==='character'&&entity.characterId===maxId
+        ?{...entity,routine:{kind:'windows',defaultState:'available',windows:[{from:0,to:1_000,state:'unavailable'}]}}:entity)});
+    registerRun(journal,ReadyRunConfigurationSchema.parse({...configuration,worldSnapshot}));
+    const result=journal.advanceRoutineClock({runId,operationId:uuid(39_230)});
+    assert.equal(result.kind,'advanced');if(result.kind!=='advanced')assert.fail('No avanzó hasta fin de descanso');
+    assert.equal(result.activationIds.length,1);
+    const begun=journal.beginCoordinatorPulse({runId});assert.equal(begun.kind,'started');
+    if(begun.kind!=='started')assert.fail('No convocó la vuelta a disponibilidad por defecto');
+    assert.equal(begun.jobs.length,1);const job=begun.jobs[0];assert.ok(job);
+    assert.deepEqual(job.activation?.trigger,{kind:'routine-boundary',boundaryAt:1_000});
+    assert.deepEqual(job.perceptionIds,[]);
+    const claimed=journal.claimActorTurnJob({runId,actorId:job.actorId,jobId:job.jobId,generation:job.generation,
+      ownerToken:uuid(39_231),claimToken:uuid(39_232)});
+    assert.equal(claimed.kind,'claimed','la revalidación comparte el criterio efectivo del planner');
+  });
+  withJournal((journal)=>{
+    const configuration=routineConfigurationFixture({kind:'advance-while-running',maxAdvanceMs:1_000});
+    const worldSnapshot=WorldSnapshotSchema.parse({...configuration.worldSnapshot,
+      entities:configuration.worldSnapshot.entities.map((entity)=>entity.kind==='character'&&entity.characterId===maxId
+        ?{...entity,routine:{kind:'windows',defaultState:'available',windows:[{from:1_000,to:2_000,state:'available'}]}}:entity)});
+    registerRun(journal,ReadyRunConfigurationSchema.parse({...configuration,worldSnapshot}));
+    const result=journal.advanceRoutineClock({runId,operationId:uuid(39_233)});
+    assert.equal(result.kind,'advanced');if(result.kind==='advanced')assert.deepEqual(result.activationIds,[]);
+    assert.equal(journal.beginCoordinatorPulse({runId}).kind,'idle','available→available no inventa una convocatoria');
+  });
+});
+
+test('el coordinador descarta convocatorias agotadas sin saltar una válida ni terminar su step',()=>{
+  withJournal((journal,path)=>{
+    registerRun(journal,routineConfigurationFixture({kind:'advance-while-running',maxAdvanceMs:1_000},[[1_000,1_500],[2_000,3_000]]));
+    const old=journal.advanceRoutineClock({runId,operationId:uuid(39_240)});
+    assert.equal(old.kind,'advanced');if(old.kind!=='advanced')assert.fail('Falta primera convocatoria');
+    assert.equal(journal.advanceRoutineClock({runId,operationId:uuid(39_241)}).kind,'advanced');
+    const current=journal.advanceRoutineClock({runId,operationId:uuid(39_242)});
+    assert.equal(current.kind,'advanced');if(current.kind!=='advanced')assert.fail('Falta convocatoria vigente');
+    const oldId=old.activationIds[0];const currentId=current.activationIds[0];assert.ok(oldId);assert.ok(currentId);
+    const stepId=uuid(39_243);const inspect=new DatabaseSync(path);
+    try{
+      // Both causes are real durable admissions. Enforce chronology independently of wall-clock resolution.
+      inspect.prepare('UPDATE actor_activation_causes SET created_at=1 WHERE activation_id=?').run(oldId);
+      inspect.prepare('UPDATE actor_activation_causes SET created_at=2 WHERE activation_id=?').run(currentId);
+      const lifecycle=journal.readWorldLifecycle({runId});assert.ok(lifecycle);
+      inspect.prepare("INSERT INTO run_step_jobs VALUES(?,?,NULL,'queued',0,?,0,0)").run(stepId,runId,lifecycle.lifecycleRevision);
+      const begun=journal.beginCoordinatorPulse({runId,emptyStepPolicy:'defer'});
+      assert.equal(begun.kind,'started');if(begun.kind!=='started')assert.fail('Se saltó la convocatoria vigente tras descartar la anterior');
+      assert.deepEqual(begun.pulse.cause,{kind:'actorActivation',id:currentId,trigger:{kind:'routine-boundary',boundaryAt:2_000}});
+      assert.equal(inspect.prepare('SELECT state FROM actor_activation_causes WHERE activation_id=?').get(oldId)?.state,'blocked');
+      const step=journal.readActiveRunStepJob({runId});assert.ok(step);
+      assert.equal(step.jobId,stepId);assert.equal(step.state,'running');assert.equal(step.pulseId,begun.pulse.pulseId);
+      assert.equal(journal.loadWorld({runId})?.clock.instant,2_000);
+    }finally{inspect.close();}
+  });
+});
+
+test('reloj idle rechaza trabajo en vuelo aunque se lo invoque directamente desde el host',()=>{
+  withJournal((journal,path)=>{
+    registerRun(journal,routineConfigurationFixture({kind:'advance-while-running',maxAdvanceMs:1_000}));
+    assert.equal(journal.advanceRoutineClock({runId,operationId:uuid(39_250)}).kind,'advanced');
+    const begun=journal.beginCoordinatorPulse({runId});assert.equal(begun.kind,'started');
+    if(begun.kind!=='started')assert.fail('Falta pulso con job encolado');
+    const job=begun.jobs[0];assert.ok(job);const before=journal.loadWorld({runId});
+    const inspect=new DatabaseSync(path);
+    let operation=39_251;
+    const blocked=()=>{
+      const result=journal.advanceRoutineClock({runId,operationId:uuid(operation++)});
+      assert.equal(result.kind,'notApplicable');
+      if(result.kind==='notApplicable')assert.equal(result.reason,'work-pending');
+      assert.deepEqual(journal.loadWorld({runId}),before);
+      assert.equal(inspect.prepare('SELECT COUNT(*) n FROM routine_clock_advances WHERE run_id=?').get(runId)?.n,1);
+    };
+    try{
+      blocked();
+      inspect.prepare("UPDATE coordinator_pulses SET state='completed' WHERE pulse_id=?").run(begun.pulse.pulseId);
+      blocked(); // The queued job alone is sufficient to fence the clock.
+      inspect.prepare("UPDATE coordinator_pulses SET state='running' WHERE pulse_id=?").run(begun.pulse.pulseId);
+      const lease={ownerToken:uuid(39_260),claimToken:uuid(39_261)};
+      const claimed=journal.claimActorTurnJob({runId,actorId:job.actorId,jobId:job.jobId,generation:job.generation,...lease});
+      assert.equal(claimed.kind,'claimed');
+      inspect.prepare("UPDATE coordinator_pulses SET state='completed' WHERE pulse_id=?").run(begun.pulse.pulseId);
+      blocked(); // A claimed actor remains in flight even without a running coordinator row.
+      inspect.prepare("UPDATE coordinator_pulses SET state='running' WHERE pulse_id=?").run(begun.pulse.pulseId);
+      const failed=journal.failActorTurnJob({execution:{runId,actorId:job.actorId,jobId:job.jobId,generation:job.generation,
+        pulseId:job.pulseId,lease},code:'execution-failed'});
+      assert.equal(failed.kind,'blocked');
+      blocked(); // A pulse still awaiting administrative work must close first.
+      assert.equal(journal.closeCoordinatorPulse({runId,pulseId:begun.pulse.pulseId}).state,'blocked');
+      const advanced=journal.advanceRoutineClock({runId,operationId:uuid(39_262)});
+      assert.equal(advanced.kind,'advanced');assert.equal(journal.loadWorld({runId})?.clock.instant,1_500);
+    }finally{inspect.close();}
+  });
+});
+
+function routineOffersConfigurationFixture() {
+  const configuration=routineConfigurationFixture({kind:'advance-while-running',maxAdvanceMs:1_000});
+  const objectEntityId=uuid(39_200);
+  const offer=(id:number,expiresAt:number)=>({state:'open',id:uuid(id),handle:`offer-${id}`,
+    objectEntityId,ownerEntityId:maxEntity,recipientCharacterId:agentId,objectRevision:0,createdAt:0,expiresAt});
+  const worldSnapshot=WorldSnapshotSchema.parse({...configuration.worldSnapshot,
+    entities:[...configuration.worldSnapshot.entities,{kind:'object',entityId:objectEntityId,label:'Sobre',description:'Sobre sintético.',
+      collisionRadius:0,blocksMovement:false,portable:true}],
+    inventory:[{objectEntityId,revision:0,location:{kind:'heldBy',entityId:maxEntity}}],
+    offers:[offer(39_203,1_000),offer(39_202,500),offer(39_201,500),offer(39_204,1_501),
+      {...offer(39_205,100),state:'accepted',eventId:uuid(39_206)}]});
+  return ReadyRunConfigurationSchema.parse({...configuration,worldSnapshot});
+}
+
+test('avance de rutina invalida ofertas al vencer con tiempos y origen durables sin repetir efectos al reabrir',()=>{
+  withJournal((journal,path)=>{
+    registerRun(journal,routineOffersConfigurationFixture());
+    const operationId=uuid(39_210);
+    const result=journal.advanceRoutineClock({runId,operationId});
+    assert.equal(result.kind,'advanced');if(result.kind!=='advanced')assert.fail('No avanzó el reloj');
+    assert.equal(result.worldSeq,4);assert.equal(result.worldRevision,1);
+    const snapshot=journal.loadWorld({runId});assert.ok(snapshot);
+    assert.equal(snapshot.clock.instant,1_000);
+    const events=journal.readWorldEvents({runId});
+    assert.deepEqual(events.map((event)=>event.kind),['clockAdvanced','offerInvalidated','offerInvalidated','offerInvalidated']);
+    assert.deepEqual(events.map((event)=>event.seq),[1,2,3,4]);
+    assert.deepEqual(events.map((event)=>event.fictitiousAt),[0,500,500,1_000]);
+    for(const event of events)assert.deepEqual(event.origin,{kind:'system',causeClockAdvanceId:operationId});
+    assert.deepEqual(events.filter((event)=>event.kind==='offerInvalidated').map((event)=>event.offerId),
+      [uuid(39_201),uuid(39_202),uuid(39_203)]);
+    for(const offer of snapshot.offers){
+      if(offer.id===uuid(39_204)){assert.equal(offer.state,'open');continue;}
+      if(offer.id===uuid(39_205)){assert.equal(offer.state,'accepted');continue;}
+      assert.equal(offer.state,'invalidated');if(offer.state!=='invalidated')assert.fail('Oferta vencida sigue abierta');
+      assert.equal(offer.cause,'expired');
+      const event=events.find((event)=>event.id===offer.eventId);assert.equal(event?.kind,'offerInvalidated');
+      assert.equal(event?.fictitiousAt,offer.expiresAt);
+    }
+    const inspect=new DatabaseSync(path);
+    try{
+      assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_perceptions WHERE run_id=?').get(runId)?.n,0);
+      assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_commits WHERE run_id=?').get(runId)?.n,1);
+    }finally{inspect.close();}
+    journal.close();const reopened=openJournal({path});
+    try{
+      assert.deepEqual(reopened.advanceRoutineClock({runId,operationId}),{...result,kind:'existing'});
+      assert.deepEqual(reopened.loadWorld({runId}),snapshot);
+      assert.deepEqual(reopened.readWorldEvents({runId}),events);
+      const observations=reopened.readObservationEvents({runId,fromWorldSeq:1,toWorldSeq:4,afterWorldSeq:null,limit:10,communicationsOnly:false});
+      assert.deepEqual(observations?.map((row)=>row.event),events);
+    }finally{reopened.close();}
+  });
+});
+
+test('fallo al persistir expiración revierte reloj, ofertas, eventos, convocatoria y recibo en una transacción',()=>{
+  withJournal((journal,path)=>{
+    registerRun(journal,routineOffersConfigurationFixture());
+    const operationId=uuid(39_220);const before=journal.loadWorld({runId});
+    const inspect=new DatabaseSync(path);
+    try{
+      inspect.exec(`CREATE TRIGGER fail_routine_offer BEFORE INSERT ON world_events
+        WHEN json_extract(NEW.payload_json,'$.kind')='offerInvalidated'
+        BEGIN SELECT RAISE(ABORT,'injected routine expiry failure'); END`);
+      assert.throws(()=>journal.advanceRoutineClock({runId,operationId}),/injected routine expiry failure/);
+      assert.deepEqual(journal.loadWorld({runId}),before);
+      assert.deepEqual(journal.readWorldEvents({runId}),[]);
+      for(const table of ['world_commits','routine_clock_advances','actor_activation_causes','world_perceptions'])
+        assert.equal(inspect.prepare(`SELECT COUNT(*) n FROM ${table} WHERE run_id=?`).get(runId)?.n,0);
+      inspect.exec('DROP TRIGGER fail_routine_offer');
+      const retried=journal.advanceRoutineClock({runId,operationId});assert.equal(retried.kind,'advanced');
+      if(retried.kind==='advanced')assert.equal(retried.worldSeq,4);
+      assert.equal(journal.loadWorld({runId})?.clock.instant,1_000);
+    }finally{inspect.close();}
+  });
+});
+
 test('coordinador conserva causa y cuota compartida, asigna destinatarios tardíos y migra v13 poblado', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-coordinator-'));
   const path = join(directory, 'world.sqlite'); let journal = openJournal({ path });

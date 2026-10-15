@@ -221,13 +221,41 @@ export async function createRepresentationRuntime(input: {
   const narrator=createNarratorPiWorker({journal:input.host.journal,runtime,ownerToken,reviewer,...(testTransport?.narratorSessionFactory===undefined?{}:{sessionFactory:testTransport.narratorSessionFactory})});
   function advanceRoutineClock(runId:RunId):boolean {
     if(closed||admissionSuspended||!enabledRuns.has(runId))return false;
+    const before=input.host.journal.loadWorld({runId});
     const result=input.host.journal.advanceRoutineClock({runId,operationId:randomUUID()});
+    if(result.kind==='advanced') {
+      const eventIds:string[]=[];
+      let afterWorldSeq=before?.seq??null;
+      while(afterWorldSeq!==null&&afterWorldSeq<result.worldSeq) {
+        const page=input.host.journal.readObservationEvents({runId,fromWorldSeq:afterWorldSeq,toWorldSeq:result.worldSeq,
+          afterWorldSeq,limit:100,communicationsOnly:false});
+        if(page===undefined||page.length===0)break;
+        eventIds.push(...page.map(row=>row.event.id));
+        afterWorldSeq=page[page.length-1]?.event.seq??null;
+      }
+      try { input.onWorldCommitted?.({runId,eventIds}); }
+      catch { /* Presentation failure cannot undo a confirmed clock advance. */ }
+    }
     return result.kind==='advanced'||result.kind==='existing';
+  }
+  async function beginNextPulse({runId}:{runId:RunId},signal?:AbortSignal) {
+    let begin=input.host.journal.beginCoordinatorPulse({runId,emptyStepPolicy:'defer'});
+    while(begin.kind==='idle'&&!signal?.aborted&&advanceRoutineClock(runId)) {
+      await yieldToHost();
+      if(closed||admissionSuspended||signal?.aborted||!enabledRuns.has(runId))return begin;
+      begin=input.host.journal.beginCoordinatorPulse({runId,emptyStepPolicy:'defer'});
+    }
+    if(begin.kind==='idle'&&!signal?.aborted) {
+      const step=input.host.journal.readActiveRunStepJob({runId});
+      if(step?.pulseId===null)input.host.journal.completeRunStepJob({runId,jobId:step.jobId,failed:false});
+    }
+    return begin;
   }
   const coordinator = createCoordinatorPulseSupervisor({
     journal: input.host.journal,
     ownerToken,
     actorWorker,
+    beginPulse:beginNextPulse,
     async beforeClosePulse({runId,pulseId},signal) {
       await delivery.waitForRunIdle({runId});
       if(closed||signal.aborted)return false;
@@ -245,7 +273,7 @@ export async function createRepresentationRuntime(input: {
     },
     async onPulseClosed({runId,pulseId}) {
       const step = input.host.journal.readActiveRunStepJob({runId});
-      if (step === undefined) { advanceRoutineClock(runId); return; }
+      if (step === undefined) return;
       if (step.pulseId !== pulseId) return;
       await delivery.waitForRunIdle({runId});
       const configuration = ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({runId}));
@@ -286,14 +314,8 @@ export async function createRepresentationRuntime(input: {
     if (closed||admissionSuspended) return false;
     const { runId } = ScheduleRunSchema.parse(rawInput);
     if (!enabledRuns.has(runId)) return false;
-    let begin = input.host.journal.beginCoordinatorPulse({ runId });
+    const begin = await beginNextPulse({runId});
     if (begin.kind === 'inactive') return false;
-    while(begin.kind==='idle'&&advanceRoutineClock(runId)) {
-      if(closed||admissionSuspended||!enabledRuns.has(runId))return false;
-      await yieldToHost();
-      begin=input.host.journal.beginCoordinatorPulse({runId});
-      if(begin.kind==='inactive')return false;
-    }
     // An authorized run can wait for its first stimulus. Accepting its schedule
     // must not depend on a fictional event or an already delivered perception.
     if (begin.kind === 'idle') return true;

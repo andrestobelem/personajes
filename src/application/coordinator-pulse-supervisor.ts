@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { openJournal } from '../adapters/journal.ts';
-import { ActorTurnJobClaimSchema, ActorTurnJobViewSchema } from '../domain/world-journal.ts';
+import { ActorTurnJobClaimSchema, ActorTurnJobViewSchema, CoordinatorPulseBeginResultSchema } from '../domain/world-journal.ts';
 import { RunIdSchema } from '../domain/values.ts';
 import type { ActorTurnWorkerResult } from './actor-turn-worker.ts';
 
@@ -38,6 +38,7 @@ export function createCoordinatorPulseSupervisor(input: {
   journal: Journal;
   ownerToken: string;
   actorWorker: ActorWorker;
+  beginPulse?: (target: {runId: RunId}, signal: AbortSignal) => Promise<z.infer<typeof CoordinatorPulseBeginResultSchema>>;
   onOutcome?: (outcome: {
     runId: RunId;
     pulseId: Job['pulseId'];
@@ -93,7 +94,9 @@ export function createCoordinatorPulseSupervisor(input: {
   async function drainRun(runId: RunId, signal: AbortSignal): Promise<'quiescent' | 'suspended'> {
     let pulsesSinceYield = 0;
     while (!closed && !signal.aborted) {
-      const begin = input.journal.beginCoordinatorPulse({ runId });
+      const begin = input.beginPulse === undefined
+        ? input.journal.beginCoordinatorPulse({ runId })
+        : await input.beginPulse({ runId }, signal);
       if (begin.kind === 'inactive' || begin.kind === 'idle') return 'quiescent';
       if (begin.pulse.state !== 'running') {
         await input.onPulseClosed?.({runId,pulseId:begin.pulse.pulseId});

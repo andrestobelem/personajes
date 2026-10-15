@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { validateRunConfiguration } from '../src/application/production-preflight.ts';
 import { WorldSnapshotSchema } from '../src/domain/world-schema.ts';
-import { nextRoutineAdvance, planActorActivationInvitations } from '../src/domain/actor-activation.ts';
+import { currentRoutineAvailabilityBoundary, nextRoutineAdvance, planActorActivationInvitations } from '../src/domain/actor-activation.ts';
 import { draftFixture } from './fixtures/continuista.ts';
 
 function snapshot() {
@@ -44,4 +44,43 @@ test('routine scheduling uses fictional boundaries and bounded running policy, n
   const ids = routineWorld.entities.flatMap(entity => entity.kind === 'character' ? [entity.characterId] : []);
   assert.equal(planActorActivationInvitations({ snapshot: advanced, activeCharacterIds: ids, previousInstant: now }).filter(item => item.trigger.kind === 'routine-boundary').length, 1);
   assert.equal(planActorActivationInvitations({ snapshot: advanced, activeCharacterIds: ids, previousInstant: now + 1000 }).filter(item => item.trigger.kind === 'routine-boundary').length, 0);
+});
+
+
+test('routine boundaries represent effective unavailable→available transitions including the default outside windows',()=>{
+  const window=(from:number,to:number,state:'available'|'unavailable')=>({from,to,state});
+  const cases=[
+    {defaultState:'available',windows:[window(10,20,'unavailable')],instant:20,expected:20},
+    {defaultState:'available',windows:[window(10,20,'unavailable')],instant:19,expected:undefined},
+    {defaultState:'available',windows:[window(10,20,'available')],instant:15,expected:undefined},
+    {defaultState:'available',windows:[window(10,20,'available')],instant:20,expected:undefined},
+    {defaultState:'unavailable',windows:[window(10,20,'unavailable')],instant:20,expected:undefined},
+    {defaultState:'unavailable',windows:[window(20,30,'available'),window(10,20,'available')],instant:25,expected:10},
+    {defaultState:'unavailable',windows:[window(10,20,'available'),window(20,30,'available')],instant:30,expected:undefined},
+    {defaultState:'available',windows:[window(10,20,'unavailable'),window(20,30,'unavailable')],instant:30,expected:30},
+    {defaultState:'available',windows:[window(10,20,'unavailable'),window(20,30,'available')],instant:25,expected:20},
+    {defaultState:'unavailable',windows:[window(10,20,'available'),window(30,40,'available')],instant:35,expected:30},
+    {defaultState:'unavailable',windows:[window(0,20,'available')],instant:0,expected:0},
+  ];
+  for(const {defaultState,windows,instant,expected} of cases)
+    assert.equal(currentRoutineAvailabilityBoundary({routine:{kind:'windows',defaultState,windows},instant}),expected,JSON.stringify({defaultState,windows,instant}));
+  assert.equal(currentRoutineAvailabilityBoundary({routine:{kind:'always'},instant:20}),undefined);
+});
+
+test('planner invites on effective availability and neither repeats contiguous windows nor revives an expired interval',()=>{
+  const source=snapshot();const actor=source.entities.find((entity)=>entity.kind==='character');assert.ok(actor);
+  const now=source.clock.instant;const actorId=actor.characterId;
+  function planned(routine:unknown,previous:number,current:number){
+    const world=WorldSnapshotSchema.parse({...source,clock:{...source.clock,instant:now+current},
+      entities:source.entities.map((entity)=>entity===actor?{...entity,routine}:entity)});
+    return planActorActivationInvitations({snapshot:world,activeCharacterIds:[actorId],previousInstant:now+previous})
+      .filter((invitation)=>invitation.trigger.kind==='routine-boundary').map((invitation)=>invitation.trigger);
+  }
+  assert.deepEqual(planned({kind:'windows',defaultState:'available',windows:[{from:now,to:now+20,state:'unavailable'}]},0,20),
+    [{kind:'routine-boundary',boundaryAt:now+20}]);
+  const contiguous={kind:'windows',defaultState:'unavailable',windows:[{from:now+10,to:now+20,state:'available'},{from:now+20,to:now+30,state:'available'}]};
+  assert.deepEqual(planned(contiguous,15,20),[]);
+  assert.deepEqual(planned(contiguous,0,25),[{kind:'routine-boundary',boundaryAt:now+10}]);
+  assert.deepEqual(planned(contiguous,0,30),[]);
+  assert.deepEqual(planned({kind:'windows',defaultState:'available',windows:[{from:now+10,to:now+20,state:'available'}]},0,15),[]);
 });
