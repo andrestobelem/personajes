@@ -282,3 +282,7 @@ POST `/runs/{id}/preflight` está conectado al broker durable, exige Ready guard
 ## Contexto de conciliación de voces
 
 `GET /runs/{runId}/voice-settings/reconciliation`, con sesión local de operador, devuelve `{kind:'voice-reconciliation-context',snapshot,baseStale}` y ETag de la revisión sonora preservada. Permite construir el POST existente `/voice-settings/reconcile` aun cuando una preparación nueva dejó obsoleta la base. Leer el contexto no concilia ni genera. El POST conserva If-Match/idempotencia y devuelve el recibo original al reintentar; el cliente distingue obsolescencia de otros errores de lectura. [Prueba SQLite/ruta](../../tests/voice-reconciliation-routes.test.ts).
+
+## Archivo privado histórico — corte 43
+
+La consulta existente del inspector acepta memoryOffset entero no negativo y memoryLimit entre 1 y 100, conservando el opt-in privado de sesión/corrida. La respuesta histórica distingue checkpoint verificado y no disponible, e incluye fuente, fecha de registro, experiences congeladas y paginación; no ejecuta recall semántico. No existe aún ruta productiva de bifurcación. Ver [contrato y evidencia](../auditoria/cortes-privados.md).

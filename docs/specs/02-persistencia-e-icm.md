@@ -22,7 +22,7 @@ Un solo host escritor controla cada `privateData`. Antes de abrir workers se adq
 
 ## Schema de journal
 
-El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v30; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El fork durable sigue siendo futuro.
+El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v34; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El fork durable sigue siendo futuro.
 
 Migraciones numeradas con `schema_version`; JSON versionado validado en lectura/escritura. Tablas requeridas:
 
@@ -185,3 +185,7 @@ Director conserva job, contexto, sesión propia, candidato, checkpoint, lease y 
 `circumstance_operations` conserva request hash y recibo idempotente por corrida/principal/clave, separado de las operaciones administrativas de metaindicaciones. El historial `direction_events` comparte su revisión para que los CAS físicos y administrativos se invaliden mutuamente. `world_commits`, eventos, percepciones e intenciones admiten origen `directionCircumstance`; su causa abre un pulso sólo tras entrega efectiva. La migración reconstruye el CHECK de pulsos con foreign keys desactivadas únicamente durante la transacción y verifica todas las referencias antes de confirmar. Un fallo revierte tablas y versión.
 
 Una aplicación física confirma snapshot, mundo, historial, percepciones y recibo en la misma transacción; un no-op conserva el snapshot y sólo agrega Dirección/recibo. Replay exacto consulta su recibo antes de reevaluar lifecycle y no repite efectos. Catálogo y ambiente son campos opcionales sin defaults en snapshots legados: su lectura no cambia el contenido canónico original.
+
+## Cortes privados exactos — journal v34
+
+La implementación registra lotes y cortes privados por commit en la misma transacción, con fuente exacta y manifiesto de todos los personajes. Conserva reconocimiento y la unión verificable de experiencias propias aceptadas y mente del snapshot, con cierre de referencias y fechas no futuras. No hace backfill ni reconstruye memoria pasada con ICM actual. La preparación editable reemplaza sólo su corte inicial. Ver [ADR 0010](../adr/0010-cortes-privados-exactos.md) y [evidencia](../auditoria/cortes-privados.md). El fork durable sigue pendiente.

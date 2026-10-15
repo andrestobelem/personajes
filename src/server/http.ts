@@ -2232,7 +2232,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           options.onInspectorRead?.({runId,requestId:inspectionRequestId});
           sendJson(res,200,view);return;
         }
-        const query=parseQuery(url,z.strictObject({characterId:InspectorRequestSchema.shape.characterId,atWorldSeq:z.coerce.number().int().nonnegative().safe().optional(),worldRevision:z.coerce.number().int().nonnegative().safe().optional()}));
+        const query=parseQuery(url,z.strictObject({characterId:InspectorRequestSchema.shape.characterId,atWorldSeq:z.coerce.number().int().nonnegative().safe().optional(),worldRevision:z.coerce.number().int().nonnegative().safe().optional(),memoryOffset:z.coerce.number().int().nonnegative().safe().optional(),memoryLimit:z.coerce.number().int().min(1).max(100).optional()}));
         const result=options.runInspector.inspect({runId,...query});
         if(result.kind==='invalidCut')fail({status:422,kind:'validation',code:'INVALID_REQUEST',message:'El corte solicitado no es un snapshot confirmado.',issues:[{path:['atWorldSeq'],code:'invalid-cut'}]});
         if(result.kind==='missing')fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'El personaje no está disponible en ese corte.'});

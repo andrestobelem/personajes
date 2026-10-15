@@ -344,3 +344,7 @@ El operador puede configurar o quitar un ciclo editorial con comienzos de día/n
 ## Audio inicial y configuración efectiva (corte 42)
 
 La preparación tiene editor de audio, modelo explícito, comportamiento TTS, formato/subtítulos y slots elegibles, con referencias conservadas opacas y retirada explícita. En Voces y sonido se editan modo, slots y cuotas de la versión sonora independiente. Guardar o conciliar no genera audio. Las ediciones locales se conservan ante error/refresh y se requiere cargar explícitamente una nueva revisión guardada. Una fuente de preparación obsoleta muestra contexto preservado y botón de conciliación; no se importan silenciosamente los cambios del audio inicial. [Recorrido, pruebas y captura](../auditoria/audio-preparacion-y-admision.md).
+
+## Archivo privado histórico — corte 43
+
+El inspector histórico distingue mente del snapshot, reconocimiento del checkpoint y archivo de experiencias admitidas; pagina de a 50, conserva procedencia/hash y no lo presenta como búsqueda ICM. Cambiar corte o personaje invalida consultas pendientes; una respuesta actual no puede renderizarse como histórica aun con igual secuencia. Un corte sin registro declara indisponibilidad. Ver [recorrido de navegador](../auditoria/cortes-privados.md).

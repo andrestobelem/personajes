@@ -1,6 +1,6 @@
 # ADR 0007 — Cierres dramáticos y bifurcación de continuidad
 
-Estado: decisión adoptada; estructura básica implementada en journal v29, API autenticada y panel inicial. Director automático, fork durable, GUI completa y aceptación integral siguen pendientes.
+Estado: decisión adoptada; estructura básica implementada en journal v29, API autenticada y panel inicial. Director automático implementado con observaciones y evidencia por corte; fork durable, GUI completa y aceptación integral siguen pendientes.
 
 ## Contexto
 
@@ -38,3 +38,7 @@ El corte del 15 de octubre pasó `npm run verify` con 554 pruebas aprobadas, cer
 - [S04 — API](../specs/04-api-y-autoridad.md)
 - [S05 — Interfaz](../specs/05-interfaz.md)
 - [S07 — Verificación](../specs/07-verificacion.md)
+
+## Avance del corte 43
+
+El journal v34 registra cortes privados exactos para nuevas confirmaciones, prerrequisito de bifurcación fiel. No se habilitó fork ni restauración como fork. [Evidencia y límites](../auditoria/cortes-privados.md). Las descripciones anteriores conservan el estado del corte que auditaron.

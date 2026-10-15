@@ -17,7 +17,7 @@ function downgradeTo32(database: DatabaseSync) {
     ALTER TABLE coordinator_pulses_legacy RENAME TO coordinator_pulses;
     CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
     DROP TABLE circumstance_operations;
-    DELETE FROM schema_version WHERE version=33;
+    DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DELETE FROM schema_version WHERE version IN(33,34);
     COMMIT; PRAGMA foreign_keys=ON;`);
 }
 
@@ -51,7 +51,7 @@ for (const corruptChild of [false, true]) {
       const after = new DatabaseSync(path);
       try {
         assert.deepEqual(after.prepare('SELECT * FROM coordinator_pulses').all(), expected);
-        assert.equal(after.prepare('SELECT MAX(version) AS n FROM schema_version').get()?.n, corruptChild ? 32 : 33);
+        assert.equal(after.prepare('SELECT MAX(version) AS n FROM schema_version').get()?.n, corruptChild ? 32 : 34);
         assert.equal(after.prepare("SELECT name FROM sqlite_master WHERE name='coordinator_pulses_v33'").get(), undefined);
         assert.equal(after.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='circumstance_operations'").get()?.n, corruptChild ? 0 : 1);
         if (!corruptChild) {

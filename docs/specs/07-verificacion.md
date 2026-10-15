@@ -180,3 +180,7 @@ El [corte 41](../auditoria/rutinas-diarias.md) agrega calendario local fixedOffs
 ## Evidencia posterior: preparación sonora y admisión
 
 El [corte 42](../auditoria/audio-preparacion-y-admision.md) verifica editores inicial/efectivo, contexto/reconciliación, lectura local de evidencia de vinculación y revalidación síncrona antes de iniciar. Incluye SQLite real, transportes controlados y navegador, sin proveedor live. Gate: 693 aprobadas, cero fallidas, una omitida exclusiva de Linux. P21/G4 y aceptación integral siguen pendientes.
+
+## Gate de cortes privados — corte 43
+
+Verificar captura inicial y por commit dentro de la misma transacción, rollback ante memoria inválida, entregas tardías con igual secuencia, commits estructurales sin evento, manifiesto completo/tamper, fechas y referencias, antecedente externo autorizado, migración sin backfill, HTTP privado y paginación. El navegador debe mostrar 55 experiencias antes y 56 después de una entrega tardía, sin fuga hacia atrás ni respuesta actual obsoleta. Estos gates parciales no acreditan fork ni aceptación integral. [Resultados ejecutados](../auditoria/cortes-privados.md).

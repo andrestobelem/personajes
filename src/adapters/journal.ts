@@ -1,3 +1,4 @@
+import { ActorStateCutSchema, ActorStateCutRequestSchema, ActorStateCutReadResultSchema } from '../domain/actor-state-cut.ts';
 import {CircumstanceOptionsRequestSchema,CircumstanceOptionsSchema,CircumstanceWriteSchema,CircumstanceMutationResultSchema} from '../domain/direction-circumstances.ts';
 import {resolveWorldCircumstance} from '../domain/world-circumstances.ts';
 import { DatabaseSync } from 'node:sqlite';
@@ -513,7 +514,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1819,10 +1820,176 @@ export function openJournal(input: { path: string }) {
     }
   }
 
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=34').get()) {
+    try { database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE actor_state_cut_batches(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        commit_index INTEGER NOT NULL CHECK(commit_index>=0),
+        manifest_json TEXT NOT NULL,manifest_hash TEXT NOT NULL,
+        PRIMARY KEY(run_id,commit_index)
+      );
+      CREATE TABLE actor_state_cuts(
+        run_id TEXT NOT NULL,commit_index INTEGER NOT NULL,actor_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        PRIMARY KEY(run_id,commit_index,actor_id),
+        FOREIGN KEY(run_id,commit_index) REFERENCES actor_state_cut_batches(run_id,commit_index) ON DELETE CASCADE
+      );
+      INSERT INTO schema_version VALUES(34);
+      COMMIT;
+    `); } catch (error) {
+      try { database.exec('ROLLBACK'); } catch { /* Migration is atomic. */ }
+      database.close(); throw error;
+    }
+  }
+
+  const pendingInitialActorCuts = new Set<string>();
+  const ActorStateCutManifestSchema = z.strictObject({
+    source: ActorStateCutSchema.shape.source,
+    actors: z.array(z.strictObject({ actorId: CharacterIdSchema, cutHash: HashSchema })),
+  });
+
+  function exactActorCutSource(run: ReturnType<typeof parseWorldRun>, commitIndex: number) {
+    if (commitIndex === 0) {
+      if (canonicalJson(run.initialSnapshot) !== run.row.initial_snapshot_json || sha256(run.row.initial_snapshot_json) !== run.row.initial_snapshot_hash)
+        throw new Error('Snapshot inicial del corte privado inválido');
+      return { snapshot: run.initialSnapshot, source: {
+      runId: run.row.run_id, commitIndex: 0, worldRevision: run.initialSnapshot.revision,
+      worldSeq: run.initialSnapshot.seq, snapshotHash: run.row.initial_snapshot_hash,
+      configurationRevision: run.row.config_revision, configurationHash: run.row.configuration_hash,
+    } }; }
+    const value = database.prepare('SELECT snapshot_json,snapshot_hash,world_revision,last_seq FROM world_commits WHERE run_id=? AND commit_index=?')
+      .get(run.row.run_id, commitIndex);
+    if (value === undefined) throw new Error('Commit del corte privado inexistente');
+    const row = z.strictObject({snapshot_json:z.string(),snapshot_hash:HashSchema,world_revision:RevisionSchema,last_seq:WorldSeqSchema}).parse(value);
+    const snapshot = WorldSnapshotSchema.parse(parseStoredJson(row.snapshot_json));
+    if (canonicalJson(snapshot) !== row.snapshot_json || sha256(row.snapshot_json) !== row.snapshot_hash
+      || snapshot.runId !== run.row.run_id || snapshot.revision !== row.world_revision || snapshot.seq !== row.last_seq)
+      throw new Error('Snapshot del corte privado inválido');
+    return { snapshot, source: {runId: run.row.run_id,commitIndex,worldRevision:row.world_revision,
+      worldSeq:row.last_seq,snapshotHash:row.snapshot_hash,configurationRevision:run.row.config_revision,
+      configurationHash:run.row.configuration_hash} };
+  }
+
+  function validateActorCutExperienceClosure(cut: z.infer<typeof ActorStateCutSchema>, run: ReturnType<typeof parseWorldRun>, snapshot: z.infer<typeof WorldSnapshotSchema>) {
+    const admitted = new Set<string>(cut.experiences.map(item=>item.envelope.experienceId));
+    const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
+    const prepared = configuration.success ? configuration.data.roster.preparedCharacters.find(actor=>actor.characterId===cut.actorId) : undefined;
+    const initial = prepared?.initialExperience.value;
+    if (initial?.kind === 'run-cut') for (const experience of initial.experiences) admitted.add(experience.experienceId);
+    for (const {envelope} of cut.experiences) {
+      if (envelope.fictitiousAt > snapshot.clock.instant || envelope.receivedAt > snapshot.clock.instant)
+        throw new Error('Experiencia posterior al reloj del corte privado');
+      const references = 'basedOn' in envelope ? envelope.basedOn : [];
+      if (references.some(id=>!admitted.has(id)) || (envelope.predecessor.kind==='revision' && !admitted.has(envelope.predecessor.experienceId)))
+        throw new Error('Experiencia del corte privado refiere evidencia no admitida');
+    }
+  }
+
+  function captureActorStateCut(runId: string, commitIndex: number) {
+    const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(runId));
+    const { snapshot, source } = exactActorCutSource(run, commitIndex);
+    const recordedAt = new Date().toISOString();
+    const actors = snapshot.entities.filter(entity => entity.kind === 'character')
+      .sort((left,right) => left.characterId < right.characterId ? -1 : left.characterId > right.characterId ? 1 : 0);
+    const cuts = actors.map(actor => {
+      const knowledgeValue = database.prepare('SELECT knowledge_revision,at_world_seq,payload_json,payload_hash FROM actor_knowledge WHERE run_id=? AND actor_id=?')
+        .get(runId,actor.characterId);
+      let knowledge: z.infer<typeof ActorStateCutSchema>['knowledge'] = {kind:'unavailable',reason:'knowledge-not-recorded'};
+      if (knowledgeValue !== undefined) {
+        const row = WorldKnowledgeDbRowSchema.parse(knowledgeValue);
+        const value = ActorKnowledgeSchema.parse(parseStoredJson(row.payload_json));
+        if (canonicalJson(value) !== row.payload_json || sha256(row.payload_json) !== row.payload_hash)
+          throw new Error('Conocimiento del corte privado inválido');
+        knowledge = {kind:'recorded',revision:RevisionSchema.parse(row.knowledge_revision),atWorldSeq:WorldSeqSchema.parse(row.at_world_seq),value};
+      }
+      const experiences = new Map<string,FrozenExperience>();
+      const add = (frozen: FrozenExperience) => {
+        const verified = freezeExperience(frozen.envelope);
+        if (verified.canonicalPayload !== frozen.canonicalPayload || verified.payloadHash !== frozen.payloadHash)
+          throw new Error('Experiencia del corte privado inválida');
+        const prior = experiences.get(verified.envelope.experienceId);
+        if (prior !== undefined && (prior.canonicalPayload !== verified.canonicalPayload || prior.payloadHash !== verified.payloadHash))
+          throw new Error('ExperienceId contradictorio en corte privado');
+        experiences.set(verified.envelope.experienceId,verified);
+      };
+      for (const rowValue of database.prepare('SELECT canonical_payload,payload_hash FROM experiences WHERE run_id=? AND actor_id=? AND world_seq<=? ORDER BY experience_id')
+        .all(runId,actor.characterId,snapshot.seq)) {
+        const row = experienceRow.parse(rowValue);
+        const envelope = readPrivateExperience({summary:row.canonical_payload,actorId:actor.characterId,
+          runId:snapshot.runId,throughWorldSeq:snapshot.seq,expectedPayloadHash:row.payload_hash});
+        add({envelope,canonicalPayload:row.canonical_payload,payloadHash:row.payload_hash});
+      }
+      for (const envelope of actor.mind.experiences) add(freezeExperience(envelope));
+      const cut = ActorStateCutSchema.parse({kind:'actor-state-cut',source,actorId:actor.characterId,recordedAt,knowledge,
+        experiences:[...experiences.values()].sort((left,right) => left.envelope.experienceId < right.envelope.experienceId ? -1 : left.envelope.experienceId > right.envelope.experienceId ? 1 : 0)});
+      validateActorCutExperienceClosure(cut,run,snapshot);
+      return {cut,payload:hashJson(cut)};
+    });
+    const manifest = hashJson(ActorStateCutManifestSchema.parse({source,actors:cuts.map(({cut,payload})=>({actorId:cut.actorId,cutHash:payload.hash}))}));
+    database.prepare('INSERT INTO actor_state_cut_batches VALUES(?,?,?,?)').run(runId,commitIndex,manifest.json,manifest.hash);
+    for (const {cut,payload} of cuts) database.prepare('INSERT INTO actor_state_cuts VALUES(?,?,?,?,?)')
+      .run(runId,commitIndex,cut.actorId,payload.json,payload.hash);
+  }
+
+  function readActorStateCut(input: unknown): z.infer<typeof ActorStateCutReadResultSchema> {
+    const request = ActorStateCutRequestSchema.parse(input);
+    const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+    if (runValue === undefined) return {kind:'missing'};
+    try {
+      const run = parseWorldRun(runValue);
+      const selected = request.commitIndex === undefined
+        ? snapshotAndCommitAtCut(run,request.worldRevision,request.worldSeq)
+        : exactActorCutSource(run,request.commitIndex);
+      if (selected === undefined) return {kind:'unavailable',reason:'checkpoint-not-recorded'};
+      const commitIndex = 'source' in selected ? selected.source.commitIndex : selected.commitIndex;
+      const exact = exactActorCutSource(run,commitIndex);
+      if (exact.source.worldRevision !== request.worldRevision || exact.source.worldSeq !== request.worldSeq)
+        return {kind:'unavailable',reason:'invalid-cut'};
+      const batchValue = database.prepare('SELECT manifest_json,manifest_hash FROM actor_state_cut_batches WHERE run_id=? AND commit_index=?')
+        .get(request.runId,commitIndex);
+      if (batchValue === undefined) return {kind:'unavailable',reason:'checkpoint-not-recorded'};
+      const batch = z.strictObject({manifest_json:z.string(),manifest_hash:HashSchema}).parse(batchValue);
+      const manifest = ActorStateCutManifestSchema.parse(parseStoredJson(batch.manifest_json));
+      if (canonicalJson(manifest) !== batch.manifest_json || sha256(batch.manifest_json) !== batch.manifest_hash
+        || canonicalJson(manifest.source) !== canonicalJson(exact.source)) throw new Error('Manifest de corte privado inválido');
+      const expectedActorIds = exact.snapshot.entities.filter(entity=>entity.kind==='character').map(actor=>actor.characterId).sort();
+      if (canonicalJson(manifest.actors.map(actor=>actor.actorId)) !== canonicalJson(expectedActorIds)) throw new Error('Lote de corte privado incompleto');
+      const rows = database.prepare('SELECT actor_id,payload_json,payload_hash FROM actor_state_cuts WHERE run_id=? AND commit_index=? ORDER BY actor_id')
+        .all(request.runId,commitIndex);
+      if (rows.length !== manifest.actors.length) throw new Error('Lote de corte privado incompleto');
+      let requested: z.infer<typeof ActorStateCutSchema> | undefined;
+      for (const [index,rowValue] of rows.entries()) {
+        const row = z.strictObject({actor_id:CharacterIdSchema,payload_json:z.string(),payload_hash:HashSchema}).parse(rowValue);
+        const cut = ActorStateCutSchema.parse(parseStoredJson(row.payload_json));
+        const entry = manifest.actors[index];
+        if (canonicalJson(cut) !== row.payload_json || sha256(row.payload_json) !== row.payload_hash
+          || entry?.actorId !== row.actor_id || entry.cutHash !== row.payload_hash || cut.actorId !== row.actor_id
+          || canonicalJson(cut.source) !== canonicalJson(exact.source)) throw new Error('Corte privado alterado');
+        let previousId: string | undefined;
+        for (const frozen of cut.experiences) {
+          const verified = freezeExperience(frozen.envelope);
+          if (verified.canonicalPayload !== frozen.canonicalPayload || verified.payloadHash !== frozen.payloadHash
+            || (previousId !== undefined && previousId >= frozen.envelope.experienceId)) throw new Error('Experiencia del corte privado alterada');
+          previousId = frozen.envelope.experienceId;
+        }
+        validateActorCutExperienceClosure(cut,run,exact.snapshot);
+        if (cut.actorId === request.actorId) requested = cut;
+      }
+      return requested === undefined ? {kind:'unavailable',reason:'actor-not-in-cut'} : {kind:'found',cut:requested};
+    } catch { return {kind:'unavailable',reason:'invalid-cut'}; }
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
+      pendingInitialActorCuts.clear();
+      const watermark = z.strictObject({ value: counter }).parse(database.prepare('SELECT COALESCE(MAX(rowid),0) AS value FROM world_commits').get()).value;
       const result = operation();
+      for (const runId of pendingInitialActorCuts) captureActorStateCut(runId,0);
+      for (const value of database.prepare('SELECT run_id,commit_index FROM world_commits WHERE rowid>? ORDER BY rowid').all(watermark)) {
+        const row = z.strictObject({run_id:RunIdSchema,commit_index:RevisionSchema}).parse(value);
+        captureActorStateCut(row.run_id,row.commit_index);
+      }
       database.exec('COMMIT');
       return result;
     } catch (error) {
@@ -3779,6 +3946,8 @@ export function openJournal(input: { path: string }) {
             const knowledge=hashJson(emptyActorKnowledge({runId:snapshot.runId,actorId:context.actorId}));
             database.prepare('INSERT INTO actor_knowledge VALUES(?,?,0,?,?,?)').run(snapshot.runId,context.actorId,snapshot.seq,knowledge.json,knowledge.hash);
           }
+          database.prepare('DELETE FROM actor_state_cut_batches WHERE run_id=? AND commit_index=0').run(snapshot.runId);
+          pendingInitialActorCuts.add(snapshot.runId);
           return 'stored';
         }
         database.prepare(`
@@ -3807,6 +3976,7 @@ export function openJournal(input: { path: string }) {
             VALUES(?,?,0,?,?,?)
           `).run(snapshot.runId, context.actorId, snapshot.seq, knowledgePayload.json, knowledgePayload.hash);
         }
+        pendingInitialActorCuts.add(snapshot.runId);
         return 'stored';
 
   }
@@ -4657,6 +4827,7 @@ export function openJournal(input: { path: string }) {
       return ActorDirectionContextSchema.parse({directionRevision:request.directionRevision,indications});
     },
 
+    readActorStateCut,
     registerWorldRun(input:unknown):'stored'|'existing'{return transact(()=>registerWorldRunWithinTransaction(input));},
 
     setWorldLifecycle(input: unknown): 'updated' | 'stale' {

@@ -94,3 +94,5 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 - [Reloj y rutinas: preparación, evidencia y límite entre escenas](auditoria/reloj-y-rutinas.md).
 - [Cambios de circunstancia: contrato, implementación y evidencia](auditoria/cambios-de-circunstancia.md): cinco familias físicas, entrega situada y límites de aceptación.
 - [ADR 0008: circunstancias físicas y percepción](adr/0008-circunstancias-fisicas-y-percepcion.md), [entrevista delegada](auditoria/dialogo-circunstancias.md) y [respuestas del custodio](auditoria/circunstancias-respuestas.md).
+
+- [Cortes privados exactos: implementación y evidencia](auditoria/cortes-privados.md), [ADR 0010](adr/0010-cortes-privados-exactos.md), [entrevista](auditoria/dialogo-cortes-privados.md) y [respuestas](auditoria/cortes-privados-respuestas.md).

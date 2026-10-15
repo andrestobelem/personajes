@@ -35,3 +35,7 @@ La ausencia de credenciales o de una decisión de puesta no impide construir flu
 ## Continuación Cloud
 
 El handoff conserva los ocho pasos de este objetivo. El checkout se actualizó a `main` en `b6246e1f2c6ecedc7f0dc6869bfeb336f47bfd4b`. Tras autorización posterior del usuario se publicó el checkpoint `cd4873344677c853fb8e89a05594406c9aa90973`. No hay herramienta disponible para crear o consultar un Goal formal; la herramienta ahora visible sólo permite finalizar o bloquear uno existente. El objetivo de ocho pasos sigue vigente y no se ha declarado completo ni bloqueado. Ver [evidencia y revisión en Cloud](continuacion-cloud.md).
+
+## Avance del corte 43 — 15 de octubre de 2026
+
+Cortes privados exactos implementados en journal v34 e inspector histórico paginado; no hay reconstrucción del pasado con conocimiento/ICM actuales. Ver [evidencia, revisión y límites](cortes-privados.md). TypeScript, build y 713 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux; recorrido Chromium sintético verificado. Fork y aceptación integral de los 77 requisitos siguen pendientes.

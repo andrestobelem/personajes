@@ -137,3 +137,7 @@ Información sensorial sobre un cambio confirmado del Escenario sin hablante ni 
 ## Catálogo de circunstancias
 
 Conjunto autorizado para una puesta de condiciones ambientales y plantillas de objetos, con procedencia explícita. Elegir una opción del catálogo permite solicitar su efecto compatible; no decide cómo reaccionará un personaje.
+
+**Corte privado registrado**:
+Estado del conocimiento y de las experiencias propias efectivamente admitidas para un personaje en un momento confirmado de la representación. No atribuye al personaje información recibida después aunque se refiera a hechos anteriores.
+_Avoid_: Memoria actual filtrada, recuerdo retrospectivo supuesto

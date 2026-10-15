@@ -120,3 +120,7 @@ La revisión documental comprueba coherencia y trazabilidad; no prueba rendimien
 ## Cambio posterior de perfiles
 
 La persona usuaria pidió probar GPT-6.1 Sol con esfuerzo bajo y agregar Claude Opus 5.5 con esfuerzo medio como opción. [ADR0003](../adr/0003-perfiles-de-inferencia-seleccionables.md) reemplaza el requisito inicial Luna/xhigh; PRD ACT-03 y las specs de Pi/API/UI registran esa selección por representación, sin fallback y con autenticación por proveedor. Las auditorías anteriores son evidencia de su corte, no prueba del perfil nuevo. La verificación de implementación se registra separadamente al cerrar el corte.
+
+## Avance del corte 43 — 15 de octubre de 2026
+
+Cortes privados exactos implementados en journal v34 e inspector histórico paginado; no hay reconstrucción del pasado con conocimiento/ICM actuales. Ver [evidencia, revisión y límites](cortes-privados.md). TypeScript, build y 713 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux; recorrido Chromium sintético verificado. Fork y aceptación integral de los 77 requisitos siguen pendientes.
