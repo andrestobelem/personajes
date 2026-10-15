@@ -381,6 +381,8 @@ export type LocalHttpServer = {
   /** Binds only to IPv4 loopback and returns the canonical local origin. */
   listen(port?: number): Promise<{ readonly address: '127.0.0.1'; readonly port: number; readonly origin: string }>;
   close(): Promise<void>;
+  /** Invalidate in-memory authority and drain pending SSE reads before replacing durable services. */
+  resetSessions():Promise<void>;
 };
 
 const HTTP_FAILURE_MARKER = Symbol('personajes.http.failure');
@@ -1269,7 +1271,11 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     const method = req.method ?? 'GET';
     let releaseAdmission:()=>void;
     try{releaseAdmission=options.admissionBarrier?.enter({method,path:segments})??(()=>{});}
-    catch{fail({status:503,kind:'dependency',code:'HOST_BACKUP_IN_PROGRESS',message:'El host está preparando un backup; reintentá al terminar.',safeCode:'HOST_BACKUP_IN_PROGRESS',retryable:true});}
+    catch{
+      const recovering=options.admissionBarrier?.isRecovering===true;
+      const code=recovering?'HOST_RECOVERY_IN_PROGRESS':'HOST_BACKUP_IN_PROGRESS';
+      fail({status:503,kind:'dependency',code,message:recovering?'El host está recuperando un respaldo; reintentá al terminar.':'El host está preparando un backup; reintentá al terminar.',safeCode:code,retryable:true});
+    }
     try{return await handleAdmitted(req,res,url,segments,method);}finally{releaseAdmission();}
   }
 
@@ -1288,7 +1294,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     }
 
     if (isRoot) {
-      if (method !== 'GET') fail({ status: 404, kind: 'notFound', code: 'NOT_FOUND', message: 'Recurso no encontrado.' });
+      if (method !== 'GET'&&method!=='HEAD') fail({ status: 404, kind: 'notFound', code: 'NOT_FOUND', message: 'Recurso no encontrado.' });
       if (bootstraps.size >= MAX_PENDING_BOOTSTRAPS) {
         for (const [token, grant] of bootstraps) if (grant.expiresAtMs <= now()) bootstraps.delete(token);
         if (bootstraps.size >= MAX_PENDING_BOOTSTRAPS) fail({ status: 503, kind: 'dependency', code: 'BOOTSTRAP_CAPACITY', message: 'No se pudo iniciar una sesión local.', safeCode: 'BOOTSTRAP_CAPACITY', retryable: true });
@@ -1298,7 +1304,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
       const html = injectBootstrapMeta(shellMarkup(options), nonce);
       const body = Buffer.from(html, 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': String(body.byteLength) });
-      res.end(body);
+      res.end(method==='HEAD'?undefined:body);
       return;
     }
 
@@ -2484,7 +2490,16 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     fail({ status: 404, kind: 'notFound', code: 'NOT_FOUND', message: 'Recurso no encontrado.' });
   }
 
+  async function resetSessions():Promise<void>{
+    sessions.clear();
+    bootstraps.clear();
+    if(refreshTimer!==undefined){clearInterval(refreshTimer);refreshTimer=undefined;}
+    for(const client of refreshClients)closeRefresh(client);
+    await refreshTick;
+  }
+
   return {
+    resetSessions,
     async listen(port = 0) {
       if (listening) throw new Error('El servidor local ya está escuchando');
       await new Promise<void>((resolve, reject) => {

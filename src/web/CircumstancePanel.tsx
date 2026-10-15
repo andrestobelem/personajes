@@ -1,4 +1,5 @@
 import React from 'react';
+import { subscribeToHostSessionReset } from './host-session-reset.ts';
 import { ChangeCircumstancePayloadSchema } from '../domain/direction-indications.ts';
 import { CircumstanceOperationSchema } from '../domain/world-schema.ts';
 import { RunIdSchema } from '../domain/values.ts';
@@ -64,6 +65,7 @@ export function CircumstancePanel({runId,session,active=true,onCommitted}:{runId
   const [document,setDocument]=React.useState<CircumstanceDocument|null>(null);const [message,setMessage]=React.useState<string|null>(null);
   const [busy,setBusy]=React.useState(false);const [pending,setPending]=React.useState<CircumstanceIntent|null>(()=>uncertain.get(runId)??null);
   const epoch=React.useRef(0);
+  React.useEffect(()=>subscribeToHostSessionReset(()=>{epoch.current+=1;setDocument(null);setBusy(false);setMessage('La sesión del host cambió. Activá Dirección de nuevo antes de consultar circunstancias.');}),[]);
   const mode=session?.view.mode;const director=mode?.kind==='director'&&mode.runId===runId;
   const scopeKey=director?JSON.stringify(mode.scope):'';
   const reload=React.useCallback(async()=>{const started=++epoch.current;setDocument(null);if(!active||!director)return;

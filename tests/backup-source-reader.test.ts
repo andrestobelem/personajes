@@ -111,7 +111,7 @@ test('lector restaura mediante factory trusted en host nuevo sin padre y publica
     assert.equal(archivedActor.experiences.length, 1);
     const port = createBackupForkRestorePort({ host: f.host, runtime }); const preview = port.preview(f.context);
     assert.deepEqual(preview.blockers, []); assert.ok(preview.differences.some(line => line.includes(f.world.runId)));
-    await port.apply({ ...f.context, targetFingerprint: preview.targetFingerprint }); await runtime.waitForIdle();
+    await port.apply({ ...f.context, targetFingerprint: preview.targetFingerprint, confirmDiffHash: 'a'.repeat(64) }); await runtime.waitForIdle();
     const job = runtime.read({ operationId: f.context.operationId, principalId: f.context.principalId }); assert.ok(job?.state === 'ready');
     assert.deepEqual(job.backupOrigin, source.backup); const target = f.host.journal.loadWorld({ runId: job.targetRunId }); assert.ok(target);
     assert.equal(target.seq, f.world.seq); assert.equal(target.clock.instant, f.world.clock.instant);
@@ -127,7 +127,7 @@ test('lector restaura mediante factory trusted en host nuevo sin padre y publica
     }
     assert.equal(f.host.journal.loadWorld({ runId: f.world.runId }), undefined);
     assert.deepEqual(inventory(f.bundleRoot), before); f.assertClean();
-    await port.apply({ ...f.context, targetFingerprint: preview.targetFingerprint }); await runtime.waitForIdle();
+    await port.apply({ ...f.context, targetFingerprint: preview.targetFingerprint, confirmDiffHash: 'a'.repeat(64) }); await runtime.waitForIdle();
     assert.equal(runtime.read({ operationId: f.context.operationId, principalId: f.context.principalId })?.targetRunId, target.runId);
     assert.deepEqual(inventory(f.bundleRoot), before);
   } finally { await runtime.close(); f.close(); }

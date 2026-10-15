@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { BackupSourcesSchema } from '../domain/backup-http.ts';
 import { RestorePreviewSchema,RestoreSelectionSchema } from '../domain/backup.ts';
 import { ForkJobViewSchema,forkJobEtag } from '../domain/fork-http.ts';
+import { HostRecoveryJobSchema,hostRecoveryEtag } from '../domain/host-recovery.ts';
 import { HashSchema } from '../domain/values.ts';
 import { exchangeIntegrity } from '../adapters/exchange-integrity.ts';
 import type { openBackupService } from '../application/backup-service.ts';
@@ -14,8 +15,22 @@ import { operatorJson, OperatorResponseSchema, type OperatorExtension, type Oper
  * The adapter never invents that barrier, runs providers, or exposes bundleRoot. */
 export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnType<typeof openDossierExchange>;backups:ReturnType<typeof openBackupService>}):OperatorExtension & {close():void}{
  const db=new DatabaseSync(input.journalPath);
- db.exec('CREATE TABLE IF NOT EXISTS exchange_http_operations(principal_id TEXT NOT NULL,operation_id TEXT NOT NULL,request_hash TEXT NOT NULL,response_json TEXT,PRIMARY KEY(principal_id,operation_id))');
- const integrity=exchangeIntegrity(db);integrity.migrate('exchange_http_operations');
+ const integrity=exchangeIntegrity(db);
+ try{
+  db.exec('BEGIN IMMEDIATE');
+  db.exec("CREATE TABLE IF NOT EXISTS exchange_http_operations(principal_id TEXT NOT NULL,operation_id TEXT NOT NULL,request_hash TEXT NOT NULL,response_json TEXT,operation_kind TEXT NOT NULL DEFAULT 'unclassified',PRIMARY KEY(principal_id,operation_id))");
+  integrity.migrate('exchange_http_operations');
+  const columns=db.prepare('PRAGMA table_info(exchange_http_operations)').all().map(row=>z.object({name:z.string()}).parse(row).name);
+  if(!columns.includes('operation_kind')){
+   const identities=db.prepare('SELECT principal_id,operation_id FROM exchange_http_operations LIMIT 100001').all().map(row=>z.strictObject({principal_id:z.string(),operation_id:z.string()}).parse(row));
+   if(identities.length>100000)throw new Error('EXCHANGE_MIGRATION_LIMIT');
+   // Checksums cover the old schema. Never bless corrupted or unsealed legacy rows.
+   for(const row of identities)integrity.verify('exchange_http_operations','principal_id=? AND operation_id=?',[row.principal_id,row.operation_id]);
+   db.exec("ALTER TABLE exchange_http_operations ADD COLUMN operation_kind TEXT NOT NULL DEFAULT 'unclassified'");
+   for(const row of identities)integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[row.principal_id,row.operation_id]);
+  }
+  db.exec('COMMIT');
+ }catch(error){try{db.exec('ROLLBACK');}finally{db.close();}throw error;}
  const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
  function canonical(value:unknown):string {
   if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
@@ -23,6 +38,13 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
   return JSON.stringify(value);
  }
  const importEtag=(id:string,revision:number)=>`"import:${id}:r${revision}"`;
+ function operationKind(request:OperatorRequest){
+  if(request.kind==='write'&&request.path[0]==='backups'&&request.path[1]){
+   if(request.method==='PUT'&&request.path.length===2)return 'backup-create';
+   if(request.method==='POST'&&request.path.length===3){if(request.path[2]==='restore-preview')return 'restore-preview';if(request.path[2]==='restore')return 'restore';}
+  }
+  return 'unclassified';
+ }
  const backupEtag=(id:string,revision:number)=>`"backup:${id}:r${revision}"`;
  async function dispatch(request:OperatorRequest){
   const [resource,id,action]=request.path;
@@ -78,8 +100,8 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
     if(action==='restore'){
      const current=input.backups.get(id);if(request.ifMatch!==backupEtag(id,current.revision))throw new Error('EXCHANGE_IF_MATCH_REQUIRED');
      const body=z.strictObject({previewToken:z.uuid(),confirmDiffHash:HashSchema}).parse(request.body);
-     const job=ForkJobViewSchema.parse(await input.backups.restore({...body,backupId:id,principalId:request.principalId}));
-     return operatorJson(job,202,{ETag:forkJobEtag(job),Location:`/api/v1/forks/${job.operationId}`});
+     const job=z.union([ForkJobViewSchema,HostRecoveryJobSchema]).parse(await input.backups.restore({...body,backupId:id,principalId:request.principalId}));
+     return job.kind==='host-recovery'?operatorJson(job,202,{ETag:hostRecoveryEtag(job),Location:`/api/v1/host-recoveries/${job.operationId}`}):operatorJson(job,202,{ETag:forkJobEtag(job),Location:`/api/v1/forks/${job.operationId}`});
     }
    }
   }
@@ -88,19 +110,24 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
  return {name:'exchange',maxBodyBytes:22*1024*1024,close:()=>db.close(),matches:({path})=>['imports','exports','backups'].includes(path[0]??''),async handle(request){
   try {
    if(request.kind==='read')return await dispatch(request);
-   const requestHash=digest(canonical({method:request.method,path:request.path,body:request.body}));
-   const previous=db.prepare('SELECT request_hash,response_json FROM exchange_http_operations WHERE principal_id=? AND operation_id=?').get(request.principalId,request.idempotencyKey);
+   const requestHash=digest(canonical({method:request.method,path:request.path,body:request.body}));const kind=operationKind(request);
+   const previous=db.prepare('SELECT request_hash,response_json,operation_kind FROM exchange_http_operations WHERE principal_id=? AND operation_id=?').get(request.principalId,request.idempotencyKey);
    if(previous){
     integrity.verify('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
-    const old=z.strictObject({request_hash:z.string(),response_json:z.string().nullable()}).parse(previous);
+    const old=z.strictObject({request_hash:z.string(),response_json:z.string().nullable(),operation_kind:z.enum(['backup-create','restore-preview','restore','unclassified'])}).parse(previous);
     if(old.request_hash!==requestHash)throw new Error('EXCHANGE_IDEMPOTENCY_REUSE');
+    // Legacy rows cannot be classified from their response alone. Exact cached
+    // replay is safe after matching the authenticated request hash; keep their
+    // unclassified kind so recovery still compares these historical receipts.
+    const legacyCached=old.operation_kind==='unclassified'&&old.response_json!==null;
+    if(old.operation_kind!==kind&&!legacyCached)throw new Error('EXCHANGE_IDEMPOTENCY_REUSE');
     if(old.response_json!==null)return OperatorResponseSchema.parse(JSON.parse(old.response_json));
     // Only restore operations have a sealed service intent/idempotent preview.
     // Other interrupted mutations retain their conservative explicit failure.
     const recoverable=request.method==='POST'&&request.path.length===3&&request.path[0]==='backups'&&['restore','restore-preview'].includes(request.path[2]??'');
     if(!recoverable)throw new Error('EXCHANGE_OPERATION_INTERRUPTED');
    }else{
-    db.prepare('INSERT INTO exchange_http_operations(principal_id,operation_id,request_hash,response_json) VALUES(?,?,?,NULL)').run(request.principalId,request.idempotencyKey,requestHash);
+    db.prepare('INSERT INTO exchange_http_operations(principal_id,operation_id,request_hash,response_json,operation_kind) VALUES(?,?,?,NULL,?)').run(request.principalId,request.idempotencyKey,requestHash,kind);
     integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
    }
    let result;

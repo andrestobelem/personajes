@@ -1,4 +1,5 @@
 import React from 'react';
+import { subscribeToHostSessionReset } from './host-session-reset.ts';
 import { CircumstancePanel } from './CircumstancePanel.tsx';
 import { SessionModeSchema } from '../domain/http.ts';
 import { MetaIndicationPayloadSchema } from '../domain/direction-indications.ts';
@@ -94,6 +95,11 @@ export function DirectorMetaIndicationsPanel({
   const [loading, setLoading] = React.useState(true);
   const epoch = React.useRef(0);
 
+  React.useEffect(()=>subscribeToHostSessionReset(()=>{
+    epoch.current+=1;setSession(null);setDocument(null);setOptions(null);setRecipients([]);setBusy(false);setLoading(false);
+    setMessage('La sesión del host cambió. Actualizá la sesión y activá Dirección de nuevo; el texto se conserva.');
+  }),[]);
+
   const directorActive = currentModeMatches(session, runId, scope, activeSceneId);
   const availableRecipients = React.useMemo(() => {
     const all = options?.participants ?? [];
@@ -161,19 +167,21 @@ export function DirectorMetaIndicationsPanel({
       setDocument(next);
       setMessage('Modo Dirección confirmado por el host.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo activar Dirección.');
+      if(started===epoch.current)setMessage(error instanceof Error ? error.message : 'No se pudo activar Dirección.');
     } finally {
-      setBusy(false);
+      if(started===epoch.current)setBusy(false);
     }
   }
 
   async function submit(intent: DirectionIntent) {
     if (busy || !directorActive) return;
+    const started=epoch.current;
     setPending(intent);
     setBusy(true);
     setMessage(null);
     try {
       const result = await sendDirectionIntent(intent);
+      if(started!==epoch.current)return;
       if (result.kind === 'stored' || result.kind === 'existing') {
         unresolvedByRun.delete(runId);
         setPending(null);
@@ -184,9 +192,9 @@ export function DirectorMetaIndicationsPanel({
         setMessage(result.kind === 'existing' ? 'Se recuperó la misma operación ya registrada.' : intent.payload.kind === 'metaIndication'
           ? 'Metaindicación registrada en el ledger de Dirección.' : 'Metaindicación revocada para turnos nuevos.');
         try {
-          setDocument(await directionClient.readComplete(runId));
+          const next=await directionClient.readComplete(runId);if(started!==epoch.current)return;setDocument(next);
         } catch {
-          setDocument(null);
+          if(started!==epoch.current)return;setDocument(null);
           setMessage('La operación quedó confirmada, pero no se pudo actualizar el historial. Actualizá sesión y ledger antes de continuar.');
         }
       } else {
@@ -197,13 +205,14 @@ export function DirectorMetaIndicationsPanel({
           : 'El host no pudo confirmar la indicación para este alcance. Actualizá Dirección y revisá la escena.');
       }
     } catch (error) {
+      if(started!==epoch.current)return;
       const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
       setPending(unresolvedByRun.get(runId) ?? null);
       setMessage(error instanceof Error
         ? `${error.message}${status === undefined || status === 408 || status >= 500 ? ' Se conserva la misma operación para reintentar.' : ''}`
         : 'Resultado incierto. Se conserva la misma operación para reintentar.');
     } finally {
-      setBusy(false);
+      if(started===epoch.current)setBusy(false);
     }
   }
 

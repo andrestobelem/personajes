@@ -1,4 +1,5 @@
 import React from 'react';
+import { subscribeToHostSessionReset } from './host-session-reset.ts';
 import type { InspectorView } from '../domain/run-inspector.ts';
 import { createRunInspectorClient, type RunInspectorClient, type InspectorViewIntent } from './run-inspector-client.ts';
 const client=createRunInspectorClient();
@@ -28,8 +29,12 @@ export function InspectorPanel({runId,atWorldSeq,worldRevision,api=client}:{runI
   const [consent,setConsent]=React.useState(false);const [authorized,setAuthorized]=React.useState(false);const [busy,setBusy]=React.useState(false);
   const [actors,setActors]=React.useState<Array<{characterId:string;label:string}>>([]);const [actor,setActor]=React.useState('');const [view,setView]=React.useState<InspectorView|null>(null);const [error,setError]=React.useState<string|null>(null);const [pending,setPending]=React.useState<InspectorViewIntent|null>(null);
   const lifetime=React.useRef<AbortController|null>(null);const epoch=React.useRef(0);
-  React.useEffect(()=>{const controller=new AbortController();lifetime.current=controller;epoch.current++;setConsent(false);setAuthorized(false);setActors([]);setActor('');setView(null);setError(null);setPending(null);setBusy(false);return()=>{controller.abort();lifetime.current=null;epoch.current++;};},[runId]);
-  // Actor selection invalidates explicitly in onChange; preference resets must not cancel their own request.
+  React.useEffect(()=>{
+    let controller=new AbortController();lifetime.current=controller;
+    const reset=()=>{controller.abort();controller=new AbortController();lifetime.current=controller;epoch.current++;setExpiresAt(null);setConsent(false);setAuthorized(false);setActors([]);setActor('');setView(null);setError(null);setPending(null);setBusy(false);};
+    reset();const unsubscribe=subscribeToHostSessionReset(reset);
+    return()=>{unsubscribe();controller.abort();lifetime.current=null;epoch.current++;};
+  },[runId]);
   React.useEffect(()=>{epoch.current++;setView(null);setBusy(false);},[atWorldSeq,worldRevision]);
   React.useEffect(()=>{if(!authorized||expiresAt===null)return;const timer=setTimeout(()=>{epoch.current++;setView(null);setActors([]);setActor('');setAuthorized(false);setBusy(false);setPending(null);setError('La sesión privada venció. Recargá la aplicación para abrir otra sesión.');},Math.max(0,expiresAt-Date.now()));return()=>clearTimeout(timer);},[authorized,expiresAt]);
   async function preference(mode:'stage'|'internal',retry?:InspectorViewIntent) {

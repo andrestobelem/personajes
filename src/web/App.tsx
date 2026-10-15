@@ -4,6 +4,9 @@ import { unreachable } from '../domain/values.ts';
 import { bootstrapSession, readAvatars, readCatalog, readDocument, readDossier, readLibrary, searchCharacters, resolveReference } from './client.ts';
 import type { CatalogReferenceQuery } from '../domain/catalog-links.ts';
 import { DocumentBody } from './DocumentBody.tsx';
+import { readStoredBackupIntent } from './backup-client.ts';
+
+const BackupRestorePanel = React.lazy(async () => ({ default: (await import('./BackupRestorePanel.tsx')).BackupRestorePanel }));
 
 const RunDraftWorkspace = React.lazy(async () => ({ default: (await import('./RunDraftWorkspace.tsx')).RunDraftWorkspace }));
 const PiAccessPanel = React.lazy(async () => ({ default: (await import('./PiAccessPanel.tsx')).PiAccessPanel }));
@@ -23,7 +26,25 @@ function readableError(error: unknown) {
   return error instanceof Error ? error.message : 'No se pudo cargar el contenido';
 }
 
+export function hasPendingHostRecovery(storage:Parameters<typeof readStoredBackupIntent>[0]):boolean {
+  return readStoredBackupIntent(storage)?.kind==='recover';
+}
+function pendingHostRecovery(){
+  if(typeof window==='undefined')return false;
+  try{return hasPendingHostRecovery(window.sessionStorage);}catch{return false;}
+}
+
+export function OriginalRetainedLibraryNotice({refreshing,error,onReload}:{refreshing:boolean;error:string|null;onReload:()=>void}) {
+  return <section aria-label="Biblioteca del host original"><p role="status">La recuperación se canceló y se conservó el host original. Podés cargar su biblioteca cuando termines de revisar los borradores abiertos.</p><button disabled={refreshing} onClick={onReload}>Cargar biblioteca del host original</button>{error!==null&&<p role="alert">{error}</p>}</section>;
+}
+
 export function App() {
+  const [recoveryBoot] = React.useState(pendingHostRecovery);
+  const [hostRecovered,setHostRecovered] = React.useState(false);
+  const [originalRetained,setOriginalRetained] = React.useState(false);
+  const [refreshingLibrary,setRefreshingLibrary] = React.useState(false);
+  const [libraryRefreshError,setLibraryRefreshError] = React.useState<string|null>(null);
+  const libraryEpoch=React.useRef(0);
   const [state, setState] = React.useState<LibraryState>({ kind: 'loading' });
   const [tab, setTab] = React.useState<Tab>('characters');
   const [openedTabs, setOpenedTabs] = React.useState<ReadonlySet<Tab>>(() => new Set(['characters']));
@@ -37,12 +58,21 @@ export function App() {
   const reading = selection.kind !== 'none';
 
   React.useEffect(() => {
+    if(recoveryBoot)return;
     let active = true;
     bootstrapSession().then(() => Promise.all([readCatalog(), readLibrary(), readAvatars()]))
       .then(([catalog, library, avatars]) => { if (active) setState({ kind: 'ready', catalog, library, avatars }); })
       .catch((error: unknown) => { if (active) setState({ kind: 'error', message: readableError(error) }); });
     return () => { active = false; };
-  }, []);
+  }, [recoveryBoot]);
+
+  async function refreshLibrary(){
+    if(refreshingLibrary)return;
+    const epoch=++libraryEpoch.current;setRefreshingLibrary(true);setLibraryRefreshError(null);
+    try{await bootstrapSession();const [catalog,library,avatars]=await Promise.all([readCatalog(),readLibrary(),readAvatars()]);if(epoch===libraryEpoch.current){setState({kind:'ready',catalog,library,avatars});setHostRecovered(false);setOriginalRetained(false);}}
+    catch(error){if(epoch===libraryEpoch.current)setLibraryRefreshError(readableError(error));}
+    finally{if(epoch===libraryEpoch.current)setRefreshingLibrary(false);}
+  }
 
   React.useEffect(() => {
     if (selection.kind === 'dossier' || selection.kind === 'document' || selection.kind === 'paper') panelHeading.current?.focus();
@@ -129,6 +159,8 @@ export function App() {
     }
   }
 
+  if(recoveryBoot&&state.kind!=='ready')return <main className="host-recovery-workspace" aria-label="Recuperación independiente del host"><h1>Recuperación del host</h1><p>La operación conservada se puede consultar aunque la biblioteca y las representaciones todavía no estén disponibles.</p><React.Suspense fallback={<p role="status">Abriendo el control de recuperación…</p>}><BackupRestorePanel recoveryOnly onHostRecovered={()=>{setHostRecovered(true);setOriginalRetained(false);}} onOriginalRetained={()=>{setOriginalRetained(true);setHostRecovered(false);}}/></React.Suspense>{hostRecovered&&<><p role="status">La recuperación fue verificada. Podés volver a cargar la biblioteca con la sesión nueva.</p><button disabled={refreshingLibrary} onClick={()=>void refreshLibrary()}>Cargar biblioteca recuperada</button></>}{originalRetained&&<OriginalRetainedLibraryNotice refreshing={refreshingLibrary} error={libraryRefreshError} onReload={()=>void refreshLibrary()}/>}{refreshingLibrary&&<p role="status">Cargando la biblioteca del host…</p>}{libraryRefreshError&&!originalRetained&&<p role="alert">{libraryRefreshError}</p>}</main>;
+
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-mark">P</span><div>Personajes<small>La obra agéntica</small></div></div>
       <div className="nav-label">LA OBRA</div><nav aria-label="Representaciones"><button aria-current={tab === 'runs' ? 'page' : undefined} onClick={() => changeTab('runs')}>▧ Preparar representación</button></nav><div className="nav-label">BIBLIOTECA</div><nav aria-label="Biblioteca">
@@ -139,9 +171,11 @@ export function App() {
       </nav><div className="nav-label">CONFIGURACIÓN</div><nav aria-label="Acceso"><button aria-current={tab === 'access' ? 'page' : undefined} onClick={() => changeTab('access')}>◎ Acceso a Pi</button></nav><div className="sidebar-note">Identidad · Historia · Memoria<br />Deseo · Acción · Consecuencia</div>
     </aside>
     <main><header className="topbar"><span>{tab === 'runs' ? 'Representaciones / Preparación' : tab === 'access' ? 'Configuración / Acceso a Pi' : tab === 'exchange' ? 'Biblioteca / Importar y exportar' : <>Biblioteca / {tab === 'characters' ? 'Reparto' : tab === 'research' ? 'Investigaciones' : 'Fuentes'}</>}</span>{reading && <button className="back-button" onClick={() => { ++selectionEpoch.current; setSelection({ kind: 'none' }); requestAnimationFrame(() => catalogHeading.current?.focus()); }}>← Volver al catálogo</button>}<span className="status-chip">{tab === 'access' ? 'Administración del host' : tab === 'runs' ? 'Estado consultado desde el host' : 'Biblioteca de preparación'}</span></header>
+      {hostRecovered&&<section aria-label="Biblioteca después de recuperación"><p role="status">El host fue recuperado y verificado. Actualizá la biblioteca cuando termines de revisar los borradores abiertos.</p><button disabled={refreshingLibrary} onClick={()=>void refreshLibrary()}>Actualizar biblioteca recuperada</button>{libraryRefreshError&&<p role="alert">{libraryRefreshError}</p>}</section>}
+      {originalRetained&&<OriginalRetainedLibraryNotice refreshing={refreshingLibrary} error={libraryRefreshError} onReload={()=>void refreshLibrary()}/>}
       {state.kind === 'ready' && openedTabs.has('runs') && <React.Suspense fallback={<p role="status">Abriendo la preparación…</p>}><div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} {...(openRunRequest===undefined?{}:{openRequest:openRunRequest})} /></div></React.Suspense>}
       {openedTabs.has('access') && <React.Suspense fallback={<p role="status">Abriendo el acceso…</p>}><div hidden={tab !== 'access'}><PiAccessPanel /><PiAccessCheckPanel /></div></React.Suspense>}
-      {state.kind==='ready'&&openedTabs.has('exchange')&&<React.Suspense fallback={<p role="status">Abriendo el intercambio…</p>}><div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items} onOpenRun={(runId)=>{setOpenRunRequest({runId});changeTab('runs');}}/></div></React.Suspense>}
+      {state.kind==='ready'&&openedTabs.has('exchange')&&<React.Suspense fallback={<p role="status">Abriendo el intercambio…</p>}><div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items} onHostRecovered={()=>{setHostRecovered(true);setOriginalRetained(false);}} onOriginalRetained={()=>{setOriginalRetained(true);setHostRecovered(false);}} onOpenRun={(runId)=>{setOpenRunRequest({runId});changeTab('runs');}}/></div></React.Suspense>}
       <div hidden={tab === 'runs' || tab === 'access' || tab === 'exchange'}><div className="workspace" data-reading={reading}><section className="catalog-panel" aria-label="Catálogo">
         <span className="eyebrow">EL MUNDO EMPIEZA CON SUS PERSONAJES</span><h1 tabIndex={-1} ref={catalogHeading}>{tab === 'characters' ? 'El reparto' : tab === 'research' ? 'Ideas para la obra' : 'Las fuentes'}</h1>
         <p className="intro">{tab === 'characters' ? 'Cada ficha conserva una voz, una historia y un punto de vista.' : 'Investigación, evidencia y propuestas de interpretación.'}</p>

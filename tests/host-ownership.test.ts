@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, renameSync, mkdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test, type TestContext } from 'node:test';
-import { acquireHostOwnership, inspectHostOwnership, isHostOwnershipFailure, recoverHostOwnership,parseLinuxZombieEvidence } from '../src/adapters/host-ownership.ts';
+import { openLocalHost } from '../src/application/local-host.ts';
+import { acquireHostOwnership, inspectHostOwnership, isHostOwnershipFailure, recoverHostOwnership,parseLinuxZombieEvidence, withHostDirectoryOperation, inspectHostDirectoryOperation, recoverHostDirectoryOperation } from '../src/adapters/host-ownership.ts';
 
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), 'personajes-ownership-'));
@@ -293,4 +294,142 @@ test('rechaza raíces y registros con enlaces, permisos amplios o tamaño excesi
   assert.throws(() => inspectHostOwnership({ privateDataRoot: root }),
     (error: unknown) => isHostOwnershipFailure(error) && error.code === 'LOCK_INVALID');
   assert.equal(readFileSync(lockPath, 'utf8').length, 2_049);
+});
+
+
+test('directory gate survives both renames and rejects a competing process before root recreation', async t => {
+  const { root } = fixture(t);
+  const original = join(root, 'original');
+  const staged = join(root, 'staged');
+  const target = join(root, 'host');
+  mkdirSync(target); mkdirSync(staged);
+  const owner = acquireHostOwnership({ privateDataRoot: target });
+  await withHostDirectoryOperation({ privateDataRoot: target, operation: async directoryOperation => {
+    owner.release({ directoryOperation });
+    renameSync(target, original);
+    const competitor = childAcquire({ root: target });
+    assert.equal(competitor.status, 2, competitor.stderr);
+    assert.equal(competitor.stdout, 'OPERATION_BUSY');
+    assert.equal(existsSync(target), false);
+    renameSync(staged, target);
+    const next = acquireHostOwnership({ privateDataRoot: target, directoryOperation });
+    assert.equal(childAcquire({ root: target }).stdout, 'OPERATION_BUSY');
+    next.release({ directoryOperation });
+  } });
+  const next = acquireHostOwnership({ privateDataRoot: target }); next.release();
+});
+
+test('directory operation stat-only entry leaves absent root absent and rejects forged, foreign and expired capabilities', async t => {
+  const { root } = fixture(t);
+  const target = join(root, 'absent');
+  const expired = await withHostDirectoryOperation({ privateDataRoot: target, operation: async directoryOperation => {
+    assert.equal(existsSync(target), false);
+    assert.throws(() => acquireHostOwnership({ privateDataRoot: target, directoryOperation: { ...directoryOperation } }),
+      (error: unknown) => isHostOwnershipFailure(error) && error.code === 'OPERATION_BUSY');
+    assert.equal(existsSync(target), false);
+    const other = join(root, 'other');
+    assert.throws(() => acquireHostOwnership({ privateDataRoot: other, directoryOperation }),
+      (error: unknown) => isHostOwnershipFailure(error) && error.code === 'OPERATION_BUSY');
+    assert.equal(existsSync(other), false);
+    return directoryOperation;
+  } });
+  assert.equal(existsSync(target), false);
+  assert.throws(() => acquireHostOwnership({ privateDataRoot: target, directoryOperation: expired }),
+    (error: unknown) => isHostOwnershipFailure(error) && error.code === 'OPERATION_BUSY');
+  assert.equal(existsSync(target), false);
+});
+
+test('local host closes all journal handles and reopens under the same directory capability', async t => {
+  const { root } = fixture(t);
+  const host = openLocalHost({ privateDataRoot: root });
+  await withHostDirectoryOperation({ privateDataRoot: root, operation: async directoryOperation => {
+    host.close({ directoryOperation });
+    const next = openLocalHost({ privateDataRoot: root, directoryOperation });
+    assert.notEqual(next.ownerToken, host.ownerToken);
+    next.close({ directoryOperation });
+  } });
+  const next = openLocalHost({ privateDataRoot: root }); next.close();
+});
+
+
+test('new nested private roots create ancestors while the exchangeable root remains gated', t => {
+  const { root } = fixture(t);
+  const nested = join(root, 'new', 'ancestors', 'private');
+  const owner = acquireHostOwnership({ privateDataRoot: nested });
+  assert.equal(statSync(nested).mode & 0o777, 0o700);
+  owner.release();
+});
+
+test('external gate rescue requires explicit matching nonce and refuses the active owner', async t => {
+  const { root } = fixture(t);
+  const target = join(root, 'absent');
+  await withHostDirectoryOperation({ privateDataRoot: target, operation: async () => {
+    const record = inspectHostDirectoryOperation({ privateDataRoot: target });
+    assert.throws(() => recoverHostDirectoryOperation({ privateDataRoot: target, expectedNonce: randomUUID(), operatorConfirmed: true }),
+      (error: unknown) => isHostOwnershipFailure(error) && error.code === 'LOCK_CHANGED');
+    assert.throws(() => recoverHostDirectoryOperation({ privateDataRoot: target, expectedNonce: record.nonce, operatorConfirmed: true }),
+      (error: unknown) => isHostOwnershipFailure(error) && error.code === 'PROCESS_ACTIVE');
+    assert.equal(inspectHostDirectoryOperation({ privateDataRoot: target }).nonce, record.nonce);
+    assert.equal(existsSync(target), false);
+  } });
+});
+
+test('external gate from a dead subprocess survives until explicit rescue, without recreating absent root', async t => {
+  const { root } = fixture(t);
+  const target = join(root, 'absent');
+  const moduleUrl = pathToFileURL(join(process.cwd(), 'src/adapters/host-ownership.ts')).href;
+  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+    `import { withHostDirectoryOperation } from ${JSON.stringify(moduleUrl)};
+     await withHostDirectoryOperation({privateDataRoot:${JSON.stringify(target)},operation:async()=>process.exit(0)});`], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(child.status, 0, child.stderr);
+  const record = inspectHostDirectoryOperation({ privateDataRoot: target });
+  assert.equal(childAcquire({ root: target }).stdout, 'OPERATION_BUSY');
+  assert.equal(existsSync(target), false);
+  recoverHostDirectoryOperation({ privateDataRoot: target, expectedNonce: record.nonce, operatorConfirmed: true });
+  await withHostDirectoryOperation({ privateDataRoot: target, operation: async () => assert.equal(existsSync(target), false) });
+  const owner = acquireHostOwnership({ privateDataRoot: target }); owner.release();
+});
+
+
+test('external rescue preserves a replaced gate and refuses a concurrent rescue', async t => {
+  const { root } = fixture(t);
+  const target = join(root, 'absent');
+  const moduleUrl = pathToFileURL(join(process.cwd(), 'src/adapters/host-ownership.ts')).href;
+  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+    `import { withHostDirectoryOperation } from ${JSON.stringify(moduleUrl)};
+     await withHostDirectoryOperation({privateDataRoot:${JSON.stringify(target)},operation:async()=>process.exit(0)});`], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(child.status, 0, child.stderr);
+  const stale = inspectHostDirectoryOperation({ privateDataRoot: target });
+  const gatePath = join(root, '.absent.personajes-host-operation');
+  const replacement = { ...stale, nonce: randomUUID() };
+  rmSync(gatePath); writeFileSync(gatePath, JSON.stringify(replacement), { mode: 0o600 });
+  assert.throws(() => recoverHostDirectoryOperation({ privateDataRoot: target, expectedNonce: stale.nonce, operatorConfirmed: true }),
+    (error: unknown) => isHostOwnershipFailure(error) && error.code === 'LOCK_CHANGED');
+  assert.deepEqual(inspectHostDirectoryOperation({ privateDataRoot: target }), replacement);
+  writeFileSync(gatePath + '.rescue', 'operator review', { mode: 0o600 });
+  assert.throws(() => recoverHostDirectoryOperation({ privateDataRoot: target, expectedNonce: replacement.nonce, operatorConfirmed: true }),
+    (error: unknown) => isHostOwnershipFailure(error) && error.code === 'OPERATION_BUSY');
+  rmSync(gatePath + '.rescue');
+  recoverHostDirectoryOperation({ privateDataRoot: target, expectedNonce: replacement.nonce, operatorConfirmed: true });
+  assert.equal(existsSync(gatePath), false);
+});
+
+
+test('explicit stale owner recovery and inspection reuse the same external capability', async t => {
+  const { root } = fixture(t);
+  const stale = childAcquire({ root });
+  assert.equal(stale.status, 0, stale.stderr);
+  await withHostDirectoryOperation({ privateDataRoot: root, operation: async directoryOperation => {
+    const record = inspectHostOwnership({ privateDataRoot: root, directoryOperation });
+    const forged = { ...directoryOperation };
+    assert.throws(() => inspectHostOwnership({ privateDataRoot: root, directoryOperation: forged }),
+      (error: unknown) => isHostOwnershipFailure(error) && error.code === 'OPERATION_BUSY');
+    assert.throws(() => recoverHostOwnership({ privateDataRoot: root, directoryOperation: forged, expectedNonce: record.nonce, operatorConfirmed: true }),
+      (error: unknown) => isHostOwnershipFailure(error) && error.code === 'OPERATION_BUSY');
+    assert.equal(inspectHostOwnership({ privateDataRoot: root, directoryOperation }).nonce, record.nonce);
+    recoverHostOwnership({ privateDataRoot: root, directoryOperation, expectedNonce: record.nonce, operatorConfirmed: true });
+    const next = acquireHostOwnership({ privateDataRoot: root, directoryOperation });
+    assert.notEqual(next.ownerToken, record.nonce);
+    next.release({ directoryOperation });
+  } });
 });

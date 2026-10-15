@@ -1,10 +1,10 @@
 import { join } from 'node:path';
-import { acquireHostOwnership } from '../adapters/host-ownership.ts';
+import { acquireHostOwnership, type HostDirectoryOperation } from '../adapters/host-ownership.ts';
 import { openJournal } from '../adapters/journal.ts';
 
 /** The host acquires exclusive ownership before opening any durable writer. */
-export function openLocalHost(input: { privateDataRoot: string }) {
-  const ownership = acquireHostOwnership({ privateDataRoot: input.privateDataRoot });
+export function openLocalHost(input: { privateDataRoot: string; directoryOperation?: HostDirectoryOperation | undefined }) {
+  const ownership = acquireHostOwnership({ privateDataRoot: input.privateDataRoot, directoryOperation: input.directoryOperation });
   let journal: ReturnType<typeof openJournal> | undefined;
   try {
     journal = openJournal({ path: join(ownership.privateDataRoot, 'world.sqlite') });
@@ -22,7 +22,7 @@ export function openLocalHost(input: { privateDataRoot: string }) {
     journal.recoverAbandonedContinuistaClaims({ ownerToken: ownership.ownerToken });
     journal.recoverAbandonedAdministrativeJobs({ ownerToken: ownership.ownerToken });
   } catch (error) {
-    try { journal?.close(); } finally { ownership.release(); }
+    try { journal?.close(); } finally { ownership.release(input.directoryOperation ? { directoryOperation: input.directoryOperation } : undefined); }
     throw error;
   }
   const openedJournal = journal;
@@ -32,11 +32,11 @@ export function openLocalHost(input: { privateDataRoot: string }) {
     privateDataRoot: ownership.privateDataRoot,
     ownerToken: ownership.ownerToken,
     journal: openedJournal,
-    close(): void {
+    close(options?: { directoryOperation: HostDirectoryOperation }): void {
       if (closed) return;
       // Callers must await cancellation/settlement of workers before closing the host.
       if (!journalClosed) { journal.close(); journalClosed = true; }
-      ownership.release();
+      ownership.release(options);
       closed = true;
     },
   });

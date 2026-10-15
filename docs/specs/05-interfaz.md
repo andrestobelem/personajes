@@ -360,3 +360,7 @@ Launcher, API autenticada y panel de bifurcación ya están conectados. El retry
 ## Restauración desde backup — corte 47
 
 Restaurar como bifurcación desde un backup local registrado ya está conectado al launcher, API y GUI. La revisión/confirmación tiene operación estable y principal privado; la recuperación retoma sólo intenciones confirmadas. Journal v37 conserva la fuente respaldada y la publicación no consulta al padre vivo. Validación y migraciones actúan sobre copias privadas para mantener el bundle intacto. [Contrato, pruebas y recorrido gráfico](../auditoria/restauracion-como-bifurcacion.md). Recuperación offline del host completo, admisión de otra lineage y aceptación integral siguen pendientes.
+
+## Implementación del corte 48: recuperación del host
+
+El panel de backups permite recuperar el host completo desde un backup local registrado: diferencias, confirmación, operación conservada y seguimiento por fases. La recarga abre un control independiente del catálogo; una sesión nueva retira opt-ins y descarta lecturas atrasadas sin borrar borradores. La reanudación es explícita y conserva ID, revisión, clave y nonce de ownership observado; consultar no ejecuta. `verified` habilita cargar la biblioteca recuperada; `aborted/original-retained` informa cancelación y retorno al original, sin afirmar restauración exitosa. [Evidencia y límites](../auditoria/recuperacion-offline.md). Admisión de bundles externos y aceptación integral siguen pendientes.

@@ -200,3 +200,7 @@ Launcher, API autenticada y panel de bifurcación ya están conectados. El retry
 ## Restauración desde backup — corte 47
 
 Restaurar como bifurcación desde un backup local registrado ya está conectado al launcher, API y GUI. La revisión/confirmación tiene operación estable y principal privado; la recuperación retoma sólo intenciones confirmadas. Journal v37 conserva la fuente respaldada y la publicación no consulta al padre vivo. Validación y migraciones actúan sobre copias privadas para mantener el bundle intacto. [Contrato, pruebas y recorrido gráfico](../auditoria/restauracion-como-bifurcacion.md). Recuperación offline del host completo, admisión de otra lineage y aceptación integral siguen pendientes.
+
+## Evidencia adicional P14: corte 48
+
+La [recuperación offline](../auditoria/recuperacion-offline.md) añade comparación integral de SQLite/WAL, memorias y sesiones, preservación administrativa, exclusión entre procesos y reanudación con el mismo recibo. Los ensayos del launcher terminan procesos con SIGKILL después del primer rename y de reabrir; el arranque de control conserva el directorio y la reanudación explícita verifica servicios. HTTP productivo combina ICM y sesión Pi del SDK reales sin inferencia; el navegador verifica confirmación, estado y recarga sobre raíz sintética vacía. Son evidencias parciales de los niveles L/G, sin cerrar la aceptación integral de los 77 requisitos ni acreditar proveedores o audio reales.

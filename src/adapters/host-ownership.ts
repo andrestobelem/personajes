@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { chmodSync, closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, unlinkSync, writeSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 
 const LOCK_NAME = 'host-ownership.json';
@@ -13,7 +13,6 @@ const OwnershipRecordSchema = z.strictObject({
   pid: z.number().int().positive(),
   processStartedAt: z.string().datetime(),
 });
-type OwnershipRecord = z.infer<typeof OwnershipRecordSchema>;
 const OperationRecordSchema = z.strictObject({
   kind: z.literal('host-ownership-operation'),
   schemaVersion: z.literal(1),
@@ -33,6 +32,38 @@ function failure(input: { code: OwnershipFailureCode; message: string }) {
 
 export function isHostOwnershipFailure(error: unknown): error is Error & z.infer<typeof OwnershipFailureDataSchema> {
   return error instanceof Error && OwnershipFailureDataSchema.safeParse(error).success;
+}
+
+/** A capability is valid only inside its owning callback, for one canonical root. */
+export type HostDirectoryOperation = Readonly<{ kind: 'host-directory-operation'; privateDataRoot: string }>;
+const activeDirectoryOperations = new WeakSet<HostDirectoryOperation>();
+
+function canonicalRootPath(path: string, createParent = false): string {
+  if (!isAbsolute(path)) throw failure({ code: 'ROOT_INVALID', message: 'El directorio privado requiere una ruta absoluta.' });
+  const normalized = resolve(path);
+  try {
+    const stat = lstatSync(normalized);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw failure({ code: 'ROOT_INVALID', message: 'La raíz privada no puede ser un enlace ni un archivo.' });
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+  // Acquisition may prepare missing ancestors, never the exchangeable root itself.
+  const parent = dirname(normalized);
+  const parentExisted = existsSync(parent);
+  if (createParent) mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const canonicalParent = realpathSync(parent);
+  const parentStat = lstatSync(canonicalParent);
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  if (!parentStat.isDirectory() || (createParent && !parentExisted && uid !== undefined && parentStat.uid !== uid)) {
+    throw failure({ code: 'ROOT_INVALID', message: 'El padre debe ser un directorio del usuario actual.' });
+  }
+  return join(canonicalParent, basename(normalized));
+}
+
+function validateDirectoryOperation(input: { root: string; directoryOperation: HostDirectoryOperation }): void {
+  if (!activeDirectoryOperations.has(input.directoryOperation) || input.directoryOperation.privateDataRoot !== input.root) {
+    throw failure({ code: 'OPERATION_BUSY', message: 'La capacidad de operación no está activa o pertenece a otro directorio.' });
+  }
 }
 
 function privateRoot(input: { path: string }) {
@@ -62,35 +93,57 @@ function writeAll(input: { descriptor: number; bytes: Buffer }): void {
  * without this gate a second stale recovery could unlink a newly acquired lock.
  * A process crash while holding the gate leaves it for explicit operator review.
  */
-function withOperationGate<T>(input: { root: string; operation: () => T }): T {
-  const releaseExternal=acquireExternalDirectoryOperation(input.root);
-  try{return withInternalOperationGate(input);}finally{releaseExternal();}
+function withOperationGate<T>(input: { root: string; directoryOperation?: HostDirectoryOperation | undefined; operation: () => T }): T {
+  if (input.directoryOperation) {
+    validateDirectoryOperation({ root: input.root, directoryOperation: input.directoryOperation });
+    privateRoot({ path: input.root });
+    return withInternalOperationGate(input);
+  }
+  const releaseExternal = acquireExternalDirectoryOperation(input.root);
+  try {
+    privateRoot({ path: input.root });
+    return withInternalOperationGate(input);
+  } finally { releaseExternal(); }
 }
 
 /** Parent-level gate survives an atomic exchange of the private directory. All host
  * ownership operations cooperate with it; a stale gate requires explicit inspection. */
-function acquireExternalDirectoryOperation(root:string){
+function acquireExternalDirectoryOperation(root:string, rescue = false){
   const parent=dirname(root);
   if(realpathSync(parent)!==parent)throw failure({code:'ROOT_INVALID',message:'El padre del directorio debe ser canónico.'});
-  const path=join(parent,`.${basename(root)}.personajes-host-operation`);
+  const mainPath=join(parent,`.${basename(root)}.personajes-host-operation`);
+  const rescuePath=mainPath+'.rescue';
+  const path=rescue?rescuePath:mainPath;
+  if(!rescue&&existsSync(rescuePath))throw failure({code:'OPERATION_BUSY',message:'Hay una recuperación explícita del gate en curso.'});
   let fd:number;
   try{fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);}
   catch{throw failure({code:'OPERATION_BUSY',message:'Hay una operación externa del directorio activa o pendiente de revisión.'});}
   const record=OperationRecordSchema.parse({kind:'host-ownership-operation',schemaVersion:1,nonce:randomUUID(),pid:process.pid,processStartedAt:new Date(Date.now()-process.uptime()*1000).toISOString()});
   const bytes=Buffer.from(JSON.stringify(record));
-  try{writeAll({descriptor:fd,bytes});fsyncSync(fd);}catch(error){closeSync(fd);throw error;}
+  try{writeAll({descriptor:fd,bytes});fsyncSync(fd);const parentFd=openSync(parent,constants.O_RDONLY);try{fsyncSync(parentFd);}finally{closeSync(parentFd);}}catch(error){closeSync(fd);throw error;}
+  if(!rescue&&existsSync(rescuePath)){
+    try { const stored=fstatSync(fd);const current=lstatSync(path);if(current.dev===stored.dev&&current.ino===stored.ino)unlinkSync(path); }
+    finally { closeSync(fd); }
+    throw failure({code:'OPERATION_BUSY',message:'Hay una recuperación explícita del gate en curso.'});
+  }
   let released=false;
   return ()=>{
     if(released)return;
-    try{const opened=fstatSync(fd);const current=lstatSync(path);if(!current.isFile()||current.isSymbolicLink()||current.dev!==opened.dev||current.ino!==opened.ino)throw failure({code:'LOCK_CHANGED',message:'Cambió el gate externo; se conserva para inspección.'});unlinkSync(path);released=true;}finally{closeSync(fd);}
+    try{const opened=fstatSync(fd);const current=readRecord({lockPath:path,schema:OperationRecordSchema});if(current.dev!==opened.dev||current.inode!==opened.ino||current.content!==bytes.toString('utf8'))throw failure({code:'LOCK_CHANGED',message:'Cambió el gate externo; se conserva para inspección.'});unlinkSync(path);const parentFd=openSync(parent,constants.O_RDONLY);try{fsyncSync(parentFd);}finally{closeSync(parentFd);}released=true;}finally{closeSync(fd);}
   };
 }
 
 /** Restore already owns the stopped host before entering this gate. No root can be
  * acquired by another process while the canonical directory is exchanged. */
-export async function withHostDirectoryOperation<T>(input:{privateDataRoot:string;operation:()=>Promise<T>}):Promise<T>{
-  const root=privateRoot({path:input.privateDataRoot});const release=acquireExternalDirectoryOperation(root);
-  try{return await input.operation();}finally{release();}
+export async function withHostDirectoryOperation<T>(input: {
+  privateDataRoot: string; operation: (capability: HostDirectoryOperation) => Promise<T>;
+}): Promise<T> {
+  const root = canonicalRootPath(input.privateDataRoot);
+  const release = acquireExternalDirectoryOperation(root);
+  const capability: HostDirectoryOperation = Object.freeze({ kind: 'host-directory-operation', privateDataRoot: root });
+  activeDirectoryOperations.add(capability);
+  try { return await input.operation(capability); }
+  finally { activeDirectoryOperations.delete(capability); release(); }
 }
 
 function withInternalOperationGate<T>(input: { root: string; operation: () => T }): T {
@@ -127,7 +180,7 @@ function withInternalOperationGate<T>(input: { root: string; operation: () => T 
   }
 }
 
-function readRecord(input: { lockPath: string }): { record: OwnershipRecord; content: string; dev: number; inode: number } {
+function readRecord<S extends z.ZodType>(input: { lockPath: string; schema: S }): { record: z.output<S>; content: string; dev: number; inode: number } {
   let descriptor: number;
   try {
     descriptor = openSync(input.lockPath, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -154,7 +207,7 @@ function readRecord(input: { lockPath: string }): { record: OwnershipRecord; con
     if (!currentPath.isFile() || currentPath.isSymbolicLink() || currentPath.dev !== stat.dev || currentPath.ino !== stat.ino) {
       throw failure({ code: 'LOCK_CHANGED', message: 'Cambió el registro durante la lectura; se conserva para revisión.' });
     }
-    return { record: OwnershipRecordSchema.parse(data), content, dev: stat.dev, inode: stat.ino };
+    return { record: input.schema.parse(data), content, dev: stat.dev, inode: stat.ino };
   } catch (error) {
     if (isHostOwnershipFailure(error)) throw error;
     throw failure({ code: 'LOCK_INVALID', message: 'El registro de ownership necesita revisión; no se elimina automáticamente.' });
@@ -164,7 +217,7 @@ function readRecord(input: { lockPath: string }): { record: OwnershipRecord; con
 }
 
 function removeMatchingRecord(input: { lockPath: string; nonce: string; content: string; dev: number; inode: number }): void {
-  const current = readRecord({ lockPath: input.lockPath });
+  const current = readRecord({ lockPath: input.lockPath, schema: OwnershipRecordSchema });
   if (current.record.nonce !== input.nonce || current.content !== input.content || current.dev !== input.dev || current.inode !== input.inode) {
     throw failure({ code: 'LOCK_CHANGED', message: 'Cambió el dueño del directorio; se conserva su registro.' });
   }
@@ -172,9 +225,9 @@ function removeMatchingRecord(input: { lockPath: string; nonce: string; content:
 }
 
 /** Acquire before opening the journal or workers. Age never authorizes recovery. */
-export function acquireHostOwnership(input: { privateDataRoot: string }) {
-  const root = privateRoot({ path: input.privateDataRoot });
-  return withOperationGate({ root, operation: () => {
+export function acquireHostOwnership(input: { privateDataRoot: string; directoryOperation?: HostDirectoryOperation | undefined }) {
+  const root = canonicalRootPath(input.privateDataRoot, !input.directoryOperation);
+  return withOperationGate({ root, directoryOperation: input.directoryOperation, operation: () => {
     const lockPath = join(root, LOCK_NAME);
     const record = OwnershipRecordSchema.parse({
       kind: 'host-ownership', schemaVersion: 1, nonce: randomUUID(), pid: process.pid,
@@ -194,15 +247,15 @@ export function acquireHostOwnership(input: { privateDataRoot: string }) {
       writeAll({ descriptor, bytes: Buffer.from(JSON.stringify(record), 'utf8') });
       fsyncSync(descriptor);
     } finally { closeSync(descriptor); }
-    const stored = readRecord({ lockPath });
+    const stored = readRecord({ lockPath, schema: OwnershipRecordSchema });
     let released = false;
     return Object.freeze({
       privateDataRoot: root,
       /** Stable for the lifetime of this exclusive host; journals use it to recover owned jobs. */
       ownerToken: record.nonce,
-      release(): void {
+      release(options?: { directoryOperation: HostDirectoryOperation }): void {
         if (released) return;
-        withOperationGate({ root, operation: () => removeMatchingRecord({
+        withOperationGate({ root, directoryOperation: options?.directoryOperation, operation: () => removeMatchingRecord({
           lockPath, nonce: record.nonce, content: stored.content, dev: stored.dev, inode: stored.inode,
         }) });
         released = true;
@@ -211,10 +264,10 @@ export function acquireHostOwnership(input: { privateDataRoot: string }) {
   } });
 }
 
-export function inspectHostOwnership(input: { privateDataRoot: string }) {
-  const root = privateRoot({ path: input.privateDataRoot });
-  return withOperationGate({ root, operation: () => {
-    const { record } = readRecord({ lockPath: join(root, LOCK_NAME) });
+export function inspectHostOwnership(input: { privateDataRoot: string; directoryOperation?: HostDirectoryOperation | undefined }) {
+  const root = canonicalRootPath(input.privateDataRoot);
+  return withOperationGate({ root, directoryOperation: input.directoryOperation, operation: () => {
+    const { record } = readRecord({ lockPath: join(root, LOCK_NAME), schema: OwnershipRecordSchema });
     return Object.freeze(record);
   } });
 }
@@ -240,14 +293,14 @@ function linuxZombieEvidence(pid:number){
 }
 
 /** Explicit operator recovery. A live or ambiguous PID is never overridden. */
-export function recoverHostOwnership(input: { privateDataRoot: string; expectedNonce: string; operatorConfirmed: true }): void {
+export function recoverHostOwnership(input: { privateDataRoot: string; expectedNonce: string; operatorConfirmed: true; directoryOperation?: HostDirectoryOperation | undefined }): void {
   z.strictObject({ expectedNonce: z.string().uuid(), operatorConfirmed: z.literal(true) }).parse({
     expectedNonce: input.expectedNonce, operatorConfirmed: input.operatorConfirmed,
   });
-  const root = privateRoot({ path: input.privateDataRoot });
-  return withOperationGate({ root, operation: () => {
+  const root = canonicalRootPath(input.privateDataRoot);
+  return withOperationGate({ root, directoryOperation: input.directoryOperation, operation: () => {
     const lockPath = join(root, LOCK_NAME);
-    const stored = readRecord({ lockPath });
+    const stored = readRecord({ lockPath, schema: OwnershipRecordSchema });
     if (stored.record.nonce !== input.expectedNonce) {
       throw failure({ code: 'LOCK_CHANGED', message: 'El diagnóstico ya no identifica el mismo registro.' });
     }
@@ -273,4 +326,44 @@ export function recoverHostOwnership(input: { privateDataRoot: string; expectedN
     if(process.platform==='linux'&&first.kind==='ambiguous')throw failure({code:'PROCESS_AMBIGUOUS',message:'No se puede comprobar el estado del proceso; se conserva ownership.'});
     throw failure({ code: 'PROCESS_ACTIVE', message: 'El PID registrado está activo o fue reutilizado. Se conserva ownership.' });
   } });
+}
+
+
+/** Read-only diagnosis remains available while the external gate is abandoned. */
+export function inspectHostDirectoryOperation(input: { privateDataRoot: string }) {
+  const root = canonicalRootPath(input.privateDataRoot);
+  const lockPath = join(dirname(root), `.${basename(root)}.personajes-host-operation`);
+  return Object.freeze(readRecord({ lockPath, schema: OperationRecordSchema }).record);
+}
+
+/** Explicit rescue never uses age and never overrides an active or ambiguous PID. */
+export function recoverHostDirectoryOperation(input: { privateDataRoot: string; expectedNonce: string; operatorConfirmed: true }): void {
+  z.strictObject({ expectedNonce: z.string().uuid(), operatorConfirmed: z.literal(true) }).parse({ expectedNonce: input.expectedNonce, operatorConfirmed: input.operatorConfirmed });
+  const root = canonicalRootPath(input.privateDataRoot);
+  const releaseRescue = acquireExternalDirectoryOperation(root, true);
+  const lockPath = join(dirname(root), `.${basename(root)}.personajes-host-operation`);
+  try {
+    const stored = readRecord({ lockPath, schema: OperationRecordSchema });
+    if (stored.record.nonce !== input.expectedNonce) throw failure({ code: 'LOCK_CHANGED', message: 'El diagnóstico ya no identifica el mismo gate externo.' });
+    let absent = false;
+    try { process.kill(stored.record.pid, 0); }
+    catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ESRCH') absent = true;
+      else throw failure({ code: 'PROCESS_AMBIGUOUS', message: 'No se puede verificar la ausencia del proceso del gate.' });
+    }
+    if (!absent) {
+      const first = linuxZombieEvidence(stored.record.pid);
+      const second = first.kind === 'zombie' ? linuxZombieEvidence(stored.record.pid) : undefined;
+      if (!(first.kind === 'zombie' && second?.kind === 'zombie' && first.startTicks === second.startTicks)) {
+        throw failure({ code: first.kind === 'ambiguous' && process.platform === 'linux' ? 'PROCESS_AMBIGUOUS' : 'PROCESS_ACTIVE', message: 'El proceso del gate está activo, fue reutilizado o no puede verificarse.' });
+      }
+    }
+    const current = readRecord({ lockPath, schema: OperationRecordSchema });
+    if (current.record.nonce !== input.expectedNonce || current.content !== stored.content || current.dev !== stored.dev || current.inode !== stored.inode) {
+      throw failure({ code: 'LOCK_CHANGED', message: 'El gate cambió durante el rescate; se conserva para inspección.' });
+    }
+    unlinkSync(lockPath);
+    const parentFd = openSync(dirname(root), constants.O_RDONLY);
+    try { fsyncSync(parentFd); } finally { closeSync(parentFd); }
+  } finally { releaseRescue(); }
 }

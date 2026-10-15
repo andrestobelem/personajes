@@ -15,13 +15,15 @@ Una obra de ficción en la que actores agénticos encarnan personajes con identi
 
 El encargo actual es revisar todos los materiales uno por uno, corregirlos, escribir y revisar un [PRD exhaustivo](docs/PRD.md), escribir y revisar las [specs](docs/specs/README.md), e implementar y revisar el producto completo. Los cierres documentales previos del PRD y las specs 1.0 fueron reabiertos para reconciliar cambios posteriores y corregir inconsistencias; la implementación comenzó por la base TypeScript. El [registro de progreso](docs/auditoria/objetivo-y-progreso.md) conserva evidencia por fase.
 
-## Estado al 14 de octubre de 2026
+## Estado al 15 de octubre de 2026
 
 Hay 16 documentos de investigación, 27 expedientes de personajes de la serie original, 28 imágenes de referencia, recetas de voz, el paper ICM, cuatro skills locales y un workspace documental de la obra. La constitución y el diseño fueron revisados por agentes, con preguntas y respuestas conservadas.
 
 La arquitectura requerida usa **una instancia Pi independiente por personaje**, perfil seleccionable **GPT-6.1 Sol bajo con Codex OAuth** o **Claude Opus 5.5 medio con Anthropic**, por [decisión posterior](docs/adr/0003-perfiles-de-inferencia-seleccionables.md). Un coordinador puede marcar el pulso sin decidir por los personajes. ICM en Markdown e ICM Memory con SQLite son proyectos diferentes que se propone integrar.
 
 Ya hay una biblioteca gráfica local para consultar personajes, investigaciones y fuentes, y una base TypeScript de preparación, Escenario, HTTP, Pi y memoria. Hay preparación gráfica de borradores, validación/promoción Ready y preflight de ejecución durables, y el launcher puede componer el runtime con ICM configurado. Hay controles gráficos conectados al lifecycle, presupuesto actualizado y paso durable de un único pulso; la API de inicio está implementada, pero todavía no se acreditó una puesta real. La interfaz completa de representación y las voces sintetizadas siguen pendientes. Ver [continuación Cloud](docs/auditoria/continuacion-cloud.md). La investigación de ritmo en YouTube localizó material, pero su calibración mediante escucha continúa pendiente. La primera puesta aún necesita fecha, lugar, continuidad, reparto activo y conflicto concretos. El [registro de implementación](docs/auditoria/implementacion-progreso.md) distingue los componentes probados de las integraciones pendientes.
+
+La [recuperación offline del host](docs/auditoria/recuperacion-offline.md) conserva estado, memorias, sesiones Pi, credenciales actuales y backups posteriores, con revisión gráfica, cierre/reapertura y control durable externo. Permite reanudar la misma operación tras interrupciones; cambios operativos posteriores bloquean el reemplazo. La admisión de backups externos y la aceptación integral del producto siguen pendientes.
 
 Para abrir la biblioteca local, ejecutar `npm run build` y `npm start`, y visitar `http://127.0.0.1:4173/`. `npm run verify` comprueba tipos y pruebas; las pruebas del CLI ICM real requieren `PERSONAJES_ICM_TEST_BINARY` con la ruta del binario 0.11.4. Sin ese binario, esas pruebas se omiten explícitamente.
 

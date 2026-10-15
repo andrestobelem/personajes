@@ -80,6 +80,8 @@ export function createHostBackupQuiesce(input:{
      const path=`runs/${actor.run_id}/actors/${actor.actor_id}/memory.sqlite`;
      if(existsSync(join(input.host.privateDataRoot,path)))add(path,'sqlite');
      else if(db.prepare('SELECT 1 FROM memory_receipts r JOIN experiences e ON e.experience_id=r.experience_id WHERE e.run_id=? AND e.actor_id=? LIMIT 1').get(actor.run_id,actor.actor_id))throw new Error('BACKUP_MEMORY_WITH_RECEIPT_MISSING');
+     const configPath=`runs/${actor.run_id}/actors/${actor.actor_id}/icm-config.toml`;
+     if(existsSync(join(input.host.privateDataRoot,configPath)))add(configPath,'fork-metadata');
    }
    const actorSessions=db.prepare('SELECT run_id,actor_id,session_path FROM actor_pi_sessions LIMIT 100001').all();if(actorSessions.length>100000)throw new Error('BACKUP_ARTIFACT_LIMIT');
    for(const row of actorSessions){

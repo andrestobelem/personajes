@@ -149,3 +149,6 @@ Conjunto autorizado para una puesta de condiciones ambientales y plantillas de o
 **Corte privado registrado**:
 Estado del conocimiento y de las experiencias propias efectivamente admitidas para un personaje en un momento confirmado de la representación. No atribuye al personaje información recibida después aunque se refiera a hechos anteriores.
 _Avoid_: Memoria actual filtrada, recuerdo retrospectivo supuesto
+
+**Recuperación de la representación**: Restablecimiento de una representación conservando su identidad, continuidad, acontecimientos y memorias confirmadas, sin reemplazar cambios posteriores por una versión anterior.
+_Evitar_: recuperación como sinónimo de bifurcación o de reinicio de la historia.

@@ -12,9 +12,12 @@ import {
   type SessionDocument,
 } from "./human-interaction-client.ts";
 
+import { subscribeToHostSessionReset } from "./host-session-reset.ts";
+
 const drafts = new Map<string, string>();
 // An unresolved operation survives changing representations and remounting this panel.
 let unresolved: HumanIntent | null = null;
+let previousHostIntent: HumanIntent | null = null;
 const defaultApi = createHumanInteractionClient();
 export function HumanInteractionPanel({
   runId,
@@ -35,6 +38,7 @@ export function HumanInteractionPanel({
   const [text, setText] = useState("");
   const [recipients, setRecipients] = useState<string[]>([]);
   const [pending, setPending] = useState<HumanIntent | null>(unresolved);
+  const [previousIntent,setPreviousIntent]=useState<HumanIntent|null>(previousHostIntent);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const epoch = useRef(0);
@@ -44,6 +48,11 @@ export function HumanInteractionPanel({
       epoch.current += 1;
     };
   }, [runId, participantId]);
+  useEffect(()=>subscribeToHostSessionReset(()=>{
+    epoch.current+=1;setSession(null);setContext(null);setRecipients([]);setBusy(false);
+    if(unresolved!==null){previousHostIntent=unresolved;setPreviousIntent(unresolved);}
+    unresolved=null;setPending(null);setMessage('La sesión del host cambió. Volvé a consultar y activar la interlocución; el borrador se conserva.');
+  }),[]);
   const draftKey = `${runId}:${participantId}`;
   useEffect(() => {
     setParticipantId(participants[0]?.participantId ?? "");
@@ -56,14 +65,14 @@ export function HumanInteractionPanel({
     setText(drafts.get(draftKey) ?? "");
   }, [draftKey]);
   useEffect(() => {
-    let live = true;
+    let live = true;const started=epoch.current;
     void api
       .session()
       .then((value) => {
-        if (live) setSession(value);
+        if (live&&started===epoch.current) setSession(value);
       })
       .catch((error) => {
-        if (live)
+        if (live&&started===epoch.current)
           setMessage(
             error instanceof Error ? error.message : "Sesión no disponible",
           );
@@ -329,6 +338,7 @@ export function HumanInteractionPanel({
           : "audiencia del canal"}{" "}
         por {context?.view.channel.label ?? "canal pendiente"}
       </button>
+      {previousIntent!==null&&<details><summary>Solicitud sin confirmar de la sesión anterior</summary><p>Se conserva para revisión. No se reenvía con la autoridad nueva; activá la interlocución y revisá el borrador antes de crear otra solicitud.</p><pre>{JSON.stringify(previousIntent,null,2)}</pre></details>}
       {pending && (
         <p role="alert">
           Hay una operación sin confirmar ({pending.kind})

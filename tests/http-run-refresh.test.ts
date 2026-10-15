@@ -77,3 +77,18 @@ test('SSE heartbeat never renews idle session; expiry ends stream without privat
   assert.equal((await fetch(origin+'/api/v1/session',{headers:{Cookie:s.cookie}})).status,401);
  }finally{stream?.close();await server.close();f.journal.close();rmSync(f.directory,{recursive:true,force:true});}
 });
+
+test('resetSessions closes SSE and waits for an in-flight refresh before a recovered host can replace its journal',async()=>{
+ const f=await setup();const app=createRunLifecycleApplication({journal:f.journal});const view=app.readRunView({runId:f.claim.runId});assert.ok(view);
+ const {createHostRequestBarrier}=await import('../src/application/host-request-barrier.ts');const barrier=createHostRequestBarrier();
+ let enteredResolve=()=>{};const entered=new Promise<void>(resolve=>{enteredResolve=resolve;});let finishResolve=()=>{};const finish=new Promise<void>(resolve=>{finishResolve=resolve;});let reads=0;
+ const server=createLocalHttpServer({catalog:await loadCatalog({repositoryRoot:process.cwd()}),shellHtml:'<html><head></head><body></body></html>',admissionBarrier:barrier,
+ runRefreshStream:{pollIntervalMs:20,heartbeatMs:20},runLifecycle:{async readRunView(){reads++;if(reads>1){enteredResolve();await finish;}return view;},controlRun(){throw new Error('UNEXPECTED_CONTROL');}}});
+ let stream:Awaited<ReturnType<typeof connect>>|undefined;let release:(()=>void)|undefined;
+ try{
+  const {origin}=await server.listen();const s=await session(origin);stream=await connect(origin,`/api/v1/runs/${f.claim.runId}/events/stream`,s.cookie);await stream.nextFrame();await entered;
+  release=await barrier.acquireRecovery();let resetFinished=false;const reset=server.resetSessions().then(()=>{resetFinished=true;});await stream.ended;assert.equal(resetFinished,false,'pending refresh must drain before closing the database');
+  finishResolve();await reset;const atReset=reads;await delay(50);assert.equal(reads,atReset,'invalidated streams cannot read a replacement journal');
+  assert.equal((await fetch(origin+'/api/v1/session',{headers:{Cookie:s.cookie}})).status,401);
+ }finally{finishResolve();release?.();stream?.close();await server.close();f.journal.close();rmSync(f.directory,{recursive:true,force:true});}
+});

@@ -59,3 +59,19 @@ El diálogo constitucional tuvo **cinco rondas y quince preguntas efectivamente 
 La revisión integral comprobó, entre otros elementos, diferencias entre identidad y actor, límites de conocimiento, versiones aprobadas de respuestas, idempotencia, fuentes de estado y separación de efectos. También contrastó hashes de imágenes, paper, adjunto y skills. Los informes conservan su alcance y no sustituyen pruebas del runtime.
 
 Se corrigió un falso positivo de la revisión técnica: `AgentSession.getAvailableThinkingLevels()` sí existe en la versión de Pi consultada. El expediente técnico y los informes conservan la rectificación; comprobar el nivel de razonamiento efectivo sigue siendo un criterio válido. No se perpetúa un hallazgo por haberlo producido un revisor.
+
+## Corte 48 — recuperación offline
+
+| Agente | Responsabilidad y evidencia |
+|---|---|
+| `restore_interviewer` y `restore_custodian` | Tres rondas reales de entrevista y respuestas; auditoría, ADR y reconciliación de las specs. |
+| `recovery_ownership` | Gate previo a crear raíz, capability vigente y rescate explícito con prueba de ausencia del proceso. |
+| `fork_icm_audit` | Comparación completa de SQLite/WAL, ICM y archivos; preservación administrativa, auth y backups posteriores. |
+| `actor_cut_journal` | Control durable externo, intercambio por fases, reanudación idempotente y aborto seguro antes del rename. |
+| `fork_http` | Composición reusable, barrera/SSE/sesiones y launcher de control tras dos SIGKILL reales, hasta verified. |
+| `fork_backup` | Metadata explícita de receipts y migración con integridad, replay legacy y respuesta recovery/fork. |
+| `actor_cut_migration_tests` | Inventario config ICM y cinco integraciones productivas de recuperación, aborto/replay/cierre incierto. |
+| `restore_ui` y `actor_cut_inspector` | GUI, recarga independiente del catálogo, reanudación explícita y retiro de opt-ins sin perder borradores. |
+| `actor_cut_integrity_review` | Revisión independiente, hallazgos corregidos y 31 focales finales aprobados. |
+
+La raíz integró, verificó 946 pruebas aprobadas/una omitida por plataforma, build y QA gráfico, actualizó trazabilidad y mantuvo la aceptación integral pendiente. [Detalle](recuperacion-offline.md).

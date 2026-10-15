@@ -69,3 +69,75 @@ test('a new restoration never inherits the uncertain retry of a previous publish
  const nextPreview={...preview,operationId:next.operationId};
  assert.doesNotThrow(()=>captureBackupIntent({kind:'apply',backupId,key,backupRevision:1,preview:nextPreview,retry:selected}));
 });
+test('host recovery preserves the confirmed operation and never replays restore to reconnect GET authority', async () => {
+ const {RecoveryPreviewSchema} = await import('../src/web/backup-client.ts');
+ const {HostRecoveryJobSchema,hostRecoveryEtag} = await import('../src/domain/host-recovery.ts');
+ const recoverPreview=RecoveryPreviewSchema.parse({...preview,mode:'recover'});
+ const intent=captureBackupIntent({kind:'recover',backupId,key,backupRevision:1,preview:recoverPreview}); if(intent.kind!=='recover')throw new Error('Fixture');
+ const recovery=HostRecoveryJobSchema.parse({kind:'host-recovery',operationId,backupId,state:'running',phase:'reopening',revision:4,safeCode:null});
+ const calls:Array<{url:string;method:string|undefined;body:unknown}>=[];let unauthorized=true,reconnections=0;
+ const api=createBackupClient(async(url,init)=>{calls.push({url:String(url),method:init?.method,body:init?.body});if(String(url).includes('/host-recoveries/')&&unauthorized){unauthorized=false;return new Response('',{status:401});}return new Response(JSON.stringify(recovery),{status:202,headers:{etag:hostRecoveryEtag(recovery)}});},bootstrap,async()=>{reconnections++;return bootstrap();});
+ assert.deepEqual(await api.recover(intent,new AbortController().signal),recovery);
+ assert.deepEqual(await api.readRecovery({operationId,backupId},new AbortController().signal),recovery);
+ assert.equal(reconnections,1);assert.deepEqual(calls.map(call=>call.method),['POST',undefined,undefined]);assert.equal(calls[1]?.url,calls[2]?.url);assert.deepEqual(JSON.parse(String(calls[0]?.body)),{previewToken:preview.previewToken,confirmDiffHash:preview.diffHash});
+ const storageValues=new Map<string,string>();const storage={getItem:(key:string)=>storageValues.get(key)??null,setItem:(key:string,value:string)=>{storageValues.set(key,value);},removeItem:(key:string)=>{storageValues.delete(key);}};
+ writeStoredBackupIntent(storage,intent);assert.deepEqual(readStoredBackupIntent(storage),intent);
+});
+test('recovery GET rejects a foreign operation, a substituted backup and unverified success', async()=>{
+ const {HostRecoveryJobSchema,hostRecoveryEtag}=await import('../src/domain/host-recovery.ts');
+ const recovery=HostRecoveryJobSchema.parse({kind:'host-recovery',operationId,backupId,state:'succeeded',phase:'verified',revision:8,safeCode:null});
+ for(const altered of [{...recovery,operationId:key},{...recovery,backupId:key},{...recovery,phase:'installed'}]) {
+   const api=createBackupClient(async()=>new Response(JSON.stringify(altered),{headers:{etag:hostRecoveryEtag(HostRecoveryJobSchema.parse(altered))}}),bootstrap);
+   await assert.rejects(api.readRecovery({operationId,backupId},new AbortController().signal),/identidad o la verificación/);
+ }
+ const {newerHostRecovery}=await import('../src/web/backup-client.ts');
+ assert.deepEqual(newerHostRecovery(recovery,{...recovery,state:'running',phase:'reopening',revision:7}),recovery);
+ assert.deepEqual(newerHostRecovery(recovery,HostRecoveryJobSchema.parse({...recovery,operationId:key,revision:9})),recovery);
+});
+test('recovery preview has no selected actor/run and preserves blockers for explicit review',async()=>{
+ const recoveryPreview={...preview,mode:'recover',blockers:['RESTORE_TARGET_DIVERGED']};
+ const intent=captureBackupIntent({kind:'preview',backupId,key,selection:{mode:'recover'}});if(intent.kind!=='preview')throw new Error('Fixture');
+ const request=buildBackupRequest({intent,csrfToken:'csrf'});assert.deepEqual(JSON.parse(request.init.body),{mode:'recover'});
+ const api=createBackupClient(async()=>new Response(JSON.stringify(recoveryPreview)),bootstrap);
+ assert.equal((await api.preview(intent,new AbortController().signal)).mode,'recover');
+ assert.throws(()=>captureBackupIntent({kind:'recover',backupId,key,backupRevision:1,preview:recoveryPreview}));
+});
+test('recovery resume preserves one CAS/key through transport loss and never targets restore again',async()=>{
+ const {RecoveryPreviewSchema,buildRecoveryResumeRequest}=await import('../src/web/backup-client.ts');
+ const {HostRecoveryJobSchema,hostRecoveryEtag}=await import('../src/domain/host-recovery.ts');
+ const failed=HostRecoveryJobSchema.parse({kind:'host-recovery',operationId,backupId,state:'interrupted',phase:'reopening',revision:4,safeCode:'RECOVERY_INTERRUPTED'});
+ const intent=captureBackupIntent({kind:'recover',backupId,key,backupRevision:1,preview:RecoveryPreviewSchema.parse({...preview,mode:'recover'}),resume:{key:sourceRunId,job:failed}});if(intent.kind!=='recover')throw new Error('Fixture');
+ const built=buildRecoveryResumeRequest({intent,csrfToken:'csrf'});assert.equal(built.path,`/api/v1/host-recoveries/${operationId}/resume`);assert.equal(built.init.body,'{}');assert.equal(built.init.headers['If-Match'],hostRecoveryEtag(failed));assert.equal(built.init.headers['Idempotency-Key'],sourceRunId);
+ const next=HostRecoveryJobSchema.parse({...failed,state:'queued',phase:'queued',revision:5,safeCode:null});const calls:Array<{path:string;init:RequestInit|undefined}>=[];let lost=true;
+ const api=createBackupClient(async(path,init)=>{calls.push({path:String(path),init});if(lost){lost=false;throw new Error('perdida');}return new Response(JSON.stringify(next),{status:202,headers:{etag:hostRecoveryEtag(next)}});},bootstrap);
+ await assert.rejects(api.resumeRecovery(intent,new AbortController().signal),/perdida/);assert.deepEqual(await api.resumeRecovery(intent,new AbortController().signal),next);assert.deepEqual(calls[0],calls[1]);
+ const values=new Map<string,string>();const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}};writeStoredBackupIntent(storage,intent);assert.deepEqual(readStoredBackupIntent(storage),intent);
+ assert.throws(()=>captureBackupIntent({...intent,resume:{key,job:{...failed,operationId:key}}}));assert.throws(()=>captureBackupIntent({...intent,resume:{key,job:{...failed,state:'succeeded'}}}));
+});
+test('401 on explicit resume reconnects authority once without replaying its POST',async()=>{
+ const {RecoveryPreviewSchema,backupRejection}=await import('../src/web/backup-client.ts');const {HostRecoveryJobSchema}=await import('../src/domain/host-recovery.ts');
+ const failed=HostRecoveryJobSchema.parse({kind:'host-recovery',operationId,backupId,state:'failed',phase:'staging',revision:2,safeCode:'RECOVERY_FAILED'});
+ const intent=captureBackupIntent({kind:'recover',backupId,key,backupRevision:1,preview:RecoveryPreviewSchema.parse({...preview,mode:'recover'}),resume:{key,job:failed}});if(intent.kind!=='recover')throw new Error('Fixture');
+ let posts=0,reconnected=0;const api=createBackupClient(async()=>{posts++;return new Response('',{status:401});},bootstrap,async()=>{reconnected++;return bootstrap();});
+ await assert.rejects(api.resumeRecovery(intent,new AbortController().signal),failure=>backupRejection(failure)?.code==='RECOVERY_SESSION_RECONNECTED');assert.equal(posts,1);assert.equal(reconnected,1);
+});
+test('ownership inspection is GET-only and nonce is pinned in the durable resume body',async()=>{
+ const {RecoveryPreviewSchema,buildRecoveryResumeRequest}=await import('../src/web/backup-client.ts');const {HostRecoveryJobSchema}=await import('../src/domain/host-recovery.ts');
+ const calls:Array<{path:string;method:string|undefined}>=[];
+ const api=createBackupClient(async(path,init)=>{calls.push({path:String(path),method:init?.method});return new Response(JSON.stringify({kind:'host-recovery-ownership',operationId,directoryOperation:{kind:'present',nonce:key,pid:123}}));},bootstrap);
+ const ownership=await api.readRecoveryOwnership(operationId,new AbortController().signal);assert.equal(ownership.directoryOperation.kind,'present');assert.deepEqual(calls,[{path:`/api/v1/host-recoveries/${operationId}/ownership`,method:undefined}]);
+ const running=HostRecoveryJobSchema.parse({kind:'host-recovery',operationId,backupId,state:'running',phase:'closing',revision:3,safeCode:null});
+ const intent=captureBackupIntent({kind:'recover',backupId,key,backupRevision:1,preview:RecoveryPreviewSchema.parse({...preview,mode:'recover'}),resume:{key,job:running,expectedDirectoryOperationNonce:ownership.directoryOperation.kind==='present'?ownership.directoryOperation.nonce:undefined}});if(intent.kind!=='recover')throw new Error('Fixture');
+ const built=buildRecoveryResumeRequest({intent,csrfToken:'csrf'});assert.deepEqual(JSON.parse(built.init.body),{expectedDirectoryOperationNonce:key});
+ const values=new Map<string,string>();const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}};writeStoredBackupIntent(storage,intent);assert.deepEqual(readStoredBackupIntent(storage),intent);
+ const wrong=createBackupClient(async()=>new Response(JSON.stringify({...ownership,operationId:key})),bootstrap);await assert.rejects(wrong.readRecoveryOwnership(operationId,new AbortController().signal),/otra recuperación/);
+});
+test('original-retained cancellation is terminal, cannot resume and rejects unproven cancellation receipts',async()=>{
+ const {HostRecoveryJobSchema,hostRecoveryEtag}=await import('../src/domain/host-recovery.ts');const {RecoveryPreviewSchema,newerHostRecovery}=await import('../src/web/backup-client.ts');
+ const aborted=HostRecoveryJobSchema.parse({kind:'host-recovery',operationId,backupId,state:'aborted',phase:'original-retained',revision:8,safeCode:'RESTORE_TARGET_DIVERGED'});
+ const api=createBackupClient(async()=>new Response(JSON.stringify(aborted),{headers:{etag:hostRecoveryEtag(aborted)}}),bootstrap);assert.deepEqual(await api.readRecovery({operationId,backupId},new AbortController().signal),aborted);
+ assert.deepEqual(newerHostRecovery(aborted,{...aborted,state:'running',phase:'reopening',revision:7}),aborted);
+ assert.deepEqual(newerHostRecovery(aborted,{...aborted,state:'running',phase:'reopening',revision:9}),aborted);
+ assert.throws(()=>captureBackupIntent({kind:'recover',backupId,key,backupRevision:1,preview:RecoveryPreviewSchema.parse({...preview,mode:'recover'}),resume:{key,job:aborted}}));
+ const unproven=HostRecoveryJobSchema.parse({...aborted,phase:'closing'});const bad=createBackupClient(async()=>new Response(JSON.stringify(unproven),{headers:{etag:hostRecoveryEtag(unproven)}}),bootstrap);await assert.rejects(bad.readRecovery({operationId,backupId},new AbortController().signal),/verificación/);
+});

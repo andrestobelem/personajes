@@ -300,3 +300,19 @@ Launcher, API autenticada y panel de bifurcación ya están conectados. El retry
 ## Restauración desde backup — corte 47
 
 Restaurar como bifurcación desde un backup local registrado ya está conectado al launcher, API y GUI. La revisión/confirmación tiene operación estable y principal privado; la recuperación retoma sólo intenciones confirmadas. Journal v37 conserva la fuente respaldada y la publicación no consulta al padre vivo. Validación y migraciones actúan sobre copias privadas para mantener el bundle intacto. [Contrato, pruebas y recorrido gráfico](../auditoria/restauracion-como-bifurcacion.md). Recuperación offline del host completo, admisión de otra lineage y aceptación integral siguen pendientes.
+
+## Recuperación completa y control externo — corte 48
+
+El preview existente admite `{mode:"recover"}` para el backup local registrado; devuelve diferencias/fingerprint o blockers de compatibilidad completa. Confirmar por `POST /backups/{backupId}/restore` conserva sesión local, CSRF, ETag, clave y diff exacto; devuelve `202 HostRecoveryJob`, Location y ETag del job. El cliente no elige raíz ni aporta manifest/fingerprint como autoridad. Recover conserva identidad de las corridas; no devuelve un fork ni crea otra continuidad.
+
+| Ruta | Autoridad y contrato ejecutado |
+|---|---|
+| `GET /host-recoveries/{operationId}` | Operador propietario. DTO público con backup/operación, estado, fase, revisión y código seguro; ETag `"host-recovery:<operationId>:r<revision>"`. Sin paths, principal ni secretos. Sólo lectura, incluso cuando producción está cerrada. |
+| `GET /host-recoveries/{operationId}/ownership` | Mismo propietario. Gate ausente o nonce/PID diagnosticados, sin recuperar ni borrar. |
+| `POST /host-recoveries/{operationId}/resume` | CSRF, clave e `If-Match` del job; body estricto con `expectedDirectoryOperationNonce?`. Si hay gate, exige el nonce observado y proceso muerto demostrado; PID activo/ambiguo bloquea. Reanudación durable de la misma operación, 202/Location/ETag; replay conserva recibo original y GET consulta el estado actual. |
+
+Los recursos de control sobreviven fuera del journal sustituido. La admisión completa se drena antes del cierre de todos los servicios/handles; el HTTP de control permanece disponible. Tras una caída con operación pendiente, el launcher inicia únicamente control, sin aplicar ni reanudar automáticamente. Los getters no limpian ownership ni abren bases de producción. Reanudar conserva fases, IDs y confirmación ya admitida; no requiere volver a inventar otra solicitud por expiración del preview.
+
+La reapertura invalida sesiones HTTP, CSRF y opt-ins privados; la GUI restablece autenticación local y consulta la operación conservada. No se restauran permisos de browser como identidad ficticia. Las sesiones Pi, memorias y presupuesto conservan sus contratos, sin inferencia ni TTS automáticos. Divergencia de estado completo, corrupción, tablas/archivos desconocidos, origen de otra raíz o lineage bloquean; preservar el original no autoriza rollback con pérdida desconocida. [Contrato de persistencia](02-persistencia-e-icm.md) y [evidencia/limitaciones](../auditoria/recuperacion-offline.md).
+
+`HostRecoveryJob` distingue además `aborted/original-retained`: fallo anterior al intercambio con original acreditado y reabierto, sin declarar éxito de restore. Libera la admisión; no se agenda resume ni cuenta como operación pendiente. Un fallo que no pueda demostrar esa salida conserva control offline y reanudación explícita.

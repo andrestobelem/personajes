@@ -49,7 +49,7 @@ export type BackupRestoreContext = {
 export type BackupRestorePort = {
  preview(input:BackupRestoreContext):{differences:string[];blockers:string[];targetFingerprint:string};
  /** Must be idempotent for operationId. A replay also reads the current durable job. */
- apply(input:BackupRestoreContext & {targetFingerprint:string}):Promise<unknown>;
+ apply(input:BackupRestoreContext & {targetFingerprint:string;confirmDiffHash:string}):Promise<unknown>;
 };
 
 export function openBackupService(input: { privateDataRoot: string; quiesce?: BackupQuiescePort; restore?: BackupRestorePort; now?: () => number }) {
@@ -234,7 +234,7 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
     // Once claimed, expiry/target changes must not strand the original operation.
     // apply verifies/reuses the same operation rather than choosing a new target.
     const work=Promise.resolve().then(async()=>{
-      const result=await port.apply({...selected,targetFingerprint:record.target_fingerprint});const json=JSON.stringify(z.json().parse(result));
+      const result=await port.apply({...selected,targetFingerprint:record.target_fingerprint,confirmDiffHash:p.diffHash});const json=JSON.stringify(z.json().parse(result));
       db.prepare('UPDATE backup_restore_previews SET result_json=? WHERE token=?').run(json,p.previewToken);integrity.seal('backup_restore_previews','token=?',[p.previewToken]);return JSON.parse(json);
     });
     activeRestores.set(p.previewToken,work);

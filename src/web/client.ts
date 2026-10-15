@@ -18,6 +18,31 @@ async function request<T>(input: { path: string; schema: z.ZodType<T>; init?: Re
 }
 
 let session: Promise<z.infer<typeof SessionCreatedSchema>> | undefined;
+let reconnecting: Promise<z.infer<typeof SessionCreatedSchema>> | undefined;
+/** A directory recovery invalidates HTTP authority. Obtain a fresh one-use nonce;
+ * reconnecting never retries the business mutation that initiated recovery. */
+export function reconnectSession() {
+  if (reconnecting !== undefined) return reconnecting;
+  session = undefined;
+  const pending = (async () => {
+    const response = await fetch('/', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('No se pudo restablecer la sesión local');
+    const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const nonce = html.querySelector(`meta[name="${BOOTSTRAP_META_NAME}"]`)?.getAttribute('content');
+    if (!nonce) throw new Error('El host no ofreció una sesión local nueva');
+    const created = await request({ path: '/api/v1/session', schema: SessionCreatedSchema,
+      init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bootNonce: nonce }) } });
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('personajes:host-session-reset'));
+    return created;
+  })();
+  reconnecting = pending;
+  session = pending;
+  void pending.then(() => { if (reconnecting === pending) reconnecting = undefined; }, () => {
+    if (session === pending) session = undefined;
+    if (reconnecting === pending) reconnecting = undefined;
+  });
+  return pending;
+}
 export function bootstrapSession() {
   if (session === undefined) {
     const nonce = document.querySelector(`meta[name="${BOOTSTRAP_META_NAME}"]`)?.getAttribute('content');
