@@ -9,6 +9,8 @@ Estas instrucciones orientan a los asistentes que desarrollan o mantienen el pro
 - Para mantenimiento de `obra/`, seguir también [obra/AGENTS.md](obra/AGENTS.md) y su ruteo ICM. No inventar escenas o registros para llenar plantillas.
 - La [matriz de decisiones](docs/diseno/decisiones-abiertas.md) evita reabrir requisitos ya resueltos. Actualizar la [cobertura](docs/auditoria/conversacion-y-cobertura.md) cuando cambie el estado de una entrega.
 
+Al retomar trabajo desde otra máquina o conversación, leer [handoff/README.md](handoff/README.md) y su entrega vigente para conocer estado, pausas y dependencias del host.
+
 ## Decisiones que se preservan
 
 - Escenario es el mundo operativo; escenografía es su representación visual/material; escena admite uno o más personajes, acciones y silencio.

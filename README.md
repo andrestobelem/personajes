@@ -7,6 +7,7 @@ Una obra de ficción en la que actores agénticos encarnan personajes con identi
 - [Documentación e investigaciones](docs/README.md): índice general de lo investigado y definido.
 - [Constitución](docs/constitucion.md) y [glosario](GLOSSARY.md): reglas comunes y lenguaje del dominio.
 - [Reparto de Get Smart](docs/personajes/get-smart/README.md): 27 expedientes individuales, familia, continuidad, avatares y recetas de voz.
+- [Continuar desde otra máquina](handoff/README.md): estado vigente, pendientes y datos del host.
 - [Obra en ICM](obra/README.md): contexto, contratos y registros Markdown para preparar una representación.
 - [Organización de Pi y Escenario](docs/diseno/organizacion-de-pi-y-escenario.md): propuesta técnica y fronteras entre instancias, memoria y presentación.
 - [Cobertura de la conversación](docs/auditoria/conversacion-y-cobertura.md) y [decisiones abiertas](docs/diseno/decisiones-abiertas.md): qué está guardado y qué sigue pendiente.
