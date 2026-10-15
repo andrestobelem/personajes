@@ -29,6 +29,8 @@ type CommonRequest = {
   readonly query: URLSearchParams;
   readonly principalId: string;
   readonly mode: SessionMode;
+  /** Host-derived opt-ins. Omitted means no private inspection authority. */
+  readonly inspectionRunIds?:readonly string[];
   readonly ifMatch: string | null;
   readonly ifNoneMatch: string | null;
 };

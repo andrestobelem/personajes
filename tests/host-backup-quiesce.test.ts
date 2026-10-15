@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
+import { ReadyRunConfigurationSchema } from '../src/application/production-preflight.ts';
+import { canonicalContinuistaValue, hashContinuistaValue } from '../src/domain/continuista-review.ts';
+import { ConfiguratorJobSessionSchema } from '../src/domain/configurator-jobs.ts';
+import { ActorIdentityEpochSchema } from '../src/domain/identity-promotion.ts';
+import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import { createIcmMemoryAdapter } from '../src/adapters/icm.ts';
 import { openBackupService } from '../src/application/backup-service.ts';
 import { createHostBackupQuiesce } from '../src/application/host-backup-quiesce.ts';
@@ -91,5 +98,135 @@ for (const kind of ['symbolic', 'hard']) test(`backup rechaza configuración ICM
     assert.equal(existsSync(join(f.host.privateDataRoot, 'backups', backupId)), false);
     assert.deepEqual(readFileSync(target), bytes);
     assert.equal(f.admission.isHeld, false);
+  } finally { f.close(); }
+});
+
+test('backup conserva sesión Pi archivada sin candidatos ni checkpoint y rechaza su ausencia', async () => {
+  const f = fixture();
+  try {
+    const configuration = ReadyRunConfigurationSchema.parse(f.host.journal.readWorldConfiguration({ runId: f.runId }));
+    const prepared = configuration.roster.preparedCharacters[0]; assert.ok(prepared);
+    const actorRoot = join(f.host.privateDataRoot, 'runs', f.runId, 'actors', f.actorId);
+    const cwd = join(actorRoot, 'cwd'); mkdirSync(cwd, { recursive: true });
+    const manager = SessionManager.create(cwd, join(actorRoot, 'sessions'));
+    manager.appendMessage({ role: 'user', content: 'Registro histórico sintético escrito por SDK; no inferencia.', timestamp: Date.now() });
+    manager.appendMessage({ role: 'assistant', content: [], api: 'openai-codex-responses', provider: 'openai-codex', model: 'gpt-6.1-sol', stopReason: 'stop', timestamp: Date.now(),
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+    const path = manager.getSessionFile(); assert.ok(path && existsSync(path)); const originalBytes = readFileSync(path);
+    f.host.journal.registerActorPiSession({ runId: f.runId, actorId: f.actorId, sessionId: manager.getSessionId(), sessionPath: path,
+      preparedContextHash: hashContinuistaValue(prepared), profile: DEFAULT_INFERENCE_PROFILE });
+    const db = new DatabaseSync(join(f.host.privateDataRoot, 'world.sqlite'));
+    try {
+      // Construct only the historical storage boundary, using the complete real
+      // session row and its original binding. No identity promotion is claimed.
+      db.exec('PRAGMA foreign_keys=ON');
+      const row = db.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(f.runId, f.actorId); assert.ok(row);
+      const epoch = ActorIdentityEpochSchema.parse({ runId: f.runId, actorId: f.actorId, epochIndex: 0, activationCommitIndex: 0,
+        configurationRevision: configuration.configRevision, configurationHash: hashContinuistaValue(configuration), identityVersion: prepared.identityVersion,
+        preparedContextHash: hashContinuistaValue(prepared), createdAt: new Date().toISOString() });
+      const epochJson = canonicalContinuistaValue(epoch);
+      db.prepare('INSERT INTO actor_identity_epochs VALUES(?,?,0,?,?)').run(f.runId, f.actorId, epochJson, hashContinuistaValue(epoch));
+      const binding = { runId: f.runId, actorId: f.actorId, epochIndex: 0, bindingIndex: 0, sessionId: manager.getSessionId(), sessionPath: path,
+        preparedContextHash: hashContinuistaValue(prepared), profile: DEFAULT_INFERENCE_PROFILE };
+      db.prepare('INSERT INTO actor_identity_session_bindings VALUES(?,?,0,0,?,?,?,?)').run(f.runId, f.actorId, manager.getSessionId(), path, canonicalContinuistaValue(binding), hashContinuistaValue(binding));
+      const json = canonicalContinuistaValue(row); const hash = createHash('sha256').update(json).digest('hex');
+      db.prepare('INSERT INTO actor_pi_session_archives(run_id,actor_id,epoch_index,session_id,session_path,row_json,row_hash) VALUES(?,?,0,?,?,?,?)')
+        .run(f.runId, f.actorId, manager.getSessionId(), path, json, hash);
+      db.prepare('DELETE FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').run(f.runId, f.actorId);
+      assert.equal(db.prepare('SELECT count(*) n FROM actor_pi_candidates').get()?.n, 0);
+      assert.equal(db.prepare('SELECT count(*) n FROM actor_job_checkpoints').get()?.n, 0);
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+    } finally { db.close(); }
+    const backupId = randomUUID(); const job = await f.backups.create({ backupId, scope: { kind: 'all' } });
+    assert.equal(job.state, 'succeeded', job.safeCode ?? '');
+    const bundle = f.backups.verify(backupId); const relative = `runs/${f.runId}/actors/${f.actorId}/sessions/${path.split('/').at(-1)}`;
+    assert.ok(bundle.manifest.files.some(file => file.path === relative));
+    assert.deepEqual(readFileSync(join(bundle.bundleRoot, relative)), originalBytes);
+    unlinkSync(path);
+    const missing = await f.backups.create({ backupId: randomUUID(), scope: { kind: 'all' } });
+    assert.equal(missing.state, 'failed'); assert.equal(missing.safeCode, 'BACKUP_REGISTERED_SESSION_MISSING');
+    assert.equal(f.admission.isHeld, false);
+  } finally { f.close(); }
+});
+
+test('backup incluye archivo SDK del ledger Configurador y requiere barrera cuando hay job en vuelo', async () => {
+  const f = fixture();
+  try {
+    const world = f.host.journal.loadWorld({ runId: f.runId }); assert.ok(world);
+    const scope = { runId: f.runId, jobId: randomUUID(), generation: 0, lifecycleRevision: 0, configurationRevision: 0,
+      worldRevision: world.revision, throughWorldSeq: world.seq, fictitiousAt: world.clock.instant, profile: DEFAULT_INFERENCE_PROFILE };
+    const roleRoot = join(f.host.privateDataRoot, 'runs', f.runId, 'roles', 'configurador'); const cwd = join(roleRoot, 'cwd'); mkdirSync(cwd, { recursive: true });
+    const manager = SessionManager.create(cwd, join(roleRoot, 'sessions'));
+    manager.appendMessage({ role: 'user', content: 'Sesión de inventario sintética sin petición al modelo.', timestamp: Date.now() });
+    manager.appendMessage({ role: 'assistant', content: [], api: 'openai-codex-responses', provider: 'openai-codex', model: 'gpt-6.1-sol', stopReason: 'stop', timestamp: Date.now(),
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+    const path = manager.getSessionFile(); assert.ok(path && existsSync(path)); const bytes = readFileSync(path);
+    const session = ConfiguratorJobSessionSchema.parse({ execution: { role: 'configurator', scope, contextHash: 'a'.repeat(64), lease: { ownerToken: f.host.ownerToken, claimToken: randomUUID() } },
+      sessionId: manager.getSessionId(), sessionPath: path, baseLeafId: manager.getLeafId(), profile: DEFAULT_INFERENCE_PROFILE });
+    const json = canonicalContinuistaValue(session);
+    const db = new DatabaseSync(join(f.host.privateDataRoot, 'world.sqlite'));
+    try {
+      // Storage-boundary fixture only: this does not assert acceptance of a
+      // Configurator proposal or authorize any identity change.
+      db.prepare('INSERT INTO configurator_sessions VALUES(?,?,?,?,?)').run(scope.jobId, 0, path, json, hashContinuistaValue(session));
+    } finally { db.close(); }
+    const backupId = randomUUID(); assert.equal((await f.backups.create({ backupId, scope: { kind: 'all' } })).state, 'succeeded');
+    const bundle = f.backups.verify(backupId); const relative = `runs/${f.runId}/roles/configurador/sessions/${path.split('/').at(-1)}`;
+    assert.ok(bundle.manifest.files.some(file => file.path === relative)); assert.deepEqual(readFileSync(join(bundle.bundleRoot, relative)), bytes);
+    const busy = new DatabaseSync(join(f.host.privateDataRoot, 'world.sqlite'));
+    try {
+      const job = JSON.stringify({ job: { state: 'running' } });
+      busy.prepare('INSERT INTO configurator_jobs VALUES(?,?,?,?,?,?)').run(scope.jobId, 'test', f.runId, f.actorId, job, createHash('sha256').update(job).digest('hex'));
+    } finally { busy.close(); }
+    await assert.rejects(f.quiesce.acquire(), /BACKUP_CONFIGURATOR_BARRIER_UNAVAILABLE/);
+    assert.equal(f.admission.isHeld, false);
+    let acquired = 0; let released = 0; const inactive = { backupBusy: false };
+    const configured = createHostBackupQuiesce({ host: f.host, admission: f.admission, oauth: inactive, access: inactive, preflight: inactive,
+      deliveries: { async suspendAdmissions() { return () => {}; } }, voice: { async suspendAdmissions() { return () => {}; }, backupArtifacts() { return []; } },
+      configurator: { async suspendAdmissions() { acquired++; return () => { released++; }; } } });
+    const hold = await configured.acquire(); assert.equal(acquired, 1); await hold.release(); assert.equal(released, 1); assert.equal(f.admission.isHeld, false);
+  } finally { f.close(); }
+});
+
+test('backup conserva binding Pi previo a rotación sin candidato ni archivo final propio', async () => {
+  const f = fixture();
+  try {
+    const configuration = ReadyRunConfigurationSchema.parse(f.host.journal.readWorldConfiguration({ runId: f.runId }));
+    const prepared = configuration.roster.preparedCharacters[0]; assert.ok(prepared);
+    const actorRoot = join(f.host.privateDataRoot, 'runs', f.runId, 'actors', f.actorId); const cwd = join(actorRoot, 'cwd'); mkdirSync(cwd, { recursive: true });
+    function session(text: string) {
+      const manager = SessionManager.create(cwd, join(actorRoot, 'sessions'));
+      manager.appendMessage({ role: 'user', content: text, timestamp: Date.now() });
+      manager.appendMessage({ role: 'assistant', content: [], api: 'openai-codex-responses', provider: 'openai-codex', model: 'gpt-6.1-sol', stopReason: 'stop', timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+      const path = manager.getSessionFile(); assert.ok(path && existsSync(path)); return { manager, path, bytes: readFileSync(path) };
+    }
+    const earlier = session('Binding histórico sintético previo a rotación.'); const current = session('Head sintético vigente. Ninguna petición al modelo.');
+    f.host.journal.registerActorPiSession({ runId: f.runId, actorId: f.actorId, sessionId: current.manager.getSessionId(), sessionPath: current.path,
+      preparedContextHash: hashContinuistaValue(prepared), profile: DEFAULT_INFERENCE_PROFILE });
+    const db = new DatabaseSync(join(f.host.privateDataRoot, 'world.sqlite'));
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      const epoch = ActorIdentityEpochSchema.parse({ runId: f.runId, actorId: f.actorId, epochIndex: 0, activationCommitIndex: 0,
+        configurationRevision: configuration.configRevision, configurationHash: hashContinuistaValue(configuration), identityVersion: prepared.identityVersion,
+        preparedContextHash: hashContinuistaValue(prepared), createdAt: new Date().toISOString() });
+      db.prepare('INSERT INTO actor_identity_epochs VALUES(?,?,0,?,?)').run(f.runId, f.actorId, canonicalContinuistaValue(epoch), hashContinuistaValue(epoch));
+      for (const [bindingIndex, item] of [earlier, current].entries()) {
+        const binding = { runId: f.runId, actorId: f.actorId, epochIndex: 0, bindingIndex, sessionId: item.manager.getSessionId(), sessionPath: item.path,
+          preparedContextHash: hashContinuistaValue(prepared), profile: DEFAULT_INFERENCE_PROFILE };
+        db.prepare('INSERT INTO actor_identity_session_bindings VALUES(?,?,0,?,?,?,?,?)').run(f.runId, f.actorId, bindingIndex, item.manager.getSessionId(), item.path, canonicalContinuistaValue(binding), hashContinuistaValue(binding));
+      }
+      assert.equal(db.prepare('SELECT count(*) n FROM actor_pi_session_archives').get()?.n, 0);
+      assert.equal(db.prepare('SELECT count(*) n FROM actor_pi_candidates').get()?.n, 0);
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+    } finally { db.close(); }
+    const backupId = randomUUID(); const result = await f.backups.create({ backupId, scope: { kind: 'all' } }); assert.equal(result.state, 'succeeded', result.safeCode ?? '');
+    const bundle = f.backups.verify(backupId);
+    for (const item of [earlier, current]) {
+      const relative = `runs/${f.runId}/actors/${f.actorId}/sessions/${item.path.split('/').at(-1)}`;
+      assert.ok(bundle.manifest.files.some(file => file.path === relative)); assert.deepEqual(readFileSync(join(bundle.bundleRoot, relative)), item.bytes);
+    }
+    unlinkSync(earlier.path); assert.ok(existsSync(current.path));
+    const missing = await f.backups.create({ backupId: randomUUID(), scope: { kind: 'all' } });
+    assert.equal(missing.state, 'failed'); assert.equal(missing.safeCode, 'BACKUP_REGISTERED_SESSION_MISSING'); assert.equal(f.admission.isHeld, false);
   } finally { f.close(); }
 });

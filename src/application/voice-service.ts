@@ -220,8 +220,19 @@ export function openVoiceService(input: {
   let closed = false;
   let stopping = false;
   let admissionsSuspended = 0;
+  const suspendedRuns = new Map<string, number>();
   let shutdownTask: Promise<void> | null = null;
-  const pending = new Set<Promise<VoiceOperation>>();
+  const pending = new Set<Promise<unknown>>();
+  const pendingRuns = new Map<Promise<unknown>, string>();
+  function admissionsBlocked(runId: string) {
+    return stopping || closed || admissionsSuspended > 0 || suspendedRuns.has(runId);
+  }
+  function trackRunWork<T>(runId: string, promise: Promise<T>): Promise<T> {
+    pending.add(promise);
+    pendingRuns.set(promise, runId);
+    void promise.finally(() => { pending.delete(promise); pendingRuns.delete(promise); }).catch(() => {});
+    return promise;
+  }
   const executing = new Set<string>();
   const aborts = new Map<string, AbortController>();
   function transaction<T>(work: () => T): T {
@@ -502,7 +513,7 @@ export function openVoiceService(input: {
     dedupe: string | null = null,
     command: unknown = work,
   ): VoiceOperation {
-    if (stopping || closed || admissionsSuspended > 0)
+    if (admissionsBlocked(click.runId))
       throw new Error("VOICE_SERVICE_STOPPING");
     return transaction(() => {
       const old = replay(click, work.kind, command);
@@ -833,7 +844,7 @@ export function openVoiceService(input: {
   async function executeInternal(id: string): Promise<VoiceOperation> {
     assertOwnership();
     const before = operation(id);
-    if (stopping || closed || admissionsSuspended > 0) return before;
+    if (admissionsBlocked(before.runId)) return before;
     if (before.state !== "queued" || executing.has(id) || active >= concurrency)
       return before;
     executing.add(id);
@@ -1035,10 +1046,7 @@ export function openVoiceService(input: {
     }
   }
   function execute(id: string): Promise<VoiceOperation> {
-    const promise = executeInternal(id);
-    pending.add(promise);
-    void promise.finally(() => pending.delete(promise)).catch(() => {});
-    return promise;
+    return trackRunWork(operation(id).runId, executeInternal(id));
   }
   function opModel(work: Extract<Work, { kind: "tts" | "binding-test" }>) {
     return work.kind === "tts"
@@ -1200,11 +1208,12 @@ export function openVoiceService(input: {
         .min(1)
         .max(1000)
         .parse(options.limit ?? 100);
+      const runIds = [...suspendedRuns.keys()];
       const rows = db
         .prepare(
-          "SELECT id FROM voice_operations WHERE json_extract(data,'$.state')='queued' ORDER BY seq LIMIT ?",
+          `SELECT id FROM voice_operations WHERE json_extract(data,'$.state')='queued' ${runIds.length === 0 ? '' : `AND run_id NOT IN (${runIds.map(() => '?').join(',')})`} ORDER BY seq LIMIT ?`,
         )
-        .all(limit);
+        .all(...runIds, limit);
       const ids = rows
         .map((row) => z.object({ id: z.string() }).parse(row).id)
         .filter((id) => operation(id).state === "queued");
@@ -1384,74 +1393,77 @@ export function openVoiceService(input: {
     },
     async createBindingDraft(clickInput: unknown, requestInput: unknown) {
       const click = clickSchema.parse(clickInput);
-      const req = z
-        .object({
-          owner: VoiceOwnerSchema,
-          source: VoiceSourceSchema,
-          ttsModelId: z.string().min(1),
-        })
-        .strict()
-        .parse(requestInput);
-      const previous = findReceipt(
-        "draft",
-        click.operationId,
-        { click, req },
-        SpeechBindingDraftSchema,
-      );
-      if (previous) return previous;
-      const config = getConfig(click);
-      const variety = requireConfirmedVariety(config);
-      assertOwner(click.runId, req.owner);
-      const saved =
-        req.source.kind === "savedVoice"
-          ? entity("saved", req.source.savedVoiceId, savedSchema)
-          : null;
-      const providerVoiceId =
-        saved?.providerVoiceId ??
-        (req.source.kind === "providerVoice" ? req.source.providerVoiceId : "");
-      const voice = await assertCompatible(providerVoiceId, req.ttsModelId);
-      return receipt(
-        "draft",
-        click.operationId,
-        { click, req },
-        () => {
-          getConfig(click);
-          const draft = SpeechBindingDraftSchema.parse({
-            kind: "unvalidated",
-            bindingDraftId: randomUUID(),
-            owner: req.owner,
-            providerVoiceId,
-            ttsModelId: req.ttsModelId,
-            varietyLabel: variety.label,
-            configRevision: config.revision,
-            source: req.source,
-            provenance: saved
-              ? {
-                  kind: "created-by-this-app",
-                  savedVoiceId: saved.savedVoiceId,
-                  designModelId: saved.designModelId,
-                }
-              : {
-                  kind: "existing-provider-voice-selected",
-                  providerCatalogRef: voiceHash(JSON.stringify(voice)),
-                },
-            voiceSnapshot: VoiceSnapshotSchema.parse({
+      if (admissionsBlocked(click.runId)) throw new Error("VOICE_SERVICE_STOPPING");
+      return trackRunWork(click.runId, (async () => {
+        const req = z
+          .object({
+            owner: VoiceOwnerSchema,
+            source: VoiceSourceSchema,
+            ttsModelId: z.string().min(1),
+          })
+          .strict()
+          .parse(requestInput);
+        const previous = findReceipt(
+          "draft",
+          click.operationId,
+          { click, req },
+          SpeechBindingDraftSchema,
+        );
+        if (previous) return previous;
+        const config = getConfig(click);
+        const variety = requireConfirmedVariety(config);
+        assertOwner(click.runId, req.owner);
+        const saved =
+          req.source.kind === "savedVoice"
+            ? entity("saved", req.source.savedVoiceId, savedSchema)
+            : null;
+        const providerVoiceId =
+          saved?.providerVoiceId ??
+          (req.source.kind === "providerVoice" ? req.source.providerVoiceId : "");
+        const voice = await assertCompatible(providerVoiceId, req.ttsModelId);
+        return receipt(
+          "draft",
+          click.operationId,
+          { click, req },
+          () => {
+            getConfig(click);
+            const draft = SpeechBindingDraftSchema.parse({
+              kind: "unvalidated",
+              bindingDraftId: randomUUID(),
+              owner: req.owner,
               providerVoiceId,
-              name: voice.name,
-              description: voice.description ?? "",
-              language: "es",
-              catalogHash: voiceHash(JSON.stringify(voice)),
-            }),
-          });
-          put("draft", draft.bindingDraftId, { ...draft });
-          put("draft-scope", draft.bindingDraftId, {
-            runId: click.runId,
-            principal: click.principal,
-          });
-          return draft;
-        },
-        SpeechBindingDraftSchema,
-      );
+              ttsModelId: req.ttsModelId,
+              varietyLabel: variety.label,
+              configRevision: config.revision,
+              source: req.source,
+              provenance: saved
+                ? {
+                    kind: "created-by-this-app",
+                    savedVoiceId: saved.savedVoiceId,
+                    designModelId: saved.designModelId,
+                  }
+                : {
+                    kind: "existing-provider-voice-selected",
+                    providerCatalogRef: voiceHash(JSON.stringify(voice)),
+                  },
+              voiceSnapshot: VoiceSnapshotSchema.parse({
+                providerVoiceId,
+                name: voice.name,
+                description: voice.description ?? "",
+                language: "es",
+                catalogHash: voiceHash(JSON.stringify(voice)),
+              }),
+            });
+            put("draft", draft.bindingDraftId, { ...draft });
+            put("draft-scope", draft.bindingDraftId, {
+              runId: click.runId,
+              principal: click.principal,
+            });
+            return draft;
+          },
+          SpeechBindingDraftSchema,
+        );
+      })());
     },
     requestBindingTest(
       clickInput: unknown,
@@ -1806,8 +1818,9 @@ export function openVoiceService(input: {
       );
     },
     async reconcileLocal(id: string, principal: string) {
-      authorizeOperation(id, principal);
-      return await persistStaged(id);
+      const op = authorizeOperation(id, principal);
+      if (admissionsBlocked(op.runId)) throw new Error("VOICE_SERVICE_STOPPING");
+      return trackRunWork(op.runId, persistStaged(id));
     },
     readMedia: media,
     getBinding(id: string) {
@@ -1934,6 +1947,21 @@ export function openVoiceService(input: {
         if (released) return;
         released = true;
         admissionsSuspended--;
+      };
+    },
+    /** Exclusive local admission barrier for one representation. Existing work settles; release never starts a worker. */
+    async suspendRunAdmissions(request: { runId: string }) {
+      const runId = z.string().min(1).parse(request.runId);
+      if (closed || stopping) throw new Error("VOICE_SERVICE_STOPPING");
+      suspendedRuns.set(runId, (suspendedRuns.get(runId) ?? 0) + 1);
+      await Promise.allSettled([...pendingRuns].filter(([, scope]) => scope === runId).map(([promise]) => promise));
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const remaining = (suspendedRuns.get(runId) ?? 1) - 1;
+        if (remaining === 0) suspendedRuns.delete(runId);
+        else suspendedRuns.set(runId, remaining);
       };
     },
     shutdown() {

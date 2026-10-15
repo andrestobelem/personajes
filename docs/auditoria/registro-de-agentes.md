@@ -103,3 +103,18 @@ La raíz integró el launcher, el restore externo y los paneles, verificó el re
 | `actor_cut_integrity_review` | Revisión independiente; detectó duplicados en fence y errores de procedencia/expediente, contrastados y corregidos. |
 
 La raíz preparó la transformación pura de identidad y sus pruebas, integró contratos y documentación y ejecutó la verificación global. No se ejecutó promoción, nueva sesión/epoch ni inferencia del Configurador. [Evidencia y límites](promocion-identidad.md).
+
+## Corte 51 — promoción futura de identidad
+
+- `actor_cut_journal`: journal v39, épocas, archivo de sesiones, claims y promoción atómica; recuperación del mismo claim corregida y verificada.
+- `actor_cut_inspector`: ledger del Configurador, pruebas de sesión/terminal/consentimiento e independencia por ID y ruta entre roles.
+- `fork_backup`: composición de jobs y operaciones HTTP durables, consentimiento y lease de aplicación.
+- `fork_http`: autorización, revisión privada, historial público e invalidación SSE sin datos privados.
+- `restore_ui`: panel de propuestas, diferencias, consentimiento y recuperación de intenciones.
+- `actor_cut_migration_tests`: migraciones, validación externa, evaluación de recovery y backups de todos los bindings históricos.
+- `fork_icm_audit`: roundtrip con SDK Pi e ICM reales; siguiente sesión y memoria conservada; preflight antiguo obsoleto y nuevo preflight verificados con resultados de proveedor controlados.
+- `actor_cut_integrity_review`: revisión independiente; detectó colisión de rutas, reclaim y suspensión global indebida.
+- `audio_integration_review`: suspensión de audio por corrida, drenaje real y preservación de las demás corridas.
+- `restore_custodian`: actualización de especificaciones, ADR y auditoría sin declarar aceptación integral.
+
+Cierre verificado por el integrador: 1.125 pruebas aprobadas, cero fallos, una omitida exclusiva de Linux; build y QA gráfico con reinicio correctos. No se ejecuta inferencia externa para estas pruebas controladas.

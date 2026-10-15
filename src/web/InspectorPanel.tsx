@@ -24,24 +24,27 @@ export function PrivateMindView({view,onMemoryPage}:{view:InspectorView;onMemory
     <h4>Archivo de memoria admitida</h4>{memory.kind==='checkpoint'?<><p>Checkpoint privado del commit {memory.checkpointSource.commitIndex}, registrado {memory.recordedAt}. Archivo de experiencias admitidas; no es una búsqueda semántica de ICM. Se muestran {memory.items.length===0?0:memory.offset+1}–{memory.offset+memory.items.length} de {memory.total}.</p><ol start={memory.offset+1}>{memory.items.map(item=><li key={item.envelope.experienceId}>{item.envelope.content}<small> · {item.envelope.kind} · confianza {item.envelope.confidence} · secuencia causal {item.envelope.worldSeq} · SHA-256 {item.payloadHash}</small></li>)}</ol>{onMemoryPage!==undefined&&<nav aria-label="Páginas de memoria histórica"><button disabled={memory.offset===0} onClick={()=>onMemoryPage(Math.max(0,memory.offset-memory.limit))}>Memoria anterior</button><button disabled={!memory.hasMore} onClick={()=>onMemoryPage(memory.offset+memory.limit)}>Memoria siguiente</button></nav>}</>:<p>{memory.reason==='live-memory-search-not-supported'?'La búsqueda de memoria actual de ICM no está disponible en este inspector. Seleccioná un corte histórico para consultar su archivo, si fue registrado.':'No hay checkpoint privado verificable para este corte. No se consultó la memoria actual ni se reconstruyó el pasado.'}</p>}
   </article>;
 }
-export function InspectorPanel({runId,atWorldSeq,worldRevision,api=client}:{runId:string;atWorldSeq?:number;worldRevision?:number;api?:RunInspectorClient}) {
+export function InspectorPanel({runId,atWorldSeq,worldRevision,api=client,onPermissionChange}:{runId:string;atWorldSeq?:number;worldRevision?:number;api?:RunInspectorClient;onPermissionChange?:(allowed:boolean)=>void}) {
   const [expiresAt,setExpiresAt]=React.useState<number|null>(null);
   const [consent,setConsent]=React.useState(false);const [authorized,setAuthorized]=React.useState(false);const [busy,setBusy]=React.useState(false);
   const [actors,setActors]=React.useState<Array<{characterId:string;label:string}>>([]);const [actor,setActor]=React.useState('');const [view,setView]=React.useState<InspectorView|null>(null);const [error,setError]=React.useState<string|null>(null);const [pending,setPending]=React.useState<InspectorViewIntent|null>(null);
+  const authorizedRun=React.useRef<string|null>(null);
   const lifetime=React.useRef<AbortController|null>(null);const epoch=React.useRef(0);
   React.useEffect(()=>{
     let controller=new AbortController();lifetime.current=controller;
-    const reset=()=>{controller.abort();controller=new AbortController();lifetime.current=controller;epoch.current++;setExpiresAt(null);setConsent(false);setAuthorized(false);setActors([]);setActor('');setView(null);setError(null);setPending(null);setBusy(false);};
+    const reset=()=>{authorizedRun.current=null;controller.abort();controller=new AbortController();lifetime.current=controller;epoch.current++;setExpiresAt(null);setConsent(false);setAuthorized(false);setActors([]);setActor('');setView(null);setError(null);setPending(null);setBusy(false);};
     reset();const unsubscribe=subscribeToHostSessionReset(reset);
     return()=>{unsubscribe();controller.abort();lifetime.current=null;epoch.current++;};
   },[runId]);
+  React.useEffect(()=>{onPermissionChange?.(authorized&&authorizedRun.current===runId);},[authorized,runId,onPermissionChange]);
+  React.useEffect(()=>()=>onPermissionChange?.(false),[runId,onPermissionChange]);
   React.useEffect(()=>{epoch.current++;setView(null);setBusy(false);},[atWorldSeq,worldRevision]);
   React.useEffect(()=>{if(!authorized||expiresAt===null)return;const timer=setTimeout(()=>{epoch.current++;setView(null);setActors([]);setActor('');setAuthorized(false);setBusy(false);setPending(null);setError('La sesión privada venció. Recargá la aplicación para abrir otra sesión.');},Math.max(0,expiresAt-Date.now()));return()=>clearTimeout(timer);},[authorized,expiresAt]);
   async function preference(mode:'stage'|'internal',retry?:InspectorViewIntent) {
     const controller=lifetime.current;if(controller===null||(busy&&mode!=='stage'))return;
     const captured=++epoch.current;
     setView(null);setActors([]);setActor('');setAuthorized(false);setBusy(true);setError(null);
-    try {const intent=retry??await api.intent(runId,mode,controller.signal);if(controller.signal.aborted||captured!==epoch.current)return;setPending(intent);const result=await api.preference(intent,controller.signal);if(controller.signal.aborted||captured!==epoch.current)return;setPending(null);setExpiresAt(intent.expiresAt===undefined?null:Date.parse(intent.expiresAt));setAuthorized(result.mode==='internal');if(result.mode==='internal'){const list=await api.characters(runId,controller.signal);if(controller.signal.aborted||captured!==epoch.current)return;setActors(list.items);}}
+    try {const intent=retry??await api.intent(runId,mode,controller.signal);if(controller.signal.aborted||captured!==epoch.current)return;setPending(intent);const result=await api.preference(intent,controller.signal);if(controller.signal.aborted||captured!==epoch.current)return;setPending(null);setExpiresAt(intent.expiresAt===undefined?null:Date.parse(intent.expiresAt));authorizedRun.current=result.mode==='internal'?runId:null;setAuthorized(result.mode==='internal');if(result.mode==='internal'){const list=await api.characters(runId,controller.signal);if(controller.signal.aborted||captured!==epoch.current)return;setActors(list.items);}}
     catch {if(!controller.signal.aborted&&captured===epoch.current){setAuthorized(false);setActors([]);setActor('');setView(null);setError('No se confirmó la preferencia o la lectura privada. Recuperá la misma operación; los datos privados fueron retirados de la pantalla.');}}
     finally {if(!controller.signal.aborted&&captured===epoch.current)setBusy(false);}
   }

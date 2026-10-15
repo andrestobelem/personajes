@@ -1,3 +1,6 @@
+import { CONFIGURATOR_JOB_SCHEMA_SQL } from './configurator-job-ledger.ts';
+import { IdentityPromotionRequestSchema, IdentityPromotionAuthorityRequestSchema, AcceptedConfiguratorProposalSchema, IdentityPromotionReceiptSchema, IdentityPromotionResultSchema, ActorIdentityEpochSchema, type IdentityPromotionPorts } from '../domain/identity-promotion.ts';
+import { prepareIdentityPromotion, PreparedIdentityPromotionSchema } from '../application/prepare-identity-promotion.ts';
 import { BackupForkSourceSchema, ForkSourceRequestSchema, ForkSourceReadResultSchema } from '../application/fork-source.ts';
 import { ForkJobSchema, ForkJobFailureCodeSchema, ForkArtifactManifestSchema } from '../domain/fork-job.ts';
 import { ForkPublicationPackageSchema } from '../application/fork-package.ts';
@@ -520,7 +523,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1917,6 +1920,21 @@ export function openJournal(input: { path: string }) {
     `); } catch(error) { try {database.exec('ROLLBACK');} catch {/* Atomic migration. */} database.close();throw error; }
   }
 
+  if(!database.prepare('SELECT 1 FROM schema_version WHERE version=39').get()){
+    try{database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE actor_identity_epochs(run_id TEXT NOT NULL REFERENCES world_runs(run_id),actor_id TEXT NOT NULL,epoch_index INTEGER NOT NULL CHECK(epoch_index>=0),payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,PRIMARY KEY(run_id,actor_id,epoch_index));
+      CREATE TABLE actor_identity_session_bindings(run_id TEXT NOT NULL,actor_id TEXT NOT NULL,epoch_index INTEGER NOT NULL,binding_index INTEGER NOT NULL CHECK(binding_index>=0),session_id TEXT NOT NULL UNIQUE,session_path TEXT NOT NULL UNIQUE,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,PRIMARY KEY(run_id,actor_id,epoch_index,binding_index),FOREIGN KEY(run_id,actor_id,epoch_index) REFERENCES actor_identity_epochs(run_id,actor_id,epoch_index));
+      CREATE TABLE actor_pi_session_archives(run_id TEXT NOT NULL,actor_id TEXT NOT NULL,epoch_index INTEGER NOT NULL,session_id TEXT NOT NULL UNIQUE,session_path TEXT NOT NULL UNIQUE,row_json TEXT NOT NULL,row_hash TEXT NOT NULL,PRIMARY KEY(run_id,actor_id,epoch_index),FOREIGN KEY(run_id,actor_id,epoch_index) REFERENCES actor_identity_epochs(run_id,actor_id,epoch_index));
+      CREATE TABLE actor_job_identity_bindings(run_id TEXT NOT NULL,actor_id TEXT NOT NULL,job_id TEXT NOT NULL,generation INTEGER NOT NULL,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,PRIMARY KEY(run_id,actor_id,job_id,generation),FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation));
+      CREATE TABLE identity_promotion_receipts(principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,operation_id TEXT NOT NULL UNIQUE,run_id TEXT NOT NULL REFERENCES world_runs(run_id),actor_id TEXT NOT NULL,request_json TEXT NOT NULL,request_hash TEXT NOT NULL,plan_json TEXT NOT NULL,plan_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,receipt_hash TEXT NOT NULL,PRIMARY KEY(principal_id,idempotency_key));
+    `);
+    database.exec(CONFIGURATOR_JOB_SCHEMA_SQL);
+    for(const table of ['actor_identity_epochs','actor_identity_session_bindings','actor_pi_session_archives','actor_job_identity_bindings','identity_promotion_receipts'])database.exec(`CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT,'IDENTITY_HISTORY_APPEND_ONLY');END;CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT,'IDENTITY_HISTORY_APPEND_ONLY');END;`);
+    database.exec('INSERT INTO schema_version VALUES(39);COMMIT');
+    }catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+  let identityPromotionPorts:IdentityPromotionPorts|undefined;
+
   const pendingInitialActorCuts = new Set<string>();
   const ActorStateCutManifestSchema = z.strictObject({
     source: ActorStateCutSchema.shape.source,
@@ -2361,6 +2379,86 @@ export function openJournal(input: { path: string }) {
     return appendForkJob(ForkJobSchema.parse({...job,state:'ready',revision:job.revision+1,updatedAt:Date.now(),publishedAt:Date.now()}));
   });}
 
+  function identityPromotionRecord(value:unknown){
+    const row=z.strictObject({principal_id:z.string(),idempotency_key:z.string().uuid(),operation_id:z.string().uuid(),run_id:RunIdSchema,actor_id:CharacterIdSchema,request_json:z.string(),request_hash:HashSchema,plan_json:z.string(),plan_hash:HashSchema,receipt_json:z.string(),receipt_hash:HashSchema}).parse(value);
+    const request=IdentityPromotionRequestSchema.parse(parseStoredJson(row.request_json));const plan=PreparedIdentityPromotionSchema.parse(parseStoredJson(row.plan_json));const receipt=IdentityPromotionReceiptSchema.parse(parseStoredJson(row.receipt_json));
+    if(canonicalJson(request)!==row.request_json||sha256(row.request_json)!==row.request_hash||canonicalJson(plan)!==row.plan_json||sha256(row.plan_json)!==row.plan_hash||canonicalJson(receipt)!==row.receipt_json||sha256(row.receipt_json)!==row.receipt_hash
+      ||request.principalId!==row.principal_id||request.idempotencyKey!==row.idempotency_key||request.approval.operationId!==row.operation_id||receipt.operationId!==row.operation_id||receipt.principalId!==row.principal_id||receipt.actorId!==row.actor_id||receipt.source.runId!==row.run_id||receipt.target.runId!==row.run_id
+      ||hashJson(plan.promotion.source).hash!==hashJson(receipt.source).hash||hashJson(request.context).hash!==receipt.contextHash||hashJson(request.proposal).hash!==receipt.proposalHash||hashJson(request.approval).hash!==hashJson(receipt.approval).hash
+      ||plan.configuration.configRevision!==receipt.target.configurationRevision||hashJson(plan.configuration).hash!==receipt.target.configurationHash||hashJson(plan.snapshot).hash!==receipt.target.snapshotHash||plan.nextCommitIndex!==receipt.target.commitIndex
+      ||plan.promotion.characterId!==receipt.actorId||plan.promotion.identityVersion!==receipt.identityVersion||plan.promotion.previousIdentityVersion!==receipt.previousIdentityVersion||receipt.authority.contextHash!==receipt.contextHash||receipt.authority.proposalHash!==receipt.proposalHash||receipt.authority.approvalHash!==hashJson(receipt.approval).hash||receipt.authority.principalId!==receipt.principalId||receipt.authority.actorId!==receipt.actorId||receipt.authority.runId!==row.run_id)throw new Error('IDENTITY_PROMOTION_RECEIPT_INVALID');
+    return {row,request,plan,receipt};
+  }
+  function assertIdentityPromotionIdle(run:ReturnType<typeof parseWorldRun>){
+    if(!['ready','paused','stopped'].includes(run.row.lifecycle))throw new Error('IDENTITY_PROMOTION_LIFECYCLE_INVALID');
+    const scope=run.row.run_id;
+    const checks=[
+      "SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND state IN('queued','running') LIMIT 1",
+      "SELECT 1 FROM continuista_jobs WHERE run_id=? AND state IN('queued','running') LIMIT 1",
+      "SELECT 1 FROM administrative_jobs WHERE run_id=? AND state='running' LIMIT 1",
+      "SELECT 1 FROM world_proposals WHERE run_id=? AND status='pending' LIMIT 1",
+      "SELECT 1 FROM actor_pi_candidates c LEFT JOIN actor_pi_turn_receipts r ON r.candidate_id=c.candidate_id WHERE c.run_id=? AND c.candidate_kind='terminal-candidate' AND c.outcome='completed' AND r.candidate_id IS NULL LIMIT 1",
+      "SELECT 1 FROM request_reservations WHERE run_id=? AND state IN('reserved','dispatched','ambiguous') LIMIT 1",
+      "SELECT 1 FROM model_time_spans WHERE run_id=? AND state IN('reserved','running','expired','uncertain') LIMIT 1",
+      "SELECT 1 FROM run_step_jobs WHERE run_id=? AND state IN('queued','running') LIMIT 1",
+      "SELECT 1 FROM coordinator_pulses WHERE run_id=? AND state='running' LIMIT 1",
+      "SELECT 1 FROM run_preflight_jobs WHERE run_id=? AND state IN('queued','running','cancel-requested') LIMIT 1",
+      "SELECT 1 FROM actor_activation_causes WHERE run_id=? AND state IN('pending','running') LIMIT 1",
+      "SELECT 1 FROM actor_activation_invitations WHERE run_id=? AND state IN('pending','assigned') LIMIT 1",
+      "SELECT 1 FROM world_deliveries d JOIN world_perceptions p ON p.perception_id=d.perception_id WHERE p.run_id=? AND d.state<>'delivered' LIMIT 1",
+      "SELECT 1 FROM memory_outbox o JOIN experiences e ON e.experience_id=o.experience_id WHERE e.run_id=? LIMIT 1",
+    ];
+    for(const sql of checks)if(database.prepare(sql).get(scope)!==undefined)throw new Error('IDENTITY_PROMOTION_WORK_PENDING');
+    if(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='configurator_jobs'").get()!==undefined
+      &&database.prepare("SELECT 1 FROM configurator_jobs WHERE run_id=? AND json_extract(payload_json,'$.job.state') IN('queued','running') LIMIT 1").get(scope)!==undefined)throw new Error('IDENTITY_PROMOTION_WORK_PENDING');
+  }
+  function appendConfigurationRevision(runId:z.infer<typeof RunIdSchema>,commit:number,revision:number,configurationJson:string,fenceJson:string,snapshotHash:z.infer<typeof HashSchema>){
+    const record={run_id:runId,effective_commit_index:commit,configuration_revision:revision,configuration_json:configurationJson,configuration_hash:sha256(configurationJson),continuity_fence_json:fenceJson,continuity_fence_hash:sha256(fenceJson),activation_snapshot_hash:snapshotHash};
+    database.prepare('INSERT INTO run_configuration_revisions VALUES(?,?,?,?,?,?,?,?,?)').run(runId,commit,revision,configurationJson,record.configuration_hash,fenceJson,record.continuity_fence_hash,snapshotHash,hashJson(record).hash);
+  }
+  function applyIdentityPromotion(input:unknown):z.infer<typeof IdentityPromotionResultSchema>{
+    const request=IdentityPromotionRequestSchema.parse(input);const payload=hashJson(request);
+    return transact(()=>{
+      const previous=database.prepare('SELECT * FROM identity_promotion_receipts WHERE principal_id=? AND idempotency_key=?').get(request.principalId,request.idempotencyKey);
+      if(previous!==undefined){const stored=identityPromotionRecord(previous);if(stored.row.request_hash!==payload.hash)throw new Error('IDENTITY_PROMOTION_IDEMPOTENCY_REUSE');return {kind:'existing',receipt:stored.receipt};}
+      if(identityPromotionPorts===undefined)throw new Error('IDENTITY_PROMOTION_AUTHORITY_UNCONFIGURED');
+      if(request.context.scope.kind!=='evolution'||request.proposal.kind!=='identity-promotion-proposal')throw new Error('IDENTITY_PROMOTION_EVOLUTION_REQUIRED');
+      if(request.approval.operatorId!==request.principalId)throw new Error('IDENTITY_PROMOTION_PRINCIPAL_MISMATCH');
+      const anchor=request.context.scope.anchor.source;const actorId=request.context.target.characterId;
+      const run=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(anchor.runId));
+      if(run.row.lifecycle_revision!==request.expectedLifecycleRevision||run.row.commit_index!==request.expectedCommitIndex||run.row.world_revision!==request.expectedWorldRevision||anchor.commitIndex!==run.row.commit_index||anchor.worldRevision!==run.row.world_revision||anchor.worldSeq!==run.row.last_seq||anchor.configurationHash!==run.row.configuration_hash||anchor.configurationRevision!==run.row.config_revision||request.context.scope.scope.lifecycleRevision!==run.row.lifecycle_revision)throw new Error('IDENTITY_PROMOTION_STALE');
+      assertIdentityPromotionIdle(run);identityPromotionPorts.assertIdentityPromotionRuntimeIdle({runId:anchor.runId});
+      const source=readForkSourceWithinTransaction({runId:anchor.runId,commitIndex:anchor.commitIndex,worldRevision:anchor.worldRevision,worldSeq:anchor.worldSeq});if(source.kind!=='found')throw new Error('IDENTITY_PROMOTION_SOURCE_UNAVAILABLE');
+      const plan=prepareIdentityPromotion({source,context:request.context,proposal:request.proposal,approval:request.approval});
+      const authorizationRequest=IdentityPromotionAuthorityRequestSchema.parse({principalId:request.principalId,runId:anchor.runId,actorId,contextHash:hashJson(request.context).hash,proposalHash:hashJson(request.proposal).hash,approvalHash:hashJson(request.approval).hash,approval:request.approval});
+      const authority=AcceptedConfiguratorProposalSchema.parse(identityPromotionPorts.requireAcceptedConfiguratorProposal(authorizationRequest));
+      const proof=AcceptedConfiguratorProposalSchema.omit({kind:true,jobId:true,candidateHash:true}).strip().parse(authority);const expectedProof=IdentityPromotionAuthorityRequestSchema.omit({approval:true}).strip().parse(authorizationRequest);
+      if(canonicalJson(proof)!==canonicalJson(expectedProof))throw new Error('IDENTITY_PROMOTION_AUTHORITY_MISMATCH');
+      const recordedAt=new Date().toISOString();
+      const original=configurationAtCommit(run,0);const originalConfiguration=ReadyRunConfigurationSchema.parse(original.configuration);
+      for(const originalPrepared of originalConfiguration.roster.preparedCharacters){
+        if(identityEpochs(run,originalPrepared.characterId).length>0)continue;
+        const legacySession=currentActorSession(run,originalPrepared.characterId);
+        const baseline=ActorIdentityEpochSchema.parse({runId:anchor.runId,actorId:originalPrepared.characterId,epochIndex:0,activationCommitIndex:0,configurationRevision:original.configurationRevision,configurationHash:original.configurationHash,identityVersion:originalPrepared.identityVersion,preparedContextHash:hashJson(originalPrepared).hash,createdAt:recordedAt});
+        storeIdentityEpoch(baseline);if(legacySession!==undefined)bindIdentitySession(baseline,legacySession);
+      }
+      const active=identityEpochs(run,actorId).at(-1);if(active===undefined||active.identityVersion!==plan.promotion.previousIdentityVersion||active.preparedContextHash!==plan.promotion.sourcePreparedHash)throw new Error('IDENTITY_PROMOTION_EPOCH_DIVERGED');
+      const session=currentActorSession(run,actorId);
+      if(session!==undefined){const row=ActorPiSessionRowSchema.parse(database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(anchor.runId,actorId));const archived=hashJson(row);database.prepare('INSERT INTO actor_pi_session_archives VALUES(?,?,?,?,?,?,?)').run(anchor.runId,actorId,active.epochIndex,row.session_id,row.session_path,archived.json,archived.hash);}
+      if(database.prepare('SELECT 1 FROM run_configuration_revisions WHERE run_id=? LIMIT 1').get(anchor.runId)===undefined)appendConfigurationRevision(anchor.runId,0,run.row.config_revision,run.row.configuration_json,run.row.continuity_fence_json,run.row.initial_snapshot_hash);
+      const configuration=hashJson(plan.configuration);const snapshot=hashJson(plan.snapshot);const fence=hashJson(plan.continuityFence);const now=Date.now();
+      database.prepare('INSERT INTO world_commits(run_id,commit_index,origin_kind,origin_id,world_revision,last_seq,snapshot_json,snapshot_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(anchor.runId,plan.nextCommitIndex,'identityPromotion',request.approval.operationId,plan.snapshot.revision,plan.snapshot.seq,snapshot.json,snapshot.hash,now);
+      appendConfigurationRevision(anchor.runId,plan.nextCommitIndex,plan.configuration.configRevision,configuration.json,fence.json,snapshot.hash);
+      database.prepare('UPDATE world_runs SET config_revision=?,configuration_json=?,configuration_hash=?,continuity_fence_json=?,world_revision=?,commit_index=?,snapshot_json=?,snapshot_hash=?,lifecycle_revision=lifecycle_revision+1,updated_at=? WHERE run_id=?').run(plan.configuration.configRevision,configuration.json,configuration.hash,fence.json,plan.snapshot.revision,plan.nextCommitIndex,snapshot.json,snapshot.hash,now,anchor.runId);
+      database.prepare('DELETE FROM world_prepared_contexts WHERE run_id=?').run(anchor.runId);for(const context of plan.continuityFence.contexts)database.prepare('INSERT INTO world_prepared_contexts VALUES(?,?,?,?,?,?)').run(anchor.runId,context.actorId,plan.configuration.configRevision,context.continuityId,context.identityVersion,context.preparedContextHash);
+      const nextEpoch=ActorIdentityEpochSchema.parse({runId:anchor.runId,actorId,epochIndex:active.epochIndex+1,activationCommitIndex:plan.nextCommitIndex,configurationRevision:plan.configuration.configRevision,configurationHash:configuration.hash,identityVersion:plan.promotion.identityVersion,preparedContextHash:plan.promotion.preparedHash,createdAt:recordedAt});storeIdentityEpoch(nextEpoch);
+      const target={runId:anchor.runId,commitIndex:plan.nextCommitIndex,worldRevision:plan.snapshot.revision,worldSeq:plan.snapshot.seq,snapshotHash:snapshot.hash,configurationRevision:plan.configuration.configRevision,configurationHash:configuration.hash};
+      const receipt=IdentityPromotionReceiptSchema.parse({kind:'identity-promotion-receipt',operationId:request.approval.operationId,principalId:request.principalId,actorId,source:anchor,target,previousIdentityVersion:plan.promotion.previousIdentityVersion,identityVersion:plan.promotion.identityVersion,epochIndex:nextEpoch.epochIndex,lifecycleRevision:run.row.lifecycle_revision+1,contextHash:authorizationRequest.contextHash,proposalHash:authorizationRequest.proposalHash,approval:request.approval,authority,recordedAt});const receiptPayload=hashJson(receipt);const planPayload=hashJson(plan);
+      database.prepare('INSERT INTO identity_promotion_receipts VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(request.principalId,request.idempotencyKey,request.approval.operationId,anchor.runId,actorId,payload.json,payload.hash,planPayload.json,planPayload.hash,receiptPayload.json,receiptPayload.hash);
+      return {kind:'applied',receipt};
+    });
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -2386,6 +2484,21 @@ export function openJournal(input: { path: string }) {
     if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json||payload.draft.runId!==row.run_id||payload.draft.revision!==row.revision
       ||payload.principalId!==row.principal_id||payload.recordedAt!==row.recorded_at)throw new Error('Hash/metadatos de borrador durable no coinciden');
     return RunDraftHistoryEntrySchema.parse({...payload,payloadHash:row.payload_hash});
+  }
+  function identityPromotedConfiguration(runId:z.infer<typeof RunIdSchema>){return database.prepare('SELECT 1 FROM run_configuration_revisions WHERE run_id=? AND effective_commit_index>0 LIMIT 1').get(runId)!==undefined;}
+  function effectiveRunDraftView(entry:ReturnType<typeof runDraftHistoryEntry>){
+    if(!identityPromotedConfiguration(entry.draft.runId))return entry.draft;
+    const run=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(entry.draft.runId));
+    const configuration=ReadyRunConfigurationSchema.parse(configurationAtCommit(run,run.row.commit_index).configuration);
+    const latest=database.prepare('SELECT * FROM identity_promotion_receipts WHERE run_id=? ORDER BY rowid DESC LIMIT 1').get(entry.draft.runId);
+    const receipt=latest===undefined?undefined:identityPromotionRecord(latest).receipt;
+    const evidence={kind:'host-derived',derivationRef:receipt===undefined?`configuration-cut:${entry.draft.runId}:${configuration.configRevision}`:`identity-promotion:${receipt.operationId}`,recordedAt:receipt?.recordedAt??entry.recordedAt};
+    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+    const changes=Object.fromEntries(fields.flatMap(field=>{
+      const value=configuration[field];const old=entry.draft[field];if(value===undefined||(old?.kind==='configured'&&hashJson(old.value).hash===hashJson(value).hash))return [];
+      return [[field,{kind:'configured',value,evidence}]];
+    }));
+    return RunConfigurationDraftSchema.parse({...entry.draft,...changes});
   }
   function readRunDraft(input:z.infer<typeof RunDraftReadSchema>){
     const row=input.revision===undefined
@@ -2908,8 +3021,8 @@ export function openJournal(input: { path: string }) {
     if (claimedActorJob(execution) === undefined) throw new Error('Claim de perfil actoral inactivo');
     const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(execution.runId));
     const selected = runInferenceProfile(run);
-    const sessionValue = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(execution.runId, execution.actorId);
-    if (sessionValue !== undefined && canonicalJson(resolveStoredPiProfile(actorSessionBase(sessionValue).profile)) !== canonicalJson(selected)) throw new Error('Perfil actoral registrado distinto de la configuración del claim');
+    const sessionValue = currentActorSession(run,execution.actorId);
+    if (sessionValue !== undefined && canonicalJson(resolveStoredPiProfile(sessionValue.profile)) !== canonicalJson(selected)) throw new Error('Perfil actoral registrado distinto de la configuración del claim');
     return selected;
   }
 
@@ -3019,6 +3132,97 @@ export function openJournal(input: { path: string }) {
       && review.evidenceRefs.length > 0;
   }
 
+  const IdentityBindingSchema=z.strictObject({runId:RunIdSchema,actorId:CharacterIdSchema,epochIndex:RevisionSchema,bindingIndex:RevisionSchema,sessionId:z.string().min(1),sessionPath:z.string().min(1),preparedContextHash:HashSchema,profile:ActorSessionProfileSchema});
+  const JobIdentityBindingSchema=z.strictObject({runId:RunIdSchema,actorId:CharacterIdSchema,jobId:JobIdSchema,generation:RevisionSchema,epochIndex:RevisionSchema,configurationRevision:RevisionSchema,configurationHash:HashSchema,preparedContextHash:HashSchema,commitIndex:RevisionSchema,lifecycleRevision:RevisionSchema});
+  function identityEpochs(run:ReturnType<typeof parseWorldRun>,actorId:z.infer<typeof CharacterIdSchema>){
+    let previous:z.infer<typeof ActorIdentityEpochSchema>|undefined;
+    const values=database.prepare('SELECT * FROM actor_identity_epochs WHERE run_id=? AND actor_id=? ORDER BY epoch_index').all(run.row.run_id,actorId);
+    if(values.length===0&&database.prepare('SELECT 1 FROM identity_promotion_receipts WHERE run_id=? LIMIT 1').get(run.row.run_id)!==undefined
+      &&ReadyRunConfigurationSchema.parse(run.configuration).roster.preparedCharacters.some(actor=>actor.characterId===actorId))throw new Error('IDENTITY_EPOCH_MISSING');
+    return values.map((value,index)=>{
+      const row=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,epoch_index:RevisionSchema,payload_json:z.string(),payload_hash:HashSchema}).parse(value);
+      const epoch=ActorIdentityEpochSchema.parse(parseStoredJson(row.payload_json));
+      if(canonicalJson(epoch)!==row.payload_json||sha256(row.payload_json)!==row.payload_hash||epoch.runId!==row.run_id||epoch.actorId!==row.actor_id||epoch.epochIndex!==row.epoch_index||epoch.epochIndex!==index
+        ||(previous===undefined?epoch.activationCommitIndex!==0:epoch.activationCommitIndex<=previous.activationCommitIndex||epoch.identityVersion!==previous.identityVersion+1))throw new Error('IDENTITY_EPOCH_INVALID');
+      const configuration=configurationAtCommit(run,epoch.activationCommitIndex);const ready=ReadyRunConfigurationSchema.parse(configuration.configuration);const actor=ready.roster.preparedCharacters.find(actor=>actor.characterId===actorId);
+      if(configuration.effectiveCommitIndex!==epoch.activationCommitIndex||configuration.configurationRevision!==epoch.configurationRevision||configuration.configurationHash!==epoch.configurationHash||actor===undefined||actor.identityVersion!==epoch.identityVersion||hashJson(actor).hash!==epoch.preparedContextHash)throw new Error('IDENTITY_EPOCH_SOURCE_INVALID');
+      previous=epoch;return epoch;
+    });
+  }
+  function identityBinding(epoch:z.infer<typeof ActorIdentityEpochSchema>){
+    const values=database.prepare('SELECT * FROM actor_identity_session_bindings WHERE run_id=? AND actor_id=? AND epoch_index=? ORDER BY binding_index').all(epoch.runId,epoch.actorId,epoch.epochIndex);
+    return values.map((value,index)=>{
+      const row=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,epoch_index:RevisionSchema,binding_index:RevisionSchema,session_id:z.string(),session_path:z.string(),payload_json:z.string(),payload_hash:HashSchema}).parse(value);
+      const binding=IdentityBindingSchema.parse(parseStoredJson(row.payload_json));
+      if(canonicalJson(binding)!==row.payload_json||sha256(row.payload_json)!==row.payload_hash||binding.runId!==epoch.runId||binding.actorId!==epoch.actorId||binding.epochIndex!==epoch.epochIndex||row.run_id!==binding.runId||row.actor_id!==binding.actorId||row.epoch_index!==binding.epochIndex||row.binding_index!==binding.bindingIndex||binding.bindingIndex!==index||row.session_id!==binding.sessionId||row.session_path!==binding.sessionPath||binding.preparedContextHash!==epoch.preparedContextHash)throw new Error('IDENTITY_SESSION_BINDING_INVALID');
+      return binding;
+    }).at(-1);
+  }
+  function archivedIdentitySession(epoch:z.infer<typeof ActorIdentityEpochSchema>){
+    const value=database.prepare('SELECT * FROM actor_pi_session_archives WHERE run_id=? AND actor_id=? AND epoch_index=?').get(epoch.runId,epoch.actorId,epoch.epochIndex);const binding=identityBinding(epoch);
+    if(value===undefined){if(binding!==undefined)throw new Error('IDENTITY_SESSION_ARCHIVE_MISSING');return undefined;}
+    const row=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,epoch_index:RevisionSchema,session_id:z.string(),session_path:z.string(),row_json:z.string(),row_hash:HashSchema}).parse(value);
+    const head=ActorPiSessionRowSchema.parse(parseStoredJson(row.row_json));const base=actorSessionBase(head);
+    if(binding===undefined||canonicalJson(head)!==row.row_json||sha256(row.row_json)!==row.row_hash||head.run_id!==epoch.runId||head.actor_id!==epoch.actorId||row.run_id!==epoch.runId||row.actor_id!==epoch.actorId||row.epoch_index!==epoch.epochIndex||row.session_id!==base.sessionId||row.session_path!==base.sessionPath||base.sessionId!==binding.sessionId||base.sessionPath!==binding.sessionPath||base.preparedContextHash!==binding.preparedContextHash||canonicalJson(base.profile)!==canonicalJson(binding.profile))throw new Error('IDENTITY_SESSION_ARCHIVE_INVALID');
+    return {row:head,base};
+  }
+  function currentActorSession(run:ReturnType<typeof parseWorldRun>,actorId:z.infer<typeof CharacterIdSchema>){
+    const value=database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(run.row.run_id,actorId);
+    const epochs=identityEpochs(run,actorId);const active=epochs.at(-1);
+    if(active===undefined){
+      if(database.prepare('SELECT 1 FROM identity_promotion_receipts WHERE run_id=? AND actor_id=? LIMIT 1').get(run.row.run_id,actorId)!==undefined)throw new Error('IDENTITY_EPOCH_MISSING');
+      if(value===undefined)return undefined;const base=actorSessionBase(value);const context=run.fence.contexts.find(context=>context.actorId===actorId);
+      if(context===undefined||context.preparedContextHash!==base.preparedContextHash||canonicalJson(resolveStoredPiProfile(base.profile))!==canonicalJson(runInferenceProfile(run)))throw new Error('IDENTITY_LEGACY_HEAD_INVALID');
+      return base;
+    }
+    const prepared=ReadyRunConfigurationSchema.parse(run.configuration).roster.preparedCharacters.find(actor=>actor.characterId===actorId);
+    if(prepared===undefined||hashJson(prepared).hash!==active.preparedContextHash||prepared.identityVersion!==active.identityVersion)throw new Error('IDENTITY_EPOCH_HEAD_DIVERGED');
+    let finalArchive:ReturnType<typeof archivedIdentitySession>;
+    for(const epoch of epochs.slice(0,-1)){const archive=archivedIdentitySession(epoch);if(archive!==undefined)finalArchive=archive;}
+    const binding=identityBinding(active);
+    if(binding===undefined){
+      if(value!==undefined&&(finalArchive===undefined||canonicalJson(ActorPiSessionRowSchema.parse(value))!==canonicalJson(finalArchive.row)))throw new Error('IDENTITY_RESERVED_HEAD_INVALID');
+      if(value===undefined&&finalArchive!==undefined)throw new Error('IDENTITY_RESERVED_HEAD_MISSING');
+      if(database.prepare('SELECT 1 FROM actor_pi_session_archives WHERE run_id=? AND actor_id=? AND epoch_index=?').get(active.runId,active.actorId,active.epochIndex))throw new Error('IDENTITY_RESERVED_ARCHIVE_INVALID');
+      return undefined;
+    }
+    if(value===undefined)throw new Error('IDENTITY_ACTIVE_SESSION_MISSING');const base=actorSessionBase(value);
+    if(base.sessionId!==binding.sessionId||base.sessionPath!==binding.sessionPath||base.preparedContextHash!==binding.preparedContextHash||canonicalJson(base.profile)!==canonicalJson(binding.profile))throw new Error('IDENTITY_ACTIVE_SESSION_INVALID');
+    if(database.prepare('SELECT 1 FROM actor_pi_session_archives WHERE run_id=? AND actor_id=? AND epoch_index=?').get(active.runId,active.actorId,active.epochIndex))throw new Error('IDENTITY_ACTIVE_ARCHIVE_INVALID');
+    return base;
+  }
+  function bindIdentitySession(epoch:z.infer<typeof ActorIdentityEpochSchema>,session:z.infer<typeof ActorSessionBaseSchema>){
+    if(session.preparedContextHash!==epoch.preparedContextHash)throw new Error('IDENTITY_SESSION_PREPARATION_INVALID');
+    const previous=identityBinding(epoch);const binding=IdentityBindingSchema.parse({runId:epoch.runId,actorId:epoch.actorId,epochIndex:epoch.epochIndex,bindingIndex:previous===undefined?0:previous.bindingIndex+1,sessionId:session.sessionId,sessionPath:session.sessionPath,preparedContextHash:session.preparedContextHash,profile:session.profile});const payload=hashJson(binding);
+    database.prepare('INSERT INTO actor_identity_session_bindings VALUES(?,?,?,?,?,?,?,?)').run(epoch.runId,epoch.actorId,epoch.epochIndex,binding.bindingIndex,session.sessionId,session.sessionPath,payload.json,payload.hash);
+  }
+  function storeIdentityEpoch(epoch:z.infer<typeof ActorIdentityEpochSchema>){const payload=hashJson(epoch);database.prepare('INSERT INTO actor_identity_epochs VALUES(?,?,?,?,?)').run(epoch.runId,epoch.actorId,epoch.epochIndex,payload.json,payload.hash);}
+  function assertIndependentSession(sessionId:string,sessionPath:string){
+    if(database.prepare(`SELECT 1 FROM actor_pi_sessions WHERE session_id=? OR session_path=?
+      UNION ALL SELECT 1 FROM actor_pi_session_archives WHERE session_id=? OR session_path=?
+      UNION ALL SELECT 1 FROM actor_identity_session_bindings WHERE session_id=? OR session_path=?
+      UNION ALL SELECT 1 FROM continuista_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=?
+      UNION ALL SELECT 1 FROM administrative_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=? LIMIT 1`)
+      .get(sessionId,sessionPath,sessionId,sessionPath,sessionId,sessionPath,sessionId,sessionPath,sessionId,sessionPath)!==undefined
+      ||database.prepare("SELECT 1 FROM configurator_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR session_path=? LIMIT 1").get(sessionId,sessionPath)!==undefined)throw new Error('IDENTITY_SESSION_NOT_INDEPENDENT');
+  }
+  function assertJobIdentityBinding(job:z.infer<typeof ActorTurnJobDbRowSchema>,run:ReturnType<typeof parseWorldRun>){
+    const epoch=identityEpochs(run,job.actor_id).at(-1);if(epoch===undefined)return;
+    const value=database.prepare('SELECT payload_json,payload_hash FROM actor_job_identity_bindings WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?').get(job.run_id,job.actor_id,job.job_id,job.generation);
+    if(value===undefined)throw new Error('IDENTITY_JOB_BINDING_MISSING');const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(value);const binding=JobIdentityBindingSchema.parse(parseStoredJson(row.payload_json));
+    if(canonicalJson(binding)!==row.payload_json||sha256(row.payload_json)!==row.payload_hash||binding.runId!==job.run_id||binding.actorId!==job.actor_id||binding.jobId!==job.job_id||binding.generation!==job.generation||binding.epochIndex!==epoch.epochIndex||binding.configurationRevision!==run.row.config_revision||binding.configurationHash!==run.row.configuration_hash||binding.preparedContextHash!==epoch.preparedContextHash||binding.lifecycleRevision!==run.row.lifecycle_revision)throw new Error('IDENTITY_JOB_BINDING_STALE');
+    const cut=frozenActorTurnWorldCut(job);const exact=snapshotAtExactConfigurationCommit(run,binding.commitIndex);const configuration=configurationAtCommit(run,binding.commitIndex);
+    if(cut===null||exact.snapshot.revision!==cut.worldRevision||exact.snapshot.seq!==cut.worldSeq||exact.snapshot.clock.instant!==cut.fictionalAt||epoch.activationCommitIndex>binding.commitIndex||configuration.configurationRevision!==binding.configurationRevision||configuration.configurationHash!==binding.configurationHash)throw new Error('IDENTITY_JOB_BINDING_CUT_INVALID');
+  }
+  function bindClaimedIdentityJob(job:z.infer<typeof ActorTurnJobDbRowSchema>,run:ReturnType<typeof parseWorldRun>){
+    const epoch=identityEpochs(run,job.actor_id).at(-1);if(epoch===undefined)return;
+    if(database.prepare('SELECT 1 FROM actor_job_identity_bindings WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?').get(job.run_id,job.actor_id,job.job_id,job.generation)!==undefined){assertJobIdentityBinding(job,run);return;}
+    const cut=frozenActorTurnWorldCut(job);const exact=cut===null?undefined:snapshotAndCommitAtCut(run,cut.worldRevision,cut.worldSeq);if(exact===undefined||exact.snapshot.clock.instant!==cut?.fictionalAt)throw new Error('IDENTITY_JOB_BINDING_CUT_INVALID');
+    const configuration=configurationAtCommit(run,exact.commitIndex);if(configuration.configurationHash!==run.row.configuration_hash||configuration.configurationRevision!==run.row.config_revision||epoch.activationCommitIndex>exact.commitIndex)throw new Error('IDENTITY_JOB_BINDING_STALE');
+    const payload=hashJson(JobIdentityBindingSchema.parse({runId:job.run_id,actorId:job.actor_id,jobId:job.job_id,generation:job.generation,epochIndex:epoch.epochIndex,configurationRevision:run.row.config_revision,configurationHash:run.row.configuration_hash,preparedContextHash:epoch.preparedContextHash,commitIndex:exact.commitIndex,lifecycleRevision:run.row.lifecycle_revision}));
+    database.prepare('INSERT INTO actor_job_identity_bindings VALUES(?,?,?,?,?,?)').run(job.run_id,job.actor_id,job.job_id,job.generation,payload.json,payload.hash);
+  }
+
   function actorSessionBase(rowValue: unknown): z.infer<typeof ActorSessionBaseSchema> {
     const row = ActorPiSessionRowSchema.parse(rowValue);
     const profile = ActorSessionProfileSchema.parse(parseStoredJson(row.profile_json));
@@ -3113,22 +3317,17 @@ export function openJournal(input: { path: string }) {
   }
 
   function verifyCandidateBase(candidate: z.infer<typeof ActorPiCandidateSchema>): void {
-    const rowValue = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-      .get(candidate.runId, candidate.actorId);
-    if (rowValue === undefined) throw new Error('La sesión Pi del actor no está registrada');
-    const row = ActorPiSessionRowSchema.parse(rowValue);
-    const base = actorSessionBase(rowValue);
+    const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(candidate.runId);
+    if (runValue === undefined) throw new Error('Corrida del candidato Pi ausente');
+    const run = parseWorldRun(runValue);const base=currentActorSession(run,candidate.actorId);
+    if(base===undefined)throw new Error('La sesión Pi del actor no está registrada');
     if (base.sessionId !== candidate.base.sessionId || base.sessionPath !== candidate.base.sessionPath
       || base.preparedContextHash !== candidate.base.preparedContextHash
       || canonicalJson(base.profile) !== canonicalJson(candidate.base.profile)
       || base.sessionRevision !== candidate.base.sessionRevision
-      || base.committedLeafId !== candidate.base.committedLeafId
-      || row.actor_id !== candidate.actorId) {
+      || base.committedLeafId !== candidate.base.committedLeafId) {
       throw new Error('El candidato Pi parte de un checkpoint distinto del aceptado por el host');
     }
-    const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(candidate.runId);
-    if (runValue === undefined) throw new Error('Corrida del candidato Pi ausente');
-    const run = parseWorldRun(runValue);
     const context = run.fence.contexts.find((item) => item.actorId === candidate.actorId);
     if (context === undefined || context.preparedContextHash !== candidate.base.preparedContextHash) {
       throw new Error('El contexto preparado del candidato Pi ya no coincide con la puesta');
@@ -3186,9 +3385,9 @@ export function openJournal(input: { path: string }) {
     if (step !== undefined && (step.lifecycleRevision !== run.row.lifecycle_revision || step.pulseId !== job.pulse_id)) return false;
     const pulseValue = database.prepare(`SELECT lifecycle_revision FROM coordinator_pulses WHERE run_id=? AND pulse_id=?`)
       .get(job.run_id, job.pulse_id);
-    if (pulseValue === undefined) return true;
-    const pulse = z.strictObject({ lifecycle_revision: counter.nullable() }).parse(pulseValue);
-    return pulse.lifecycle_revision !== null && pulse.lifecycle_revision === run.row.lifecycle_revision;
+    if(pulseValue!==undefined){const pulse=z.strictObject({lifecycle_revision:counter.nullable()}).parse(pulseValue);if(pulse.lifecycle_revision===null||pulse.lifecycle_revision!==run.row.lifecycle_revision)return false;}
+    if(job.state==='running')assertJobIdentityBinding(job,run);
+    return true;
   }
 
   function assertActorExecutionEpoch(execution: z.infer<typeof ActorJobExecutionSchema>): void {
@@ -3198,6 +3397,7 @@ export function openJournal(input: { path: string }) {
     if (runValue === undefined || !actorJobEpochCurrent(job,parseWorldRun(runValue))) {
       throw new Error('El claim actoral pertenece a una época de lifecycle anterior');
     }
+    assertJobIdentityBinding(job,parseWorldRun(runValue));
   }
 
   function actorJobEligibility(execution: z.infer<typeof ActorJobExecutionSchema>):
@@ -3209,6 +3409,7 @@ export function openJournal(input: { path: string }) {
     const job = claimedActorJob(execution);
     if (job === undefined) return { kind: 'inactive', reason: 'claim_inactive' };
     if (!actorJobEpochCurrent(job, run)) return { kind: 'inactive', reason: 'lifecycle_epoch_stale' };
+    assertJobIdentityBinding(job,run);
     const invitationId=actorActivationInvitationForJob({runId:job.run_id,actorId:job.actor_id,jobId:job.job_id,generation:job.generation});
     if(invitationId!==undefined){
       const activationReason=activationInvitationIneligibility({run,configuration:ReadyRunConfigurationSchema.parse(run.configuration),invitationId});
@@ -3226,10 +3427,8 @@ export function openJournal(input: { path: string }) {
       || actor.presence.kind !== 'present' || actor.presence.sceneId !== scene.id) {
       return { kind: 'inactive', reason: 'actor_unavailable' };
     }
-    const sessionValue = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-      .get(execution.runId, execution.actorId);
-    if (sessionValue === undefined) return { kind: 'inactive', reason: 'session_missing' };
-    const session = actorSessionBase(sessionValue);
+    const session = currentActorSession(run,execution.actorId);
+    if (session === undefined) return { kind: 'inactive', reason: 'session_missing' };
     if(canonicalJson(resolveStoredPiProfile(session.profile))!==canonicalJson(runInferenceProfile(run)))return {kind:'inactive',reason:'inference_profile_changed'};
     const context = run.fence.contexts.find((item) => item.actorId === execution.actorId);
     if (context === undefined || context.preparedContextHash !== session.preparedContextHash
@@ -4069,8 +4268,8 @@ export function openJournal(input: { path: string }) {
     if(binding.proposal_id!==proposal.proposalId||binding.version!==proposal.version||binding.attempt_hash!==proposal.attemptHash)throw new Error('Terminal parental no pertenece a la última propuesta exacta');
     const originalExecution=ActorJobExecutionSchema.parse({...execution,lease:candidate.lease});
     verifyCandidateBase(candidate);
-    const session=actorSessionBase(database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(execution.runId,execution.actorId));
-    if(canonicalJson(session)!==canonicalJson(candidate.base)||canonicalJson(candidate.inputCut)!==canonicalJson(frozenActorTurnWorldCut(job))
+    const session=currentActorSession(parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(execution.runId)),execution.actorId);
+    if(session===undefined||canonicalJson(session)!==canonicalJson(candidate.base)||canonicalJson(candidate.inputCut)!==canonicalJson(frozenActorTurnWorldCut(job))
       ||candidate.runId!==execution.runId||candidate.actorId!==execution.actorId||candidate.scope.jobId!==execution.jobId||candidate.scope.generation!==execution.generation
       ||candidate.scope.pulseId!==execution.pulseId)throw new Error('Terminal parental no coincide con sesión, contexto o corte');
     const inputValue=database.prepare(`SELECT * FROM actor_pi_candidates WHERE job_id=? AND generation=? AND turn_id=? AND candidate_kind='request-input' AND request_seq=?`)
@@ -4175,9 +4374,8 @@ export function openJournal(input: { path: string }) {
           runId: candidate.runId, actorId: candidate.actorId, cut: candidate.inputCut,
           ...(frozenPerceptionIds === undefined ? {} : { expectedPerceptionIds: frozenPerceptionIds }),
         });
-        const currentBase = actorSessionBase(database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-          .get(candidate.runId, candidate.actorId));
-        if (currentBase.sessionRevision !== candidate.base.sessionRevision
+        const currentBase = currentActorSession(parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(candidate.runId)),candidate.actorId);
+        if (currentBase===undefined||currentBase.sessionRevision !== candidate.base.sessionRevision
           || currentBase.committedLeafId !== candidate.base.committedLeafId
           || currentBase.sessionId !== candidate.base.sessionId || currentBase.sessionPath !== candidate.base.sessionPath
           || currentBase.preparedContextHash !== candidate.base.preparedContextHash) {
@@ -4274,9 +4472,9 @@ export function openJournal(input: { path: string }) {
         }
         const updated = database.prepare(`
           UPDATE actor_pi_sessions SET committed_leaf_id=?,session_revision=?,updated_at=?
-          WHERE run_id=? AND actor_id=? AND session_revision=? AND committed_leaf_id IS ?
+          WHERE run_id=? AND actor_id=? AND session_revision=? AND committed_leaf_id IS ? AND session_id=? AND session_path=? AND prepared_context_hash=?
         `).run(receipt.committedLeafId, receipt.sessionRevision, acceptedAt,
-          candidate.runId, candidate.actorId, candidate.base.sessionRevision, candidate.base.committedLeafId);
+          candidate.runId, candidate.actorId, candidate.base.sessionRevision, candidate.base.committedLeafId,candidate.base.sessionId,candidate.base.sessionPath,candidate.base.preparedContextHash);
         if (updated.changes !== 1) throw new Error('Conflicto CAS al avanzar el checkpoint Pi aceptado');
         database.prepare(`
           INSERT INTO actor_pi_turn_receipts(candidate_id,receipt_json,receipt_hash,acceptance_hash,accepted_at)
@@ -4416,6 +4614,11 @@ export function openJournal(input: { path: string }) {
     const wallTimeRemainingMs = Math.max(0, configuration.data.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
     if (counts.uncertain_count > 0) return RunModelTimeBudgetSchema.parse({ ...base, status: 'uncertain', wallTimeMeasuredMs: counts.measured_ms, wallTimeRemainingMs });
     return RunModelTimeBudgetSchema.parse({ ...base, status: 'known', wallTimeMeasuredMs: counts.measured_ms, wallTimeRemainingMs });
+  }
+
+  function assertBudgetSpanOwner(request:{jobId:z.infer<typeof JobIdSchema>;generation:number;requestSeq:number;ownerToken:string;clockEpochId:string}){
+    const row=z.strictObject({owner_token:z.uuid(),clock_epoch_id:ModelTimeClockEpochIdSchema,run_id:RunIdSchema,pulse_id:PulseIdSchema,reservation_run:RunIdSchema,reservation_pulse:PulseIdSchema}).parse(database.prepare(`SELECT s.owner_token,s.clock_epoch_id,s.run_id,s.pulse_id,r.run_id AS reservation_run,r.pulse_id AS reservation_pulse FROM model_time_spans s JOIN request_reservations r USING(job_id,generation,request_seq) WHERE s.job_id=? AND s.generation=? AND s.request_seq=?`).get(request.jobId,request.generation,request.requestSeq));
+    if(row.owner_token!==request.ownerToken||row.clock_epoch_id!==request.clockEpochId||row.run_id!==row.reservation_run||row.pulse_id!==row.reservation_pulse)throw new Error('MODEL_TIME_RESERVATION_OWNER_MISMATCH');
   }
 
   function expireModelTimeWithinTransaction(input: z.infer<typeof ModelWallTimeExpirationSchema> & {
@@ -5239,6 +5442,11 @@ export function openJournal(input: { path: string }) {
 
     readActorStateCut,
     readRunConfigurationAtCommit,
+    configureIdentityPromotionPorts(ports:IdentityPromotionPorts){if(identityPromotionPorts!==undefined)throw new Error('IDENTITY_PROMOTION_PORTS_ALREADY_CONFIGURED');if(typeof ports.requireAcceptedConfiguratorProposal!=='function'||typeof ports.assertIdentityPromotionRuntimeIdle!=='function')throw new Error('IDENTITY_PROMOTION_PORTS_INVALID');identityPromotionPorts=Object.freeze({...ports});},
+    applyIdentityPromotion,
+    readIdentityPromotionHistory(input:unknown){const request=z.strictObject({runId:RunIdSchema,actorId:CharacterIdSchema.optional()}).parse(input);return database.prepare('SELECT * FROM identity_promotion_receipts WHERE run_id=? ORDER BY rowid').all(request.runId).map(identityPromotionRecord).filter(record=>request.actorId===undefined||record.receipt.actorId===request.actorId).map(record=>record.receipt);},
+    readActorIdentityEpochs(input:unknown){const request=z.strictObject({runId:RunIdSchema,actorId:CharacterIdSchema}).parse(input);const row=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(row===undefined)return [];return identityEpochs(parseWorldRun(row),request.actorId);},
+    loadActorPiSessionAtEpoch(input:unknown){const request=z.strictObject({runId:RunIdSchema,actorId:CharacterIdSchema,epochIndex:RevisionSchema}).parse(input);const row=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);if(row===undefined)return undefined;const run=parseWorldRun(row);const epochs=identityEpochs(run,request.actorId);const epoch=epochs.find(epoch=>epoch.epochIndex===request.epochIndex);if(epoch===undefined)throw new Error('IDENTITY_EPOCH_MISSING');return epoch.epochIndex===epochs.at(-1)?.epochIndex?currentActorSession(run,request.actorId):archivedIdentitySession(epoch)?.base;},
     readForkSource,
     beginForkJob,beginForkJobFromBackup,readForkJob,findForkJob,readForkPackage,listStagingForkJobs,
     recordForkProjection,readForkProjectionReceipt,readForkProjectionReceipts,failForkJob,retryForkJob,publishForkJob,
@@ -6804,6 +7012,7 @@ export function openJournal(input: { path: string }) {
         if(entry===undefined)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'missing'})});
         const worldValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         const world=worldValue===undefined?undefined:parseWorldRun(worldValue);
+        if(world!==undefined&&identityPromotedConfiguration(request.runId))return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'identity-promoted'})});
         if(world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined))
           return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'fork-published'})});
         if(world!==undefined){const lifecycle=world.row.lifecycle;
@@ -6829,8 +7038,9 @@ export function openJournal(input: { path: string }) {
         const replay=replayRunDraftOperation(operation);if(replay!==undefined)return RunDraftValidationResultSchema.parse(replay);
         const recordedAt=new Date().toISOString();const entry=readRunDraft({runId:request.runId});
         if(entry===undefined)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'missing'})});
-        if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
         const worldValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);const world=worldValue===undefined?undefined:parseWorldRun(worldValue);
+        if(world!==undefined&&identityPromotedConfiguration(request.runId))return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'readonly',reason:'identity-promoted'})});
+        if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
         if(world!==undefined&&world.row.lifecycle!=='draft'&&world.row.lifecycle!=='ready')return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'invalidLifecycle',lifecycle:world.row.lifecycle})});
         if(world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined))
           return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'readonly',reason:'fork-published'})});
@@ -6888,14 +7098,14 @@ export function openJournal(input: { path: string }) {
         const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);const world=value===undefined?undefined:parseWorldRun(value);
         return RunDraftStateSchema.parse({runId:request.runId,revision:entry.draft.revision,configurationRevision:world?.row.config_revision??entry.draft.revision,
           lifecycle:world?.row.lifecycle??'draft',worldRevision:world?.row.world_revision??null,configurationHash:world?.row.configuration_hash??null,
-          editability:world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined)?'fork-published':'editable'});
+          editability:world!==undefined&&identityPromotedConfiguration(request.runId)?'identity-promoted':world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined)?'fork-published':'editable'});
       });
     },
 
-    readRunConfigurationDraft(input:unknown){return readRunDraft(RunDraftReadSchema.parse(input))?.draft;},
+    readRunConfigurationDraft(input:unknown){const request=RunDraftReadSchema.parse(input);const entry=readRunDraft(request);return entry===undefined?undefined:request.revision===undefined?effectiveRunDraftView(entry):entry.draft;},
     listRunConfigurationDrafts(input:unknown={}){
       const request=RunDraftListSchema.parse(input);return database.prepare(`SELECT h.* FROM run_configuration_drafts d JOIN run_configuration_draft_history h ON h.run_id=d.run_id AND h.revision=d.revision
-        ORDER BY d.updated_at DESC,d.run_id LIMIT ? OFFSET ?`).all(request.limit,request.offset).map(runDraftHistoryEntry).map((entry)=>entry.draft);
+        ORDER BY d.updated_at DESC,d.run_id LIMIT ? OFFSET ?`).all(request.limit,request.offset).map(runDraftHistoryEntry).map(effectiveRunDraftView);
     },
     readRunConfigurationDraftHistory(input:unknown){const request=z.strictObject({runId:RunIdSchema}).parse(input);return database.prepare('SELECT * FROM run_configuration_draft_history WHERE run_id=? ORDER BY revision').all(request.runId).map(runDraftHistoryEntry);},
 
@@ -6937,6 +7147,7 @@ export function openJournal(input: { path: string }) {
       const request=ContinuistaSessionRegistrationSchema.parse(input);if(!isAbsolute(request.sessionPath))throw new Error('Ruta de sesión Continuista no absoluta');return transact(()=>{
         const {row}=claimedContinuistaJob(request.execution);if(continuistaEligibility(request.execution).kind!=='active')throw new Error('Job Continuista inactivo');
         if(canonicalJson(resolveStoredPiProfile(request.profile))!==canonicalJson(actorJobInferenceProfile(request.execution.actorExecution)))throw new Error('Perfil Continuista distinto del claim actoral');
+        if(continuistaSession(request.execution)===undefined)assertIndependentSession(request.sessionId,request.sessionPath);
         if(database.prepare('SELECT 1 FROM actor_pi_sessions WHERE session_id=? OR session_path=? LIMIT 1').get(request.sessionId,request.sessionPath)!==undefined
           ||database.prepare(`SELECT 1 FROM continuista_sessions WHERE (job_id<>? OR generation<>?) AND (json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=?) LIMIT 1`)
             .get(row.job_id,row.generation,request.sessionId,request.sessionPath)!==undefined)throw new Error('Sesión Continuista no independiente');
@@ -7246,6 +7457,7 @@ export function openJournal(input: { path: string }) {
         const session=AdministrativeSessionSchema.parse({jobId:row.job_id,generation:row.generation,role:row.role,contextHash:row.context_hash,
           sessionId:request.sessionId,sessionPath:request.sessionPath,baseLeafId:request.baseLeafId,profile:request.profile});
         if(existing!==undefined){if(canonicalJson(existing)!==canonicalJson(session))throw new Error('Sesión administrativa distinta');return 'existing';}
+        assertIndependentSession(request.sessionId,request.sessionPath);
         const duplicate=database.prepare(`SELECT 1 FROM actor_pi_sessions WHERE session_id=? OR session_path=?
           UNION ALL SELECT 1 FROM continuista_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=?
           UNION ALL SELECT 1 FROM administrative_sessions WHERE json_extract(payload_json,'$.sessionId')=? OR json_extract(payload_json,'$.sessionPath')=? LIMIT 1`)
@@ -7884,6 +8096,7 @@ export function openJournal(input: { path: string }) {
         if (row.state === 'blocked') return ActorTurnJobClaimResultSchema.parse({ kind: 'blocked', job });
         if (row.state === 'running') {
           if (row.owner_token === request.ownerToken && row.claim_token === request.claimToken) {
+            assertJobIdentityBinding(row,run);
             return ActorTurnJobClaimResultSchema.parse({
               kind: 'existing', job, ownerToken: request.ownerToken, claimToken: request.claimToken,
             });
@@ -7935,6 +8148,7 @@ export function openJournal(input: { path: string }) {
         const claimedValue = database.prepare(`
           SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?
         `).get(request.runId, request.actorId, request.jobId, request.generation);
+        bindClaimedIdentityJob(ActorTurnJobDbRowSchema.parse(claimedValue),run);
         return ActorTurnJobClaimResultSchema.parse({
           kind: 'claimed', job: actorTurnJobView(claimedValue),
           ownerToken: request.ownerToken, claimToken: request.claimToken,
@@ -8088,6 +8302,15 @@ export function openJournal(input: { path: string }) {
       transact(() => transitionWithinTransaction(request));
     },
 
+    expireBudgetRequest(input:unknown){
+      const request=z.strictObject({jobId:JobIdSchema,generation:RevisionSchema,requestSeq:counter,ownerToken:z.uuid(),clockEpochId:ModelTimeClockEpochIdSchema,reason:z.enum(['timeout','cancelled'])}).parse(input);
+      return transact(()=>{assertBudgetSpanOwner(request);return expireModelTimeWithinTransaction(request);});
+    },
+    settleBudgetRequestWallTime(input:unknown){
+      const request=z.strictObject({jobId:JobIdSchema,generation:RevisionSchema,requestSeq:counter,ownerToken:z.uuid(),clockEpochId:ModelTimeClockEpochIdSchema,monotonicNs:MonotonicNanosecondsSchema}).parse(input);
+      return transact(()=>{assertBudgetSpanOwner(request);return settleModelTimeWithinTransaction(request);});
+    },
+
     readActorJobInferenceProfile(input: unknown) {
       const execution = ActorJobExecutionSchema.parse(input);
       return actorJobInferenceProfile(execution);
@@ -8189,9 +8412,8 @@ export function openJournal(input: { path: string }) {
         if (claimed === undefined) throw new Error('El checkpoint Pi perdió el lease del job');
         const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(execution.runId));
         if (!actorJobEpochCurrent(claimed,run)) throw new Error('El checkpoint Pi pertenece a una época de lifecycle anterior');
-        const session = actorSessionBase(database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-          .get(execution.runId, execution.actorId));
-        if (session.sessionId !== snapshot.sessionId || session.sessionPath !== snapshot.sessionPath) {
+        const session=currentActorSession(run,execution.actorId);assertJobIdentityBinding(claimed,run);
+        if (session===undefined||session.sessionId !== snapshot.sessionId || session.sessionPath !== snapshot.sessionPath) {
           throw new Error('El checkpoint Pi pertenece a otra sesión');
         }
         if (purpose.kind === 'job-base' && snapshot.candidateLeafId !== session.committedLeafId) {
@@ -8412,30 +8634,21 @@ export function openJournal(input: { path: string }) {
           throw new Error('El actor no tiene ese contexto preparado dentro de esta corrida');
         }
         const profilePayload = hashJson(registration.profile);
-        const existingValue = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-          .get(registration.runId, registration.actorId);
-        if (existingValue !== undefined) {
-          const existingRow = ActorPiSessionRowSchema.parse(existingValue);
-          const base = actorSessionBase(existingValue);
-          if (existingRow.session_id !== registration.sessionId || existingRow.session_path !== registration.sessionPath
-            || existingRow.prepared_context_hash !== registration.preparedContextHash
-            || existingRow.profile_hash !== profilePayload.hash || existingRow.profile_json !== profilePayload.json) {
-            throw new Error('La sesión ya tiene otra identidad, ruta, preparación o perfil');
-          }
-          return ActorPiRegistrationResultSchema.parse({ kind: 'existing', session: base });
+        const existingValue=database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(registration.runId,registration.actorId);
+        const current=currentActorSession(run,registration.actorId);const epoch=identityEpochs(run,registration.actorId).at(-1);
+        if(current!==undefined){
+          if(current.sessionId!==registration.sessionId||current.sessionPath!==registration.sessionPath||current.preparedContextHash!==registration.preparedContextHash||canonicalJson(current.profile)!==profilePayload.json)throw new Error('La sesión ya tiene otra identidad, ruta, preparación o perfil');
+          if(registration.execution!==undefined)assertActorExecutionEpoch(registration.execution);
+          return ActorPiRegistrationResultSchema.parse({kind:'existing',session:current});
         }
+        if(epoch!==undefined&&registration.execution===undefined)throw new Error('IDENTITY_SESSION_EXECUTION_REQUIRED');
         if(registration.execution!==undefined)assertActorExecutionEpoch(registration.execution);
-        const timestamp = Date.now();
-        database.prepare(`
-          INSERT INTO actor_pi_sessions(
-            run_id,actor_id,session_id,session_path,prepared_context_hash,profile_json,profile_hash,
-            committed_leaf_id,session_revision,created_at,updated_at
-          ) VALUES(?,?,?,?,?,?,?,NULL,0,?,?)
-        `).run(registration.runId, registration.actorId, registration.sessionId, registration.sessionPath,
-          registration.preparedContextHash, profilePayload.json, profilePayload.hash, timestamp, timestamp);
-        const row = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-          .get(registration.runId, registration.actorId);
-        return ActorPiRegistrationResultSchema.parse({ kind: 'stored', session: actorSessionBase(row) });
+        assertIndependentSession(registration.sessionId,registration.sessionPath);
+        const timestamp=Date.now();
+        if(existingValue===undefined)database.prepare('INSERT INTO actor_pi_sessions VALUES(?,?,?,?,?,?,?,NULL,0,?,?)').run(registration.runId,registration.actorId,registration.sessionId,registration.sessionPath,registration.preparedContextHash,profilePayload.json,profilePayload.hash,timestamp,timestamp);
+        else database.prepare('UPDATE actor_pi_sessions SET session_id=?,session_path=?,prepared_context_hash=?,profile_json=?,profile_hash=?,committed_leaf_id=NULL,session_revision=0,created_at=?,updated_at=? WHERE run_id=? AND actor_id=?').run(registration.sessionId,registration.sessionPath,registration.preparedContextHash,profilePayload.json,profilePayload.hash,timestamp,timestamp,registration.runId,registration.actorId);
+        const base=actorSessionBase(database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?').get(registration.runId,registration.actorId));if(epoch!==undefined)bindIdentitySession(epoch,base);
+        return ActorPiRegistrationResultSchema.parse({kind:'stored',session:base});
       });
     },
 
@@ -8464,7 +8677,7 @@ export function openJournal(input: { path: string }) {
           .get(rotation.runId, rotation.actorId);
         if (rowValue === undefined) throw new Error('No existe la sesión Pi que se intenta rotar');
         const row = ActorPiSessionRowSchema.parse(rowValue);
-        const current = actorSessionBase(rowValue);
+        const current = currentActorSession(run,rotation.actorId);if(current===undefined)throw new Error('IDENTITY_SESSION_RESERVED');
         if (current.sessionRevision !== 0 || current.committedLeafId !== null) {
           throw new Error('La sesión Pi ya tiene un leaf aceptado y no puede rotarse');
         }
@@ -8479,6 +8692,8 @@ export function openJournal(input: { path: string }) {
           throw new Error('La sesión Pi cambió antes de aplicar la rotación CAS');
         }
         if(rotation.execution!==undefined)assertActorExecutionEpoch(rotation.execution);
+        const epoch=identityEpochs(run,rotation.actorId).at(-1);if(epoch!==undefined&&rotation.execution===undefined)throw new Error('IDENTITY_SESSION_EXECUTION_REQUIRED');
+        assertIndependentSession(rotation.sessionId,rotation.sessionPath);
         const timestamp = Date.now();
         const updated = database.prepare(`
           UPDATE actor_pi_sessions SET session_id=?,session_path=?,updated_at=?
@@ -8489,15 +8704,14 @@ export function openJournal(input: { path: string }) {
         if (updated.changes !== 1) throw new Error('La sesión Pi cambió antes de aplicar la rotación CAS');
         const rotatedValue = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
           .get(rotation.runId, rotation.actorId);
-        return ActorPiRotationResultSchema.parse({ kind: 'rotated', session: actorSessionBase(rotatedValue) });
+        const base=actorSessionBase(rotatedValue);if(epoch!==undefined)bindIdentitySession(epoch,base);return ActorPiRotationResultSchema.parse({ kind: 'rotated', session: base });
       });
     },
 
     loadActorPiSession(input: unknown) {
       const request = z.strictObject({ runId: RunIdSchema, actorId: CharacterIdSchema }).parse(input);
-      const row = database.prepare('SELECT * FROM actor_pi_sessions WHERE run_id=? AND actor_id=?')
-        .get(request.runId, request.actorId);
-      return row === undefined ? undefined : actorSessionBase(row);
+      const row=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      return row===undefined?undefined:currentActorSession(parseWorldRun(row),request.actorId);
     },
 
     recordActorPiCandidate(input: unknown): 'stored' | 'existing' {
@@ -8529,6 +8743,7 @@ export function openJournal(input: { path: string }) {
           }
           const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(candidate.runId));
           if (!actorJobEpochCurrent(scheduledJob,run)) throw new Error('El candidato Pi pertenece a una época de lifecycle anterior');
+          assertJobIdentityBinding(scheduledJob,run);
           const frozenWorldCut = frozenActorTurnWorldCut(scheduledJob);
           if (frozenWorldCut === null || canonicalJson(candidate.inputCut) !== canonicalJson(frozenWorldCut)) {
             throw new Error('El candidato Pi no coincide con el corte World e inbox congelados del job');

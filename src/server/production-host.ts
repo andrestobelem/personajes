@@ -16,7 +16,7 @@ import { HumanParticipantProfilesSchema } from '../domain/production.ts';
 import { createWorldDeliverySupervisor } from '../application/world-delivery-supervisor.ts';
 import { createRepresentationRuntime } from '../application/representation-runtime.ts';
 import { createRunLifecycleApplication } from '../application/run-lifecycle.ts';
-import { PiRuntime } from '../adapters/pi.ts';
+import { PiRuntime, type CreatePiSessionInput, type PiSessionHandle } from '../adapters/pi.ts';
 import { createPiOAuthPort } from '../application/pi-oauth.ts';
 import { createPiOAuthJobs } from '../application/pi-oauth-jobs.ts';
 import { createPiAccessJobs } from '../application/pi-access-jobs.ts';
@@ -38,6 +38,8 @@ import { openBackupTransferService } from '../application/backup-transfer-servic
 import { ApprovedJournalSchemaSchema } from '../application/external-backup-validation.ts';
 import { createBackupTransferRoutes } from './backup-transfer-routes.ts';
 import { createExternalBackupRestoreRoutes } from './external-backup-restore-routes.ts';
+import { createIdentityPromotionApplication } from '../application/identity-promotion-application.ts';
+import { createIdentityPromotionRoutes } from './identity-promotion-routes.ts';
 
 /** Reusable composition of one owned private directory. Creation does not recover,
  * begin a representation, login, probe a provider, or synthesize audio. */
@@ -50,6 +52,8 @@ export async function createProductionHost(input:{
  directoryOperation?:HostDirectoryOperation;
  onDiagnostic?:(diagnostic:unknown)=>void;
  configureRestorePort?:(forkPort:BackupRestorePort)=>BackupRestorePort;
+ /** Trusted composition seam for controlled local SDK integration; never read from HTTP or environment. */
+ configuratorSessionFactory?:(input:CreatePiSessionInput)=>Promise<PiSessionHandle>;
 }){
  const catalog=input.catalog;
  const diagnosticSink=(diagnostic:unknown)=>{try{input.onDiagnostic?.(diagnostic);}catch{/* Observers do not control workers. */}};
@@ -70,6 +74,7 @@ export async function createProductionHost(input:{
    oauthController.abort();
    await restoreRecovery?.catch(()=>undefined);
    await settle(()=>exchange?.backups.waitForRestores());
+   await settle(()=>identityPromotions?.close());
    await settle(()=>forks?.close());
    await settle(()=>voices?.close());
    await settle(()=>transfers?.close());
@@ -97,6 +102,7 @@ let forks: ReturnType<typeof createForkRuntime> | undefined;
 let restoreRecovery: Promise<unknown> | undefined;
 let transfers:ReturnType<typeof openBackupTransferService>|undefined;
 let externalRestoreRoutes:ReturnType<typeof createExternalBackupRestoreRoutes>|undefined;
+let identityPromotions:Awaited<ReturnType<typeof createIdentityPromotionApplication>>|undefined;
 try {
   voices=createVoiceRuntime({host,...(input.privateAuthRoot===undefined?{}:{privateAuthRoot:input.privateAuthRoot}),onDiagnostic:diagnostic=>diagnosticSink(diagnostic)});
   const configuredExchange=await createExchangeRuntime({host,catalog});
@@ -150,9 +156,19 @@ worldDeliveries = representation === undefined ? createWorldDeliverySupervisor({
     }
   },
 }) : undefined;
+  const mechanicalDeliveries = worldDeliveries;
+  identityPromotions = await createIdentityPromotionApplication({ host, runtime: piRuntime, catalog,
+    ...(input.configuratorSessionFactory === undefined ? {} : { sessionFactory: input.configuratorSessionFactory }),
+    ...(representation === undefined
+      ? mechanicalDeliveries === undefined ? {} : { representation: { suspendRunAdmissions: async (request) => mechanicalDeliveries.suspendRunAdmissions(request) } }
+      : { representation }),
+    ...(voices === undefined ? {} : { voices: voices.service }),
+    onCommitted: receipt => diagnosticSink({ kind: 'identityPromotionCommitted', runId: receipt.target.runId,
+      commitIndex: receipt.target.commitIndex, identityVersion: receipt.identityVersion }),
+  });
 if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!==undefined&&preflightJobs!==undefined) {
   exchange.setBackupQuiesce(createHostBackupQuiesce({host,admission:input.admissionBarrier,oauth:oauthJobs,access:accessJobs,preflight:preflightJobs,
-    ...(forks===undefined?{}:{forks}),
+    ...(forks===undefined?{}:{forks}),...(identityPromotions===undefined?{}:{configurator:identityPromotions}),
     ...(representation===undefined?{}:{representation}),...(worldDeliveries===undefined?{}:{deliveries:worldDeliveries}),voice:voices.service}));
 }
   const configuredVoices=voices;
@@ -166,7 +182,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
     admissionBarrier:input.admissionBarrier,
     runtimeComposition:()=>({kind:representation!==undefined&&!representation.isClosed?'composed':'unavailable'}),
     operatorExtensions:[createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),
-      createBackupTransferRoutes({service:()=>configuredTransfers}),externalRestoreRoutes,...(exchange===undefined?[]:[exchange.routes])],
+      createBackupTransferRoutes({service:()=>configuredTransfers}),externalRestoreRoutes,createIdentityPromotionRoutes({application:()=>identityPromotions}),...(exchange===undefined?[]:[exchange.routes])],
     runConfigurationDrafts: host.journal,
     forks: createForkApplication({journal:host.journal,...(forks===undefined?{}:{runtime:forks})}),
     readRunModelTimeBudget: (request) => host.journal.readRunModelTimeBudget(request),
@@ -229,7 +245,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
  // A successfully reopened host may outlive that operation; later close receives
  // a fresh capability explicitly or acquires the ordinary ownership gate.
  closeOptions=undefined;
- return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,httpOptions,recover,close});
+ return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,httpOptions,recover,close});
 } catch (error) {
   try { await close(); } catch (closeError) { throw new AggregateError([error,closeError], 'Production setup and cleanup failed'); }
   throw error;

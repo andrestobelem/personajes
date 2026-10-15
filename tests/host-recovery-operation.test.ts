@@ -15,7 +15,7 @@ async function fixture(){
  let ownership:ReturnType<typeof acquireHostOwnership>|undefined=acquireHostOwnership({privateDataRoot:root});
  let db:DatabaseSync|undefined=new DatabaseSync(join(root,'world.sqlite'));db.exec("CREATE TABLE state(lineage TEXT,budget INTEGER,leaf TEXT);INSERT INTO state VALUES('same-lineage',17,'accepted-leaf');");
  const backupId=randomUUID();const bundleRoot=join(root,'backups',backupId);mkdirSync(bundleRoot,{recursive:true,mode:0o700});await backup(db,join(bundleRoot,'world.sqlite'));
- const bytes=readFileSync(join(bundleRoot,'world.sqlite'));const manifest=BackupManifestSchema.parse({format:'personajes-backup',version:1,backupId,lineageId:randomUUID(),createdAt:0,journalVersion:38,originRootHash:hash(root),fences:[],files:[{path:'world.sqlite',bytes:bytes.length,sha256:hash(bytes)}]});
+ const bytes=readFileSync(join(bundleRoot,'world.sqlite'));const manifest=BackupManifestSchema.parse({format:'personajes-backup',version:1,backupId,lineageId:randomUUID(),createdAt:0,journalVersion:39,originRootHash:hash(root),fences:[],files:[{path:'world.sqlite',bytes:bytes.length,sha256:hash(bytes)}]});
  const manifestBytes=JSON.stringify(manifest);writeFileSync(join(bundleRoot,'manifest.json'),manifestBytes,{mode:0o600});
  writeFileSync(join(root,'administration.json'),'Preservar ledger administrativo posterior.',{mode:0o600});
  mkdirSync(join(root,'backups','newer-backup'),{mode:0o700});writeFileSync(join(root,'backups','newer-backup','keep.txt'),'Conservar backup posterior.');

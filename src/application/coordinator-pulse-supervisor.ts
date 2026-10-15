@@ -51,11 +51,13 @@ export function createCoordinatorPulseSupervisor(input: {
 }) {
   const ownerToken = OwnerTokenSchema.parse(input.ownerToken);
   const active = new Map<RunId, ActiveRun>();
+  const suspendedRuns = new Set<RunId>();
   let closed = false;
 
   function schedule(rawInput: unknown): void {
     if (closed) return;
     const request = ScheduleSchema.parse(rawInput);
+    if (suspendedRuns.has(request.runId)) return;
     const existing = active.get(request.runId);
     if (existing !== undefined) {
       if (existing.controller.signal.aborted) existing.rescheduleAfterCancel = true;
@@ -207,6 +209,18 @@ export function createCoordinatorPulseSupervisor(input: {
     return true;
   }
 
+  async function suspendRunAdmissions(rawInput: unknown): Promise<() => void> {
+    const { runId } = ScheduleSchema.parse(rawInput);
+    if (closed || suspendedRuns.has(runId)) throw new Error('COORDINATOR_RUN_BUSY');
+    suspendedRuns.add(runId);
+    const state = active.get(runId);
+    if (state !== undefined) state.rescheduleAfterCancel = false;
+    try { await cancelRun({ runId }); }
+    catch (error) { suspendedRuns.delete(runId); throw error; }
+    let released = false;
+    return () => { if (released) return; released = true; suspendedRuns.delete(runId); };
+  }
+
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
@@ -214,7 +228,7 @@ export function createCoordinatorPulseSupervisor(input: {
     await Promise.all([...active.values()].flatMap((state) => state.task === undefined ? [] : [state.task]));
   }
 
-  return Object.freeze({ schedule, recover, cancelRun, waitForIdle, close });
+  return Object.freeze({ schedule, recover, cancelRun, suspendRunAdmissions, waitForIdle, close });
 }
 
 function sameJob(left: Job, right: Job): boolean {

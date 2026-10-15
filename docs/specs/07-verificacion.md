@@ -216,3 +216,9 @@ Se verifican chunks duplicados/divergentes, offsets, límites, truncamientos, pr
 ## Evidencia preparatoria de promoción de identidad — corte 50
 
 Las suites `configuration-cut-history`, `configurator-evolution-context` y `prepare-identity-promotion` verifican lectura histórica, anchors privados, evidencia subjetiva, rechazo de bases/consentimientos distintos y transformación sin efectos. Los ensayos de schema externo y recuperación incluyen la tabla nueva, los triggers exactos y corrupción aislada del ledger. Son fundamentos para P22 y P14/P24; no prueban propuesta Pi durable, aplicación, epochs, GUI de promoción ni actuación live. La aceptación de esos recorridos sigue pendiente. [Evidencia y límites](../auditoria/promocion-identidad.md).
+
+## Cobertura construida para P22 — corte 51
+
+Las suites nuevas de journal, ledger/worker Pi, manager, rutas HTTP, cliente/UI y round-trip incluyen promoción atómica, rollback/replay/CAS, consentimiento exacto, epoch/sesión nueva, dos promociones sin turno, conservación ICM/JSONL e historia exacta, opt-in privado/Dirección, bloqueo de trabajo pendiente, cancelación/presupuesto y rechazo de JSONL alterado. Las integraciones usan SDK Pi e ICM reales con transporte controlado; su existencia no acredita aprobación de la verificación integral ni P22 live.
+
+[La auditoría](../auditoria/promocion-identidad.md) separa fundamento C50 de construcción C51. Verificación global/build y navegador con SDK controlado están acreditados en esa auditoría; evaluación artística con proveedor sigue pendiente de evidencia; no se cierran CAT-08/ESC-09/UI-05 ni los 77 criterios por declarar el workflow implementado.

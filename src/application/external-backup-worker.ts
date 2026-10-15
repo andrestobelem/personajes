@@ -69,9 +69,10 @@ function readonly(path: string) {
   return { db, allow: (names: string[]) => { for (const name of names) allowed.add(name); } };
 }
 function schema(db: DatabaseSync) { return ApprovedJournalSchemaSchema.parse(db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').all()); }
-const configurationHistoryTriggers = new Set(['run_configuration_revisions_no_update', 'run_configuration_revisions_no_delete']);
-function approvedHistoryTrigger(object: {type:string;name:string;tbl_name:string}) {
-  return object.type === 'trigger' && object.tbl_name === 'run_configuration_revisions' && configurationHistoryTriggers.has(object.name);
+const appendOnlyTables = new Set(['run_configuration_revisions', 'actor_identity_epochs', 'actor_identity_session_bindings', 'actor_pi_session_archives', 'actor_job_identity_bindings', 'identity_promotion_receipts']);
+function approvedAppendOnlyTrigger(object: {type:string;name:string;tbl_name:string}) {
+  return object.type === 'trigger' && appendOnlyTables.has(object.tbl_name)
+    && (object.name === `${object.tbl_name}_no_update` || object.name === `${object.tbl_name}_no_delete`);
 }
 
 function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
@@ -81,12 +82,12 @@ function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
     for (const object of actual) {
       const expected = approved.get(`${object.type}:${object.name}`);
       if (expected === undefined || JSON.stringify(object) !== JSON.stringify(expected)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
-      if (object.type === 'view' || (object.type === 'trigger' && !approvedHistoryTrigger(object)) || object.sql?.startsWith('CREATE VIRTUAL TABLE')) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
+      if (object.type === 'view' || (object.type === 'trigger' && !approvedAppendOnlyTrigger(object)) || object.sql?.startsWith('CREATE VIRTUAL TABLE')) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     // Only these append-only triggers may survive the exact trusted DDL check
     // above. Their absence is also a schema mismatch; uploaded SQL is never run.
     for (const trigger of request.approvedJournalSchema.filter(object => object.type === 'trigger')) {
-      if (!approvedHistoryTrigger(trigger) || !actual.some(object => object.type === 'trigger' && object.name === trigger.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
+      if (!approvedAppendOnlyTrigger(trigger) || !actual.some(object => object.type === 'trigger' && object.name === trigger.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     const names = new Set(actual.filter(object => object.type === 'table').map(object => object.name));
     // Auxiliary voice/exchange tables may be absent from a host that never
@@ -95,8 +96,8 @@ function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
       if (!names.has(approved.name) && !/^(?:voice_|exchange_)/.test(approved.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     source.allow([...names]);
-    const version = z.strictObject({ version: z.literal(38) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());
-    if (!version.success || request.manifest.journalVersion !== 38) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
+    const version = z.strictObject({ version: z.literal(39) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());
+    if (!version.success || request.manifest.journalVersion !== 39) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
     for (const name of names) {
       const columns = z.array(z.object({ hidden: z.number() })).parse(source.db.prepare(`PRAGMA table_xinfo(${quote(name)})`).all());
       if (columns.some(column => column.hidden !== 0)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
@@ -123,7 +124,7 @@ function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
     }
     for (const object of request.approvedJournalSchema.filter(object => object.type === 'index' && object.sql !== null)) if (object.sql !== null) clean.exec(object.sql);
     // Install host-supplied append-only guards after copying source rows.
-    for (const trigger of request.approvedJournalSchema.filter(approvedHistoryTrigger)) {
+    for (const trigger of request.approvedJournalSchema.filter(approvedAppendOnlyTrigger)) {
       if (trigger.sql === null) reject('EXTERNAL_BACKUP_APPROVED_SCHEMA_INVALID');
       clean.exec(trigger.sql);
     }
@@ -154,7 +155,7 @@ function validate() {
     }
   }
   inventory(request.bundleRoot);
-  if (request.manifest.journalVersion !== 38) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
+  if (request.manifest.journalVersion !== 39) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
   const copies = new Map<string, string>(); let index = 0;
   for (const file of request.manifest.files) {
     const sqlite = file.path.endsWith('.sqlite'); const target = sqlite ? join(temporary, `input-${index++}.sqlite`) : undefined;
@@ -193,7 +194,7 @@ function validate() {
       try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
     }
   } finally { hostJournal.close(); }
-  const result = ExternalBackupValidationResultSchema.parse({ journalVersion: 38, sources: outputs });
+  const result = ExternalBackupValidationResultSchema.parse({ journalVersion: 39, sources: outputs });
   const bytes = Buffer.from(JSON.stringify(result)); if (bytes.length > 64 * 1024 * 1024) reject('EXTERNAL_BACKUP_RESULT_LIMIT');
   writeFileSync(join(dirname(requestPath), 'result.json'), bytes, { flag: 'wx', mode: 0o600 });
   process.stdout.write(JSON.stringify({ kind: 'validated', resultHash: digest(bytes) }));

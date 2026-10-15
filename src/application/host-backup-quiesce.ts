@@ -5,8 +5,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { forkBackupArtifacts,type ForkBackupArtifact } from './fork-backup-artifacts.ts';
 import { BackupPathSchema } from '../domain/backup.ts';
-import { RunIdSchema, CharacterIdSchema } from '../domain/values.ts';
+import { RunIdSchema, CharacterIdSchema, HashSchema } from '../domain/values.ts';
 import { ActorJobCheckpointSchema,ContinuistaJobExecutionSchema,RunLifecycleCommandResultSchema } from '../domain/world-journal.ts';
+import { ConfiguratorJobSessionSchema } from '../domain/configurator-jobs.ts';
 import { AdministrativeCheckpointSchema } from '../domain/admin-role-jobs.ts';
 import { AdministrativeRoleSchema } from '../domain/admin-roles.ts';
 import type { openLocalHost } from './local-host.ts';
@@ -29,7 +30,7 @@ function physicalRole(raw:unknown){
 export function createHostBackupQuiesce(input:{
  host:ReturnType<typeof openLocalHost>;admission:ReturnType<typeof createHostRequestBarrier>;
  oauth:BusyPort;access:BusyPort;preflight:BusyPort;
- representation?:RepresentationSuspension;deliveries?:Suspension;forks?:Suspension;voice:MediaSuspension;
+ representation?:RepresentationSuspension;deliveries?:Suspension;forks?:Suspension;configurator?:Suspension;voice:MediaSuspension;
 }):BackupQuiescePort{
  if(input.representation===undefined&&input.deliveries===undefined)throw new Error('BACKUP_DELIVERY_BARRIER_UNAVAILABLE');
  return {async acquire(){
@@ -42,6 +43,8 @@ export function createHostBackupQuiesce(input:{
    if(input.preflight.backupBusy)throw new Error('BACKUP_PREFLIGHT_ACTIVE_CANCEL_OR_RETRY');
    if(input.forks)releases.push(await input.forks.suspendAdmissions());
    else if(db.prepare("SELECT 1 FROM fork_jobs WHERE state IN ('staging','failed') LIMIT 1").get())throw new Error('BACKUP_FORK_BARRIER_UNAVAILABLE');
+   if(input.configurator)releases.push(await input.configurator.suspendAdmissions());
+   else if(db.prepare("SELECT 1 FROM configurator_jobs WHERE json_extract(payload_json,'$.job.state') IN ('queued','running') LIMIT 1").get())throw new Error('BACKUP_CONFIGURATOR_BARRIER_UNAVAILABLE');
    const runRows=db.prepare('SELECT run_id FROM world_runs ORDER BY run_id LIMIT 100001').all();
    if(runRows.length>100000)throw new Error('BACKUP_RUN_LIMIT');
    const runIds=runRows.map(row=>z.strictObject({run_id:RunIdSchema}).parse(row).run_id);
@@ -86,6 +89,37 @@ export function createHostBackupQuiesce(input:{
    const actorSessions=db.prepare('SELECT run_id,actor_id,session_path FROM actor_pi_sessions LIMIT 100001').all();if(actorSessions.length>100000)throw new Error('BACKUP_ARTIFACT_LIMIT');
    for(const row of actorSessions){
     const record=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,session_path:z.string()}).parse(row);sessionPath(record.session_path,record.run_id,`actors/${record.actor_id}`);
+   }
+   // Pre-leaf rotations retain every immutable binding, including generations
+   // with no candidate and no final archive row of their own.
+   const identitySessions=db.prepare('SELECT run_id,actor_id,epoch_index,binding_index,session_id,session_path,payload_json,payload_hash FROM actor_identity_session_bindings LIMIT 100001').all();
+   if(identitySessions.length>100000)throw new Error('BACKUP_ARTIFACT_LIMIT');
+   for(const row of identitySessions){
+    const record=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,epoch_index:z.number().int().nonnegative(),binding_index:z.number().int().nonnegative(),session_id:z.string(),session_path:z.string(),payload_json:z.string(),payload_hash:HashSchema}).parse(row);
+    if(hash(record.payload_json)!==record.payload_hash)throw new Error('BACKUP_SESSION_METADATA_TAMPERED');
+    const binding=z.object({runId:RunIdSchema,actorId:CharacterIdSchema,epochIndex:z.number().int().nonnegative(),bindingIndex:z.number().int().nonnegative(),sessionId:z.string(),sessionPath:z.string()}).parse(JSON.parse(record.payload_json));
+    if(binding.runId!==record.run_id||binding.actorId!==record.actor_id||binding.epochIndex!==record.epoch_index||binding.bindingIndex!==record.binding_index||binding.sessionId!==record.session_id||binding.sessionPath!==record.session_path)throw new Error('BACKUP_SESSION_SCOPE_INVALID');
+    sessionPath(record.session_path,record.run_id,`actors/${record.actor_id}`);
+   }
+   // An archived generation may never have produced a candidate or checkpoint.
+   // Its sealed original row still owns a required historical session file.
+   const archivedSessions=db.prepare('SELECT run_id,actor_id,session_id,session_path,row_json,row_hash FROM actor_pi_session_archives LIMIT 100001').all();
+   if(archivedSessions.length>100000)throw new Error('BACKUP_ARTIFACT_LIMIT');
+   for(const row of archivedSessions){
+    const archived=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,session_id:z.string().min(1),session_path:z.string().min(1),row_json:z.string(),row_hash:HashSchema}).parse(row);
+    if(hash(archived.row_json)!==archived.row_hash)throw new Error('BACKUP_SESSION_METADATA_TAMPERED');
+    const original=z.object({run_id:RunIdSchema,actor_id:CharacterIdSchema,session_id:z.string().min(1),session_path:z.string().min(1)}).parse(JSON.parse(archived.row_json));
+    if(original.run_id!==archived.run_id||original.actor_id!==archived.actor_id||original.session_id!==archived.session_id||original.session_path!==archived.session_path)throw new Error('BACKUP_SESSION_SCOPE_INVALID');
+    sessionPath(archived.session_path,archived.run_id,`actors/${archived.actor_id}`);
+   }
+   const configuratorSessions=db.prepare('SELECT job_id,generation,session_path,payload_json,payload_hash FROM configurator_sessions LIMIT 100001').all();
+   if(configuratorSessions.length>100000)throw new Error('BACKUP_ARTIFACT_LIMIT');
+   for(const row of configuratorSessions){
+    const record=z.strictObject({job_id:z.uuid(),generation:z.number().int().nonnegative(),session_path:z.string(),payload_json:z.string(),payload_hash:HashSchema}).parse(row);
+    if(hash(record.payload_json)!==record.payload_hash)throw new Error('BACKUP_SESSION_METADATA_TAMPERED');
+    const session=ConfiguratorJobSessionSchema.parse(JSON.parse(record.payload_json));
+    if(session.execution.scope.jobId!==record.job_id||session.execution.scope.generation!==record.generation||session.sessionPath!==record.session_path)throw new Error('BACKUP_SESSION_SCOPE_INVALID');
+    sessionPath(session.sessionPath,session.execution.scope.runId,'roles/configurador');
    }
    // Retain all registered role generations and forensic actor candidates/checkpoints,
    // including files no longer selected as the actor's current session.

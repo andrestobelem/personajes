@@ -109,6 +109,10 @@ export async function createRepresentationRuntime(input: {
   const adapters = new Map<string, Promise<MemoryResources>>();
   const projectionUnavailable = new Set<string>();
   const inFlightOperations = new Set<Promise<void>>();
+  const runOperations = new Map<RunId, Set<Promise<void>>>();
+  const suspendedRuns = new Set<RunId>();
+  const suspensionTasks = new Set<Promise<unknown>>();
+  function admissionsBlocked(runId: RunId) { return closed || admissionSuspended || suspendedRuns.has(runId); }
   // Recovery may complete mechanical deliveries, but it must not infer until a
   // fresh preflight has explicitly authorized this run in the current process.
   const enabledRuns = new Set<RunId>();
@@ -147,13 +151,13 @@ export async function createRepresentationRuntime(input: {
 
   async function drainMemory(target: { runId: RunId; actorId: ActorId }): Promise<z.infer<typeof ProjectionResultSchema>> {
     const key = keyFor(target);
-    if (closed || projectionController.signal.aborted) return { kind: 'cancelled', projected: 0 };
+    if (admissionsBlocked(target.runId) || projectionController.signal.aborted) return { kind: 'cancelled', projected: 0 };
     try {
       const resources = await adapterFor(target);
       await resources.adapter.checkHealth({ signal: projectionController.signal });
-      if (closed || projectionController.signal.aborted) return { kind: 'cancelled', projected: 0 };
+      if (admissionsBlocked(target.runId) || projectionController.signal.aborted) return { kind: 'cancelled', projected: 0 };
       let total = 0;
-      while (!closed && !projectionController.signal.aborted) {
+      while (!admissionsBlocked(target.runId) && !projectionController.signal.aborted) {
         const result = ProjectionResultSchema.parse(await resources.worker.drain({ maxItems: 100, signal: projectionController.signal }));
         total += result.projected;
         if (result.kind !== 'completed' || !result.limitReached) {
@@ -168,7 +172,7 @@ export async function createRepresentationRuntime(input: {
       }
       return { kind: 'cancelled', projected: total };
     } catch (error) {
-      if (closed || projectionController.signal.aborted) return { kind: 'cancelled', projected: 0 };
+      if (admissionsBlocked(target.runId) || projectionController.signal.aborted) return { kind: 'cancelled', projected: 0 };
       projectionUnavailable.add(key);
       report({ kind: 'memory-projection', ...target, outcome: 'failed', reason: 'adapter_failed',
         ...(isIcmAdapterFailure(error) ? { adapterCode: error.code } : {}) });
@@ -179,10 +183,10 @@ export async function createRepresentationRuntime(input: {
   const memoryForActor = (target: { runId: RunId; actorId: ActorId }): IcmActorMemoryReader => ({
     async recall(request, options) {
       const key = keyFor(target);
-      if (closed || options?.signal?.aborted) throw new Error('La consulta de memoria fue cancelada.');
+      if (admissionsBlocked(target.runId) || options?.signal?.aborted) throw new Error('La consulta de memoria fue cancelada.');
       if (projectionUnavailable.has(key)) throw new Error('La memoria del personaje tiene proyecciones pendientes; no se puede afirmar que la búsqueda esté vacía.');
       const resources = await adapterFor(target);
-      if (closed || options?.signal?.aborted) throw new Error('La consulta de memoria fue cancelada.');
+      if (admissionsBlocked(target.runId) || options?.signal?.aborted) throw new Error('La consulta de memoria fue cancelada.');
       if (projectionUnavailable.has(key)) throw new Error('La memoria del personaje tiene proyecciones pendientes; no se puede afirmar que la búsqueda esté vacía.');
       return resources.adapter.actor.recall(request, options);
     },
@@ -203,7 +207,7 @@ export async function createRepresentationRuntime(input: {
     continuista,
     ...(testTransport === undefined ? {} : { sessionFactory: testTransport.actorSessionFactory }),
     onCommitted({ scope, commit }) {
-      if (closed || admissionSuspended || commit.resolution.kind !== 'applied') return;
+      if (admissionsBlocked(scope.runId) || commit.resolution.kind !== 'applied') return;
       try { input.onWorldCommitted?.({runId:scope.runId,eventIds:commit.resolution.events.map(event=>event.id)}); }
       catch { /* Presentation failure cannot undo a confirmed world commit. */ }
       const recipients = [...new Set(commit.resolution.perceptions.map((perception) => perception.recipientCharacterId))];
@@ -221,7 +225,7 @@ export async function createRepresentationRuntime(input: {
   const reviewer=createNarrationReviewPiPort({journal:input.host.journal,runtime,ownerToken,...(testTransport?.narrationReviewSessionFactory===undefined?{}:{sessionFactory:testTransport.narrationReviewSessionFactory})});
   const narrator=createNarratorPiWorker({journal:input.host.journal,runtime,ownerToken,reviewer,...(testTransport?.narratorSessionFactory===undefined?{}:{sessionFactory:testTransport.narratorSessionFactory})});
   function advanceRoutineClock(runId:RunId):boolean {
-    if(closed||admissionSuspended||!enabledRuns.has(runId))return false;
+    if(admissionsBlocked(runId)||!enabledRuns.has(runId))return false;
     const before=input.host.journal.loadWorld({runId});
     const result=input.host.journal.advanceRoutineClock({runId,operationId:randomUUID()});
     if(result.kind==='advanced') {
@@ -240,10 +244,11 @@ export async function createRepresentationRuntime(input: {
     return result.kind==='advanced'||result.kind==='existing';
   }
   async function beginNextPulse({runId}:{runId:RunId},signal?:AbortSignal) {
+    if(admissionsBlocked(runId)||signal?.aborted)return {kind:'idle'} as const;
     let begin=input.host.journal.beginCoordinatorPulse({runId,emptyStepPolicy:'defer'});
     while(begin.kind==='idle'&&!signal?.aborted&&advanceRoutineClock(runId)) {
       await yieldToHost();
-      if(closed||admissionSuspended||signal?.aborted||!enabledRuns.has(runId))return begin;
+      if(admissionsBlocked(runId)||signal?.aborted||!enabledRuns.has(runId))return begin;
       begin=input.host.journal.beginCoordinatorPulse({runId,emptyStepPolicy:'defer'});
       if (begin.kind === 'idle') {
         const world = input.host.journal.loadWorld({ runId });
@@ -253,7 +258,7 @@ export async function createRepresentationRuntime(input: {
         if (world === undefined || nextActorRoutineBoundary(world, configuration.roster.activeCharacterIds) === undefined) break;
       }
     }
-    if(begin.kind==='idle'&&!signal?.aborted) {
+    if(begin.kind==='idle'&&!signal?.aborted&&!admissionsBlocked(runId)) {
       const step=input.host.journal.readActiveRunStepJob({runId});
       if(step?.pulseId===null)input.host.journal.completeRunStepJob({runId,jobId:step.jobId,failed:false});
     }
@@ -266,63 +271,70 @@ export async function createRepresentationRuntime(input: {
     beginPulse:beginNextPulse,
     async beforeClosePulse({runId,pulseId},signal) {
       await delivery.waitForRunIdle({runId});
-      if(closed||signal.aborted)return false;
+      if(admissionsBlocked(runId)||signal.aborted)return false;
       const result=await director.run({runId,pulseId},{signal});
+      if(admissionsBlocked(runId)||signal.aborted)return false;
       if(result.kind==='blocked')return true;
       if(result.kind!=='accepted'&&result.kind!=='existing')return false;
       const configuration=ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({runId}));
       if(configuration.narrationMode.kind==='disabled')return true;
       if(!narratorReady)return false;
       const narrated=await narrator.run({runId,pulseId},{signal});
-      if(narrated.kind==='published' && narrated.receipt.kind==='published') {
+      if(!admissionsBlocked(runId)&&!signal.aborted&&narrated.kind==='published' && narrated.receipt.kind==='published') {
         try { input.onNarrationPublished?.({runId,publicationId:narrated.receipt.publication.publicationId}); } catch { /* Presentation failure cannot revoke confirmed narration. */ }
       }
       return narrated.kind==='published'||narrated.kind==='existing'||narrated.kind==='abstained'||narrated.kind==='blocked';
     },
     async onPulseClosed({runId,pulseId}) {
+      if(admissionsBlocked(runId))return;
       const step = input.host.journal.readActiveRunStepJob({runId});
       if (step === undefined) return;
       if (step.pulseId !== pulseId) return;
       await delivery.waitForRunIdle({runId});
+      if(admissionsBlocked(runId))return;
       const configuration = ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({runId}));
       let failed = false;
       for (const actorId of configuration.roster.activeCharacterIds) {
         let result = await drainMemory({runId,actorId});
-        while (result.kind === 'busy' && !closed) { await yieldToHost(); result = await drainMemory({runId,actorId}); }
+        while (result.kind === 'busy' && !admissionsBlocked(runId)) { await yieldToHost(); result = await drainMemory({runId,actorId}); }
         if (result.kind !== 'completed') failed = true;
       }
-      input.host.journal.completeRunStepJob({runId,jobId:step.jobId,failed});
+      if(!admissionsBlocked(runId))input.host.journal.completeRunStepJob({runId,jobId:step.jobId,failed});
     },
     onFailure(failure) {
       report({ kind: 'coordinator', runId: failure.runId, failureKind: failure.kind });
     },
   });
 
-  function trackOperation<T>(operation: () => Promise<T>): Promise<T> {
+  function trackOperation<T>(operation: () => Promise<T>, runId?: RunId): Promise<T> {
     workEpoch += 1;
     const result = Promise.resolve().then(operation);
     let settled: Promise<void>;
     settled = result.then(() => undefined, () => undefined).finally(() => {
       inFlightOperations.delete(settled);
+      if(runId!==undefined){const tasks=runOperations.get(runId);tasks?.delete(settled);if(tasks?.size===0)runOperations.delete(runId);}
       workEpoch += 1;
     });
     inFlightOperations.add(settled);
+    if(runId!==undefined){let tasks=runOperations.get(runId);if(tasks===undefined){tasks=new Set();runOperations.set(runId,tasks);}tasks.add(settled);}
     return result;
   }
 
   function trackBackground(input: { runId: RunId; operation: () => Promise<void> }): void {
-    if (closed||admissionSuspended) return;
+    if (admissionsBlocked(input.runId)) return;
     void trackOperation(async () => {
+      if(admissionsBlocked(input.runId))return;
       try { await input.operation(); }
       catch { report({ kind: 'coordinator', runId: input.runId, failureKind: 'journal' }); }
-    });
+    },input.runId);
   }
 
   async function prepareRun(rawInput: unknown): Promise<boolean> {
     if (closed||admissionSuspended) return false;
     const { runId } = ScheduleRunSchema.parse(rawInput);
-    if (!enabledRuns.has(runId)) return false;
+    if (admissionsBlocked(runId)||!enabledRuns.has(runId)) return false;
     const begin = await beginNextPulse({runId});
+    if(admissionsBlocked(runId))return false;
     if (begin.kind === 'inactive') return false;
     // An authorized run can wait for its first stimulus. Accepting its schedule
     // must not depend on a fictional event or an already delivered perception.
@@ -334,14 +346,14 @@ export async function createRepresentationRuntime(input: {
       return true;
     }
     for (const job of begin.jobs) {
-      if (closed||admissionSuspended) return false;
+      if (admissionsBlocked(runId)) return false;
       // Accepted jobs only need their durable commit receipt; blocked/running jobs
       // are handled or suspended by the coordinator without a new actor call.
       if (job.state !== 'queued') continue;
       const projected = await drainMemory({ runId: job.runId, actorId: job.actorId });
-      if (projected.kind !== 'completed'||admissionSuspended) return false;
+      if (projected.kind !== 'completed'||admissionsBlocked(runId)) return false;
     }
-    if (closed||admissionSuspended) return false;
+    if (admissionsBlocked(runId)) return false;
     workEpoch += 1;
     coordinator.schedule({ runId });
     return true;
@@ -350,7 +362,7 @@ export async function createRepresentationRuntime(input: {
   const delivery = createWorldDeliverySupervisor({
     journal: input.host.journal,
     onOutcome(target, result) {
-      if (closed) return;
+      if (admissionsBlocked(target.runId)) return;
       if (result.kind === 'failed') {
         report({ kind: 'delivery', ...target, outcome: 'failed', reason: result.reason });
         return;
@@ -358,7 +370,7 @@ export async function createRepresentationRuntime(input: {
       if (result.kind !== 'completed') return;
       trackBackground({ runId: target.runId, operation: async () => {
         const projection = await drainMemory(target);
-        if (projection.kind !== 'completed' || closed) return;
+        if (projection.kind !== 'completed' || admissionsBlocked(target.runId)) return;
         await prepareRun({ runId: target.runId });
       } });
     },
@@ -366,28 +378,34 @@ export async function createRepresentationRuntime(input: {
 
   function scheduleDelivery(rawInput: unknown): void {
     if (closed||admissionSuspended) return;
+    const request=ScheduleDeliverySchema.parse(rawInput);
+    if(admissionsBlocked(request.runId))return;
     workEpoch += 1;
-    delivery.schedule(ScheduleDeliverySchema.parse(rawInput));
+    delivery.schedule(request);
   }
 
   function scheduleRun(rawInput: unknown): Promise<boolean> {
     if (closed||admissionSuspended) return Promise.resolve(false);
     const { runId } = ScheduleRunSchema.parse(rawInput);
+    if(admissionsBlocked(runId))return Promise.resolve(false);
     enabledRuns.add(runId);
-    return trackOperation(() => prepareRun({ runId }));
+    return trackOperation(() => prepareRun({ runId }),runId);
   }
 
   function cancelRun(rawInput: unknown): Promise<boolean> {
     if (closed) return Promise.resolve(false);
     const { runId } = ScheduleRunSchema.parse(rawInput);
+    if(suspendedRuns.has(runId))return Promise.resolve(false);
     enabledRuns.delete(runId);
-    return trackOperation(() => coordinator.cancelRun({ runId }));
+    return trackOperation(() => coordinator.cancelRun({ runId }),runId);
   }
 
   function retryMemoryProjection(rawInput: unknown): Promise<z.infer<typeof ProjectionResultSchema>> {
     if (closed||admissionSuspended) return Promise.resolve({ kind: 'cancelled', projected: 0 });
+    const target = TargetSchema.parse(rawInput);
+    if(admissionsBlocked(target.runId))return Promise.resolve({kind:'cancelled',projected:0});
     return trackOperation(async () => {
-      const target = TargetSchema.parse(rawInput);
+      if(admissionsBlocked(target.runId))return {kind:'cancelled',projected:0} as const;
       const configuration = input.host.journal.readWorldConfiguration({ runId: target.runId });
       if (configuration === undefined) throw new Error('No existe una configuración durable para este Escenario.');
       const prepared = ReadyRunConfigurationSchema.parse(configuration);
@@ -395,9 +413,9 @@ export async function createRepresentationRuntime(input: {
         throw new Error('El personaje no está preparado para esta corrida.');
       }
       const result = await drainMemory(target);
-      if (result.kind === 'completed' && !closed) await prepareRun({ runId: target.runId });
+      if (result.kind === 'completed' && !admissionsBlocked(target.runId)) await prepareRun({ runId: target.runId });
       return result;
-    });
+    },target.runId);
   }
 
   function recover(): Promise<{ deliveryTargets: number; coordinatorTargets: number; scheduledRuns: number }> {
@@ -407,6 +425,7 @@ export async function createRepresentationRuntime(input: {
       const targets = input.host.journal.listCoordinatorPulseTargets({ limit: 1_000 });
       const scheduledRuns = 0;
       for (const target of targets) {
+        if(admissionsBlocked(target.runId))continue;
         if (enabledRuns.has(target.runId) || input.host.journal.readActiveRunStepJob(target) === undefined) continue;
         // A restart cannot reuse expiring preflight authorization for new calls.
         // Preserve the step/pulse and reservations; an explicit freshly gated
@@ -429,7 +448,7 @@ export async function createRepresentationRuntime(input: {
     }
   }
   async function suspendAdmissions(rawRunIds:unknown):Promise<()=>void>{
-    if(closed||admissionSuspended)throw new Error('BACKUP_REPRESENTATION_BUSY');
+    if(closed||admissionSuspended||suspendedRuns.size>0)throw new Error('BACKUP_REPRESENTATION_BUSY');
     const runIds=z.array(RunIdSchema).max(100000).parse(rawRunIds);
     admissionSuspended=true;
     enabledRuns.clear();
@@ -441,6 +460,31 @@ export async function createRepresentationRuntime(input: {
     return ()=>{if(released)return;released=true;admissionSuspended=false;};
   }
 
+  /** A run lease stops new callbacks immediately and waits for actual worker
+   * finally/dispose and run-local projection work. Durable pending work is left
+   * untouched; a later fresh preflight must explicitly schedule this run again. */
+  function suspendRunAdmissions(rawInput: unknown): Promise<() => void> {
+    const {runId}=ScheduleRunSchema.parse(rawInput);
+    if(admissionsBlocked(runId))return Promise.reject(new Error('REPRESENTATION_RUN_BUSY'));
+    suspendedRuns.add(runId);
+    enabledRuns.delete(runId);
+    const task=(async()=>{
+      const leases=await Promise.allSettled([coordinator.suspendRunAdmissions({runId}),delivery.suspendRunAdmissions({runId})]);
+      const releases=leases.flatMap(result=>result.status==='fulfilled'?[result.value]:[]);
+      try {
+        const failed=leases.find(result=>result.status==='rejected');
+        if(failed?.status==='rejected')throw failed.reason;
+        while(true){const tasks=runOperations.get(runId);if(tasks===undefined||tasks.size===0)break;await Promise.all([...tasks]);}
+        if(closed)throw new Error('REPRESENTATION_CLOSED');
+      }catch(error){for(const release of releases)release();suspendedRuns.delete(runId);throw error;}
+      let released=false;
+      return ()=>{if(released)return;released=true;for(const release of releases)release();suspendedRuns.delete(runId);};
+    })();
+    suspensionTasks.add(task);
+    void task.finally(()=>suspensionTasks.delete(task)).catch(()=>undefined);
+    return task;
+  }
+
   function close(): Promise<void> {
     if (closing !== undefined) return closing;
     closed = true;
@@ -448,6 +492,7 @@ export async function createRepresentationRuntime(input: {
     closing = (async () => {
       await Promise.all([delivery.close(), coordinator.close()]);
       while (inFlightOperations.size > 0) await Promise.all([...inFlightOperations]);
+      while (suspensionTasks.size > 0) await Promise.allSettled([...suspensionTasks]);
       try { input.host.close(); }
       finally { activeHosts.delete(input.host); }
     })();
@@ -467,6 +512,7 @@ export async function createRepresentationRuntime(input: {
     recover,
     waitForIdle,
     suspendAdmissions,
+    suspendRunAdmissions,
     close,
     get isClosed() { return closed; },
     get roleReadiness() { return {actor:!closed,continuista:!closed,director:!closed,narrator:!closed&&narratorReady}; },

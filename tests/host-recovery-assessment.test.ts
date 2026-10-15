@@ -224,3 +224,23 @@ test('assessment compara historia de configuración como estado operativo y bloq
     assert.deepEqual(bytes(f.root), before);
   } finally { await f.close(); }
 });
+
+for (const table of [
+  'identity_promotion_receipts', 'actor_identity_epochs', 'actor_pi_session_archives', 'actor_identity_session_bindings', 'actor_job_identity_bindings',
+  'configurator_http_operations', 'configurator_jobs', 'configurator_generations', 'configurator_sessions', 'configurator_checkpoints', 'configurator_candidates', 'configurator_operations', 'configurator_consents',
+]) test(`assessment incluye ${table} en comparación operativa aunque no cambien eventos`, async () => {
+  const f = await fixture();
+  try {
+    const bundle = await f.backup(); assert.ok(assess(f, bundle).kind === 'compatible');
+    f.mutate(db => {
+      assert.ok(db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?").get(table), 'La migración debe crear la tabla.');
+      // Fixed, test-owned table names. A schema-only divergence must not be
+      // discarded as administrative state while recovering an older backup.
+      db.exec(`ALTER TABLE ${table} ADD COLUMN schema39_probe TEXT`);
+      assert.equal(db.prepare('SELECT count(*) n FROM world_events').get()?.n, 0);
+    });
+    const before = bytes(f.root); const result = assess(f, bundle);
+    assert.ok(result.kind === 'blocked'); assert.equal(result.code, 'RECOVERY_STATE_DIVERGED');
+    assert.deepEqual(bytes(f.root), before);
+  } finally { await f.close(); }
+});

@@ -28,19 +28,21 @@ export function createWorldDeliverySupervisor(input: {
   const activeRunIds = new Map<string, Target['runId']>();
   let closed = false;
   let admissionSuspended=false;
+  const suspendedRuns = new Set<Target['runId']>();
 
   function schedule(rawInput: unknown): void {
     if (closed||admissionSuspended) return;
     const request = ScheduleSchema.parse(rawInput);
+    if (suspendedRuns.has(request.runId)) return;
     for (const actorId of request.actorIds) start({ runId: request.runId, actorId });
   }
 
   function start(target: Target): void {
     const key = JSON.stringify([target.runId, target.actorId]);
-    if (active.has(key) || closed||admissionSuspended) return;
+    if (active.has(key) || closed||admissionSuspended || suspendedRuns.has(target.runId)) return;
     const worker = createDeliverWorldWorker({ journal: input.journal, ...target });
     const task = (async () => {
-      while (!controller.signal.aborted) {
+      while (!controller.signal.aborted && !suspendedRuns.has(target.runId)) {
         let result: WorldDeliveryDrainResult;
         try {
           result = await worker.drain({ maxItems: 20, signal: controller.signal });
@@ -81,10 +83,25 @@ export function createWorldDeliverySupervisor(input: {
       while (active.size > 0) await Promise.all([...active.values()]);
     },
     async suspendAdmissions():Promise<()=>void>{
-      if(closed||admissionSuspended)throw new Error('BACKUP_DELIVERY_BUSY');
+      if(closed||admissionSuspended||suspendedRuns.size>0)throw new Error('BACKUP_DELIVERY_BUSY');
       admissionSuspended=true;
       while(active.size>0)await Promise.all([...active.values()]);
       let released=false;return ()=>{if(released)return;released=true;admissionSuspended=false;};
+    },
+
+    async suspendRunAdmissions(rawInput: unknown): Promise<() => void> {
+      const { runId } = z.strictObject({runId:RunIdSchema}).parse(rawInput);
+      if (closed || admissionSuspended || suspendedRuns.has(runId)) throw new Error('DELIVERY_RUN_BUSY');
+      suspendedRuns.add(runId);
+      try {
+        while (true) {
+          const tasks = [...active.entries()].filter(([key]) => activeRunIds.get(key) === runId).map(([, task]) => task);
+          if (tasks.length === 0) break;
+          await Promise.all(tasks);
+        }
+      } catch (error) { suspendedRuns.delete(runId); throw error; }
+      let released = false;
+      return () => { if (released) return; released = true; suspendedRuns.delete(runId); };
     },
 
     async close(): Promise<void> {

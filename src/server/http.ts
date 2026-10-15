@@ -52,6 +52,7 @@ import type { RunInspectorApplication } from '../application/run-inspector.ts';
 
 import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema, DirectorObservationListSchema } from '../domain/run-observation.ts';
 import { WorldSeqSchema } from '../domain/values.ts';
+import { IdentityPromotionJobViewSchema } from '../domain/identity-promotion-http.ts';
 import { RunRefreshSchema, type RunRefresh } from '../domain/run-refresh.ts';
 import {
   DirectionEventsPageSchema, DirectionMutationResultSchema, DirectionRequestPayloadSchema, ChangeCircumstancePayloadSchema,
@@ -1187,6 +1188,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
   const refreshClients=new Set<RefreshClient>();
   let refreshTimer:ReturnType<typeof setInterval>|undefined;
   let refreshTick:Promise<void>|undefined;
+  const pendingRefreshRuns=new Set<string>();
   let serverClosing=false;
   function refreshCursor(value:RunRefresh){return `rf1.${value.runId}.c${value.configRevision}.w${value.worldRevision}.l${value.lifecycleRevision}.s${value.lastWorldSeq}`;}
   function validateRefreshCursor(value:unknown,runId:string,current:RunRefresh){
@@ -1237,12 +1239,21 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
       }
     }));
   }
+  function scheduleRefreshTick(){
+    if(refreshTick!==undefined)return;
+    pendingRefreshRuns.clear();
+    refreshTick=tickRefresh().catch(()=>{for(const client of refreshClients)closeRefresh(client);}).finally(()=>{
+      refreshTick=undefined;
+      if(pendingRefreshRuns.size>0&&!serverClosing)scheduleRefreshTick();
+    });
+  }
+  function notifyRunRefresh(runId:string){
+    if(serverClosing||options.admissionBarrier?.isHeld||!Array.from(refreshClients).some(client=>client.runId===runId))return;
+    pendingRefreshRuns.add(runId);scheduleRefreshTick();
+  }
   function startRefreshTimer(){
     if(refreshTimer!==undefined)return;
-    refreshTimer=setInterval(()=>{
-      if(refreshTick!==undefined)return;
-      refreshTick=tickRefresh().catch(()=>{for(const client of refreshClients)closeRefresh(client);}).finally(()=>{refreshTick=undefined;});
-    },refreshPollMs);
+    refreshTimer=setInterval(scheduleRefreshTick,refreshPollMs);
     refreshTimer.unref();
   }
 
@@ -2166,7 +2177,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           fail({ status: 409, kind: 'conflict', code: 'INVALID_LIFECYCLE', message: 'La configuración no se puede editar con el ciclo de vida actual.' });
         }
         if (result.kind === 'readonly') {
-          fail({ status: 409, kind: 'conflict', code: 'FORK_PREPARATION_READ_ONLY', message: 'La preparación heredada es de sólo lectura; usá los controles específicos de Dirección.' });
+          fail({ status: 409, kind: 'conflict', code: result.reason==='identity-promoted'?'IDENTITY_PREPARATION_READ_ONLY':'FORK_PREPARATION_READ_ONLY', message: result.reason==='identity-promoted'?'La preparación tiene una identidad promovida y sólo admite cambios mediante su flujo de evolución.':'La preparación heredada es de sólo lectura; usá los controles específicos de Dirección.' });
         }
         if (result.kind === 'conflict') {
           const current = await options.runConfigurationDrafts.readRunConfigurationDraftState({ runId });
@@ -2206,7 +2217,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           fail({ status: 409, kind: 'conflict', code: 'INVALID_LIFECYCLE', message: 'La configuración no se puede validar con el ciclo de vida actual.' });
         }
         if (result.kind === 'readonly') {
-          fail({ status: 409, kind: 'conflict', code: 'FORK_PREPARATION_READ_ONLY', message: 'La preparación heredada es de sólo lectura; usá los controles específicos de Dirección.' });
+          fail({ status: 409, kind: 'conflict', code: result.reason==='identity-promoted'?'IDENTITY_PREPARATION_READ_ONLY':'FORK_PREPARATION_READ_ONLY', message: result.reason==='identity-promoted'?'La preparación tiene una identidad promovida y sólo admite cambios mediante su flujo de evolución.':'La preparación heredada es de sólo lectura; usá los controles específicos de Dirección.' });
         }
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra operación de borrador.' });
@@ -2454,6 +2465,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
       if (extension !== undefined) {
         const common = {
           path: route, query: url.searchParams, principalId: localOperatorPrincipalId(), mode: session.mode,
+          inspectionRunIds:Array.from(session.observerViews).filter(([,view])=>view==='internal').map(([runId])=>runId),
           ifMatch: typeof req.headers['if-match'] === 'string' ? req.headers['if-match'] : null,
           ifNoneMatch: typeof req.headers['if-none-match'] === 'string' ? req.headers['if-none-match'] : null,
         };
@@ -2470,10 +2482,17 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         try { result = OperatorResponseSchema.parse(await extension.handle(request)); }
         catch (error) { if (error instanceof z.ZodError) throw validationFailure(error); throw error; }
         switch (result.kind) {
-          case 'json': sendJson(res, result.status, result.body, {
+          case 'json': {
+            sendJson(res, result.status, result.body, {
             ...(result.headers.ETag === undefined ? {} : { ETag: result.headers.ETag }),
             ...(result.headers.Location === undefined ? {} : { Location: result.headers.Location }),
-          }); return;
+            });
+            if(request.kind==='write'&&extension.name==='identity-promotion'){
+              const promoted=IdentityPromotionJobViewSchema.safeParse(result.body);
+              if(promoted.success&&promoted.data.promotion.kind==='applied')notifyRunRefresh(promoted.data.runId);
+            }
+            return;
+          }
           case 'binary': {
             if (createHash('sha256').update(result.bytes).digest('hex') !== result.sha256) throw new Error('Artifact checksum mismatch');
             noStoreBinary(res, 200, result.mimeType, result.bytes, result.sha256, result.filename); return;
@@ -2518,6 +2537,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
   async function resetSessions():Promise<void>{
     sessions.clear();
     bootstraps.clear();
+    pendingRefreshRuns.clear();
     if(refreshTimer!==undefined){clearInterval(refreshTimer);refreshTimer=undefined;}
     for(const client of refreshClients)closeRefresh(client);
     await refreshTick;
@@ -2550,6 +2570,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     async close() {
       if (!listening) return;
       serverClosing=true;
+      pendingRefreshRuns.clear();
       if(refreshTimer!==undefined){clearInterval(refreshTimer);refreshTimer=undefined;}
       for(const client of refreshClients)closeRefresh(client);
       await refreshTick;

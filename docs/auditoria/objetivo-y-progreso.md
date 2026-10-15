@@ -79,3 +79,11 @@ El compilador del Configurador ahora enlaza expediente/preparación/configuraci�
 Faltan job/dispatcher Pi durable del Configurador, epochs de sesión, consentimiento gráfico y aplicación transaccional en frontera coherente, además de P22 live. Esta base no se presenta como promoción ejecutada. La aceptación integral y los ocho pasos del objetivo continúan pendientes.
 
 Verificación final C50: TypeScript correcto, **1.042 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.043 totales), con ICM real; build correcto (461 módulos). Revisión independiente de fundamentos: 27/27 focales sin bloqueantes restantes. No se ejecutó una promoción ni inferencia del Configurador.
+
+## Corte 51 — evolución estable de identidad
+
+Implementados Configurador Pi independiente con propuesta durable y cuotas, revisión privada con Dirección e inspector explícitos, consentimiento vinculado a hashes y promoción transaccional v39. La identidad futura abre una sesión nueva; la sesión anterior, los cortes históricos, ICM, reloj y presupuesto se conservan. El borrador original queda protegido y su lectura muestra la configuración efectiva. Recuperación y backup contemplan épocas, bindings históricos y sesiones del Configurador.
+
+Verificación global: **1.125 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.126 totales), TypeScript y build correctos. La revisión independiente aprobó 43 pruebas focales. El roundtrip con SDK e ICM reales acredita próxima sesión, conservación histórica e invalidación de preflight; los resultados del proveedor son controlados, sin inferencia externa. La comprobación gráfica solicitó una propuesta, revisó evidencia propia y aplicó v1→v2 sin avanzar secuencia ni reloj. Tras reiniciar el host y recargar, el historial y recibo siguieron disponibles sin nueva inferencia.
+
+Persisten P22 live, export portable público y aceptación integral de los 77 requisitos. Los ocho pasos del objetivo permanecen activos. [Evidencia y límites](promocion-identidad.md).

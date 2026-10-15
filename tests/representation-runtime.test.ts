@@ -863,3 +863,125 @@ test('circunstancia física confirmada llega a memoria y Actor/Continuista publi
     assert.deepEqual(notices,result.receipt.effect.eventIds,'replay no notifica ni actúa otra vez');
   }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
 });
+
+test('suspensión por corrida espera disposal real sin esperar ni deshabilitar otra corrida activa', realIcmOptions, async () => {
+  assert.ok(realIcmBinary);
+  const fixture=await setup();let host:ReturnType<typeof openLocalHost>|undefined;
+  let runtime:Awaited<ReturnType<typeof createRepresentationRuntime>>|undefined;
+  const startedA=deferred();const startedB=deferred();const promptA=deferred();const promptB=deferred();
+  const disposingA=deferred();const finishDisposalA=deferred();let callsA=0;let callsB=0;
+  try {
+    host=hostFromFixture(fixture);
+    const runA=registerAdditionalRun(fixture,host);const runB=registerAdditionalRun(fixture,host);
+    const transportA=controlledTransport({fixture,host,runId:runA,stats:{requests:0,recallResults:0,disposed:0}});
+    const transportB=controlledTransport({fixture,host,runId:runB,stats:{requests:0,recallResults:0,disposed:0}});
+    runtime=await createRepresentationRuntime({host,icmBinaryPath:realIcmBinary,testTransport:{...transportA,
+      async actorSessionFactory(input){
+        const isA=input.runId===runA;const handle=await (isA?transportA:transportB).actorSessionFactory(input);
+        return {...handle,async prompt(){
+          if(isA){callsA++;startedA.resolve();await promptA.promise;}else{callsB++;startedB.resolve();await promptB.promise;}
+          return {kind:'pi-terminal-candidate' as const,candidateId:null,outcome:'aborted' as const,candidateLeafId:null};
+        },async abortAndDispose(){
+          if(isA){promptA.resolve();disposingA.resolve();await finishDisposalA.promise;}else promptB.resolve();
+          await handle.abortAndDispose();
+        }};
+      },
+    }});
+    runtime.scheduleDelivery({runId:runA,actorIds:[actorId]});runtime.scheduleDelivery({runId:runB,actorIds:[actorId]});
+    await Promise.all([runtime.scheduleRun({runId:runA}),runtime.scheduleRun({runId:runB})]);
+    await withTimeout(Promise.all([startedA.promise,startedB.promise]),15000);
+    let acquired=false;
+    const acquisition=runtime.suspendRunAdmissions({runId:runA}).then(release=>{acquired=true;return release;});
+    await withTimeout(disposingA.promise,5000);await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(acquired,false,'el lease no se concede mientras Pi sigue dentro de finally/dispose');
+    assert.equal(await runtime.scheduleRun({runId:runA}),false);
+    assert.equal(await runtime.scheduleRun({runId:runB}),true,'otra corrida sigue admitiendo agendas');
+    assert.equal((await runtime.retryMemoryProjection({runId:runA,actorId})).kind,'cancelled');
+    await assert.rejects(runtime.suspendAdmissions([runA,runB]),/BUSY/);
+    await assert.rejects(runtime.suspendRunAdmissions({runId:runA}),/BUSY/);
+    finishDisposalA.resolve();
+    const release=await withTimeout(acquisition,5000);
+    assert.equal(callsA,1);assert.equal(callsB,1,'el lease no esperó el prompt aún abierto de B');
+    // A direct host fixture creates durable pending work while the runtime lease
+    // is held. Production admission is responsible for forbidding this mutation.
+    const currentA=host.journal.loadWorld({runId:runA});assert.ok(currentA);
+    const later=host.journal.commitHumanIntervention({runId:runA,participantId:'visitante-prueba',expectedRevision:currentA.revision,
+      idempotencyKey:randomUUID(),request:{kind:'speech',recipientCharacterIds:[actorId],
+        channelId:'00000000-0000-4000-8000-000000000104',content:{kind:'speech',text:'Estímulo posterior al lease.'}}});
+    assert.ok(later.kind!=='idempotencyConflict'&&later.kind!=='invalidLifecycle'&&later.resolution.kind==='applied');
+    const before=host.journal.loadWorld({runId:runA});
+    runtime.scheduleDelivery({runId:runA,actorIds:[actorId]});await runtime.recover();
+    assert.equal(await runtime.scheduleRun({runId:runA}),false);
+    assert.deepEqual(host.journal.loadWorld({runId:runA}),before,'callbacks tardíos no cambian el Escenario suspendido');
+    assert.ok(host.journal.listPendingWorldDeliveryTargets({limit:1000}).some(target=>target.runId===runA),'el lease conserva entregas pendientes sin ejecutarlas ni completarlas');
+    assert.equal(await runtime.scheduleRun({runId:runB}),true);
+    release();release();
+    runtime.scheduleDelivery({runId:runA,actorIds:[actorId]});
+    await withTimeout(runtime.retryMemoryProjection({runId:runA,actorId}),5000);
+    promptB.resolve();await withTimeout(runtime.waitForIdle(),10000);
+    assert.equal(host.journal.listPendingWorldDeliveryTargets({limit:1000}).some(target=>target.runId===runA),false,'una agenda de entrega explícita puede continuar después del lease');
+    assert.equal(callsA,1,'liberar no restaura autorización de inferencia incluso si llega otro estímulo');
+    assert.equal(await runtime.scheduleRun({runId:runA}),true);
+    await withTimeout(runtime.waitForIdle(),10000);
+    const globalRelease=await runtime.suspendAdmissions([runA,runB]);
+    await assert.rejects(runtime.suspendRunAdmissions({runId:runA}),/BUSY/);globalRelease();
+  }finally{
+    promptA.resolve();promptB.resolve();finishDisposalA.resolve();
+    if(runtime!==undefined)await runtime.close();else host?.close();
+    rmSync(fixture.directory,{recursive:true,force:true});
+  }
+});
+
+test('suspensión por corrida drena proyección pendiente propia y permite proyección nueva de otra corrida', realIcmOptions, async()=>{
+  assert.ok(realIcmBinary);
+  const fixture=await setup();let host:ReturnType<typeof openLocalHost>|undefined;
+  let runtime:Awaited<ReturnType<typeof createRepresentationRuntime>>|undefined;
+  const gate=join(fixture.directory,'release-target-projection');
+  try{
+    host=hostFromFixture(fixture);const runA=registerAdditionalRun(fixture,host);const runB=registerAdditionalRun(fixture,host,false);
+    const marker=join(fixture.directory,'target-projection-entered');const executable=join(fixture.directory,'gated-icm');
+    writeFileSync(executable,`#!/bin/sh\ncase "$*" in *'${runA}'*) : > '${marker}'; while [ ! -f '${gate}' ]; do /bin/sleep 0.01; done;; esac\nexec '${realIcmBinary}' "$@"\n`,{mode:0o700});
+    runtime=await createRepresentationRuntime({host,icmBinaryPath:executable});
+    runtime.scheduleDelivery({runId:runA,actorIds:[actorId]});await waitForFile(marker);
+    let acquired=false;const acquisition=runtime.suspendRunAdmissions({runId:runA}).then(release=>{acquired=true;return release;});
+    await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(acquired,false);
+    const other=await withTimeout(runtime.retryMemoryProjection({runId:runB,actorId}),10000);
+    assert.equal(other.kind,'completed','el drenado de A no bloquea ICM ni operaciones nuevas de B');
+    assert.equal(acquired,false);
+    assert.equal(await runtime.scheduleRun({runId:runB}),true);
+    writeFileSync(gate,'release',{mode:0o600});const release=await withTimeout(acquisition,10000);
+    assert.equal((await runtime.retryMemoryProjection({runId:runA,actorId})).kind,'cancelled');
+    const reader=new DatabaseSync(join(host.privateDataRoot,'world.sqlite'),{readOnly:true});
+    try { const state=reader.prepare('SELECT COUNT(*) n,COUNT(o.experience_id) pending,COUNT(r.experience_id) projected FROM experiences e LEFT JOIN memory_outbox o ON o.experience_id=e.experience_id LEFT JOIN memory_receipts r ON r.experience_id=e.experience_id WHERE e.run_id=? AND e.actor_id=?').get(runA,actorId);
+      assert.ok(Number(state?.n)>0);
+      assert.equal(Number(state?.pending)+Number(state?.projected),Number(state?.n),'cada experiencia conserva su outbox o el recibo real de ICM; el lease no la borra');
+    } finally {reader.close();}
+    release();
+    const retried=await withTimeout(runtime.retryMemoryProjection({runId:runA,actorId}),10000);assert.equal(retried.kind,'completed');
+    await withTimeout(runtime.waitForIdle(),10000);
+  }finally{
+    writeFileSync(gate,'release',{mode:0o600});
+    if(runtime!==undefined)await runtime.close();else host?.close();
+    rmSync(fixture.directory,{recursive:true,force:true});
+  }
+});
+
+test('close drena una adquisición de lease por corrida sin liberar ownership con proyección viva', async()=>{
+  const fixture=await setup();let host:ReturnType<typeof openLocalHost>|undefined;
+  let runtime:Awaited<ReturnType<typeof createRepresentationRuntime>>|undefined;
+  try{
+    host=hostFromFixture(fixture);const runId=registerAdditionalRun(fixture,host);
+    const marker=join(fixture.directory,'lease-close-icm-started');const executable=join(fixture.directory,'lease-close-icm');
+    writeFileSync(executable,`#!/bin/sh\n: > '${marker}'\nexec /bin/sleep 30\n`,{mode:0o700});
+    runtime=await createRepresentationRuntime({host,icmBinaryPath:executable});
+    runtime.scheduleDelivery({runId,actorIds:[actorId]});await waitForFile(marker);
+    const acquired=runtime.suspendRunAdmissions({runId});
+    const refused=assert.rejects(acquired,/REPRESENTATION_CLOSED/);
+    await withTimeout(runtime.close(),5000);await refused;
+    assert.equal(runtime.isClosed,true);
+    const reopened=openLocalHost({privateDataRoot:fixture.directory});reopened.close();
+  }finally{
+    if(runtime!==undefined)await runtime.close();else host?.close();
+    rmSync(fixture.directory,{recursive:true,force:true});
+  }
+});

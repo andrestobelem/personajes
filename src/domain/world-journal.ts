@@ -61,7 +61,7 @@ export const RunDraftValidationResultSchema = z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('conflict'),currentRevision:RevisionSchema}),
   z.strictObject({kind:z.literal('missing')}),
   z.strictObject({kind:z.literal('invalidLifecycle'),lifecycle:z.enum(['running','paused','stopped','closed'])}),
-  z.strictObject({kind:z.literal('readonly'),reason:z.literal('fork-published')}),
+  z.strictObject({kind:z.literal('readonly'),reason:z.enum(['fork-published','identity-promoted'])}),
   z.strictObject({kind:z.literal('idempotencyConflict')}),
 ]);
 
@@ -75,13 +75,13 @@ export const RunDraftMutationResultSchema = z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('conflict'),currentRevision:RevisionSchema}),
   z.strictObject({kind:z.literal('missing')}),
   z.strictObject({kind:z.literal('invalidLifecycle'),lifecycle:z.enum(['running','paused','stopped','closed'])}),
-  z.strictObject({kind:z.literal('readonly'),reason:z.literal('fork-published')}),
+  z.strictObject({kind:z.literal('readonly'),reason:z.enum(['fork-published','identity-promoted'])}),
   z.strictObject({kind:z.literal('idempotencyConflict')}),
 ]);
 
 export const RunDraftOperationResultSchema = z.union([RunDraftMutationResultSchema,RunDraftValidationResultSchema]);
 
-export const RunDraftStateSchema = z.strictObject({runId:RunIdSchema,revision:RevisionSchema,configurationRevision:RevisionSchema,lifecycle:WorldLifecycleSchema,worldRevision:RevisionSchema.nullable(),configurationHash:HashSchema.nullable(),editability:z.enum(['editable','fork-published']).optional()});
+export const RunDraftStateSchema = z.strictObject({runId:RunIdSchema,revision:RevisionSchema,configurationRevision:RevisionSchema,lifecycle:WorldLifecycleSchema,worldRevision:RevisionSchema.nullable(),configurationHash:HashSchema.nullable(),editability:z.enum(['editable','fork-published','identity-promoted']).optional()});
 export type WorldLifecycle = z.infer<typeof WorldLifecycleSchema>;
 
 export const PreparedContextFenceSchema = z.strictObject({

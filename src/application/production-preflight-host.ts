@@ -49,7 +49,13 @@ export function createProductionPreflightHost(input: { journal: Journal; catalog
   return {
     async readCurrentConfigurationRevision({ runId }) {
       const draft = journal.readRunConfigurationDraft({ runId });
-      if (draft !== undefined) return { kind: 'loaded', revision: draft.revision };
+      if (draft !== undefined) {
+        // A lived identity revision advances the effective Ready configuration
+        // while preserving the original draft/history. An ordinary newer draft
+        // still takes precedence and requires its own validation/promotion.
+        try { return { kind: 'loaded', revision: Math.max(draft.revision, ready(runId).configRevision) }; }
+        catch { return { kind: 'loaded', revision: draft.revision }; }
+      }
       try { return { kind: 'loaded', revision: ready(runId).configRevision }; } catch { return { kind: 'unavailable', code: 'configuration-not-ready' }; }
     },
     async loadCurrentWorldSnapshot({ runId }) { const world = journal.loadWorld({ runId }); if (world === undefined) throw new Error('Committed world unavailable.'); return world; },

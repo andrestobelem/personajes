@@ -13,7 +13,7 @@ import { changeDraftField, confirmDraftField, DRAFT_SECTIONS, draftFieldState, d
 
 type Pending = 'moment' | 'place' | 'line' | 'budget' | 'continuity' | 'humanParticipants' | 'world' | 'character' | 'circadian' | 'dayNight' | 'audio';
 export function RunDraftEditor(props: {
-  draft: RunConfigurationDraft; initialDirty?: boolean; catalog: CatalogPage['items']; saving: boolean; lifecycle?: string; readOnly?: boolean; readOnlyReason?: 'fork-published'; message?: string;
+  draft: RunConfigurationDraft; initialDirty?: boolean; catalog: CatalogPage['items']; saving: boolean; lifecycle?: string; readOnly?: boolean; readOnlyReason?: 'fork-published' | 'identity-promoted'; message?: string;
   onSave: (draft: RunConfigurationDraft) => void; onValidate: () => void; onDirty: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = React.useState(props.draft);
@@ -45,7 +45,7 @@ export function RunDraftEditor(props: {
   return <div className="draft-editor">
     <div className="draft-editor-header"><div><span className="eyebrow">PREPARACIÓN DE LA OBRA</span><h2>{draft.name.kind === 'empty' ? 'Borrador sin nombre' : draft.name.value}</h2><p>{props.readOnly ? 'Configuración conservada' : 'Configuración editable'} · revisión {props.draft.revision}</p></div><span className="draft-status">{props.readOnly ? `Estado: ${props.lifecycle ?? 'running'}` : props.lifecycle === 'ready' ? 'Preparación válida · Sin iniciar' : 'Borrador · Sin iniciar'}</span></div>
     <div className="draft-savebar"><span role="status">{props.message ?? (dirty ? 'Cambios locales sin guardar' : 'Versión guardada abierta')}{pending.length > 0 ? ' · Hay secciones en edición' : ''}</span><button className="primary-button" disabled={props.saving || props.readOnly || pending.length > 0} onClick={() => props.onSave(draft)}>{props.saving ? 'Guardando…' : 'Guardar borrador'}</button><button disabled={props.saving || props.readOnly || dirty || pending.length > 0} title={dirty ? 'Guardá primero para validar esta revisión' : undefined} onClick={props.onValidate}>Validar puesta</button></div>
-    {props.readOnly && <p className="edit-notice">{props.readOnlyReason === 'fork-published' ? 'Esta preparación hereda una historia y una continuidad. Está conservada; usá los controles de Dirección para continuar la obra.' : 'Esta representación está activa o finalizada. Su configuración está conservada; no se modifica desde el editor de borradores.'}</p>}
+    {props.readOnly && <p className="edit-notice">{props.readOnlyReason === 'identity-promoted' ? 'Esta preparación muestra una identidad consolidada en la historia de la representación. La versión inicial se conserva; los cambios futuros se revisan desde Dirección.' : props.readOnlyReason === 'fork-published' ? 'Esta preparación hereda una historia y una continuidad. Está conservada; usá los controles de Dirección para continuar la obra.' : 'Esta representación está activa o finalizada. Su configuración está conservada; no se modifica desde el editor de borradores.'}</p>}
     {props.lifecycle === 'ready' && !props.readOnly && <p className="edit-notice">La preparación es válida. Comprobá los requisitos de ejecución antes de iniciar la obra. Guardar cambios la devuelve a borrador y exige validarla nuevamente.</p>}
     {pending.length > 0 && <p className="edit-notice">Aplicá las secciones en edición para incluir todos tus cambios en el guardado.</p>}
     {error && <p role="alert" className="error">{error}</p>}

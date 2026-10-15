@@ -896,3 +896,11 @@ test('HTTP sessions remain independent across loopback ports in a shared hostnam
  const clearedName=cleared.slice(0,cleared.indexOf('='));jar.delete(clearedName);
  assert.equal((await read(first.origin)).status,401);assert.equal((await read(second.origin)).status,200,'logging out one port preserves the other session');
 });
+
+test('HTTP explica que una identidad promovida impide reemplazar o validar el borrador ordinario',async(t)=>{
+ const directory=mkdtempSync(join(tmpdir(),'personajes-http-identity-readonly-'));const journal=openJournal({path:join(directory,'journal.sqlite')});t.after(()=>{journal.close();rmSync(directory,{recursive:true,force:true});});
+ const {origin}=await startServer(t,{runConfigurationDrafts:{...journal,updateRunConfigurationDraft:()=>({kind:'readonly',reason:'identity-promoted'}),validateRunConfigurationDraft:()=>({kind:'readonly',reason:'identity-promoted'})}});const session=await createSession(origin);const runId='00000000-0000-4000-8000-000000000604';const configuration=createEmptyRunConfigurationDraft({runId,revision:0});
+ for(const command of [{method:'PUT',path:'configuration',body:{configuration}},{method:'POST',path:'validate',body:{}}]){
+  const response=await fetch(`${origin}/api/v1/runs/${runId}/${command.path}`,{method:command.method,headers:{...securePrivateHeaders(origin,session.cookie),'Content-Type':'application/json','X-CSRF-Token':session.csrfToken,'Idempotency-Key':'6dbd18b8-7056-4db2-8a74-890d1a0d0604','If-Match':`"run-config:${runId}:c0"`},body:JSON.stringify(command.body)});assert.equal(response.status,409);assert.equal(problemCode(await response.json()),'IDENTITY_PREPARATION_READ_ONLY');
+ }
+});

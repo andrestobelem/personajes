@@ -278,6 +278,7 @@ export function createVoiceRuntime(input: {
     config,
     service,
     credentials,
+    suspendRunAdmissions: service.suspendRunAdmissions,
     /** Read-only local readiness: no import of defaults, provider discovery or paid request. */
     readPreflightReadiness(request: {runId:string;configRevision:number}) {
       try {

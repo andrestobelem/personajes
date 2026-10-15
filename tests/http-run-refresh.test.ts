@@ -92,3 +92,22 @@ test('resetSessions closes SSE and waits for an in-flight refresh before a recov
   assert.equal((await fetch(origin+'/api/v1/session',{headers:{Cookie:s.cookie}})).status,401);
  }finally{finishResolve();release?.();stream?.close();await server.close();f.journal.close();rmSync(f.directory,{recursive:true,force:true});}
 });
+
+test('an applied identity response schedules only public revision refresh without waiting for periodic polling',async()=>{
+ const f=await setup();const app=createRunLifecycleApplication({journal:f.journal});const before=app.readRunView({runId:f.claim.runId});assert.ok(before);let view=before;
+ const {IdentityPromotionJobViewSchema}=await import('../src/domain/identity-promotion-http.ts');const {operatorJson}=await import('../src/server/operator-extension.ts');
+ const {ForkSourceSchema}=await import('../src/domain/fork-origin.ts');const {hashContinuistaValue}=await import('../src/domain/continuista-review.ts');const world=f.journal.readInspectorWorldCut({runId:f.claim.runId,worldRevision:before.worldRevision,atWorldSeq:before.lastWorldSeq});assert.ok(world);
+ const source=ForkSourceSchema.parse({runId:f.claim.runId,commitIndex:world.commitIndex,worldRevision:before.worldRevision,worldSeq:before.lastWorldSeq,snapshotHash:hashContinuistaValue(world.snapshot),configurationRevision:before.configRevision,configurationHash:hashContinuistaValue(f.configuration)});const jobId=randomUUID();
+ const target={...source,commitIndex:source.commitIndex+1,worldRevision:source.worldRevision+1,configurationRevision:source.configurationRevision+1,snapshotHash:'a'.repeat(64),configurationHash:'b'.repeat(64)};
+ const publicJob=IdentityPromotionJobViewSchema.parse({kind:'configurator-job',jobId,runId:f.claim.runId,actorId:f.claim.actorId,generation:0,revision:1,state:'accepted',source,contextHash:'c'.repeat(64),failureCode:null,createdAt:0,updatedAt:1,promotion:{kind:'applied',receipt:{kind:'identity-promotion-receipt',operationId:randomUUID(),actorId:f.claim.actorId,source,target,previousIdentityVersion:1,identityVersion:2,epochIndex:1,lifecycleRevision:before.lifecycleRevision+1,contextHash:'c'.repeat(64),proposalHash:'d'.repeat(64),recordedAt:'2026-10-15T23:00:00Z'}}});
+ const server=createLocalHttpServer({catalog:await loadCatalog({repositoryRoot:process.cwd()}),shellHtml:'<html><head></head><body></body></html>',runRefreshStream:{pollIntervalMs:60_000,heartbeatMs:60_000},
+ runLifecycle:{readRunView(){return view;},controlRun(){throw new Error('UNEXPECTED_CONTROL');}},
+ // Simulate the already-authorized application response; promotion-core authority
+ // and persistence are tested separately from this transport invalidation.
+ operatorExtensions:[{name:'identity-promotion',matches:({path})=>path[0]==='identity-promotions',handle(){view=RunViewSchema.parse({...view,configRevision:view.configRevision+1,config:{...view.config,configRevision:view.configRevision+1},worldRevision:view.worldRevision+1,lifecycleRevision:view.lifecycleRevision+1});return operatorJson(publicJob);}}]});
+ let stream:Awaited<ReturnType<typeof connect>>|undefined;
+ try{const {origin}=await server.listen();const s=await session(origin);stream=await connect(origin,`/api/v1/runs/${f.claim.runId}/events/stream`,s.cookie);await stream.nextFrame();
+  const response=await fetch(`${origin}/api/v1/identity-promotions/${jobId}/approve`,{method:'POST',headers:{Origin:origin,Cookie:s.cookie,'Content-Type':'application/json','X-CSRF-Token':s.csrf,'Idempotency-Key':randomUUID()},body:'{}'});assert.equal(response.status,200,await response.clone().text());
+  const notified=data(await stream.nextFrame());assert.equal(notified.configRevision,before.configRevision+1);assert.equal(notified.worldRevision,before.worldRevision+1);assert.equal(notified.lifecycleRevision,before.lifecycleRevision+1);assert.deepEqual(Object.keys(notified).sort(),['kind','runId','configRevision','worldRevision','lifecycleRevision','lastWorldSeq'].sort());
+ }finally{stream?.close();await server.close();f.journal.close();rmSync(f.directory,{recursive:true,force:true});}
+});

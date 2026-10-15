@@ -320,7 +320,7 @@ export const RunConfigurationDraftViewSchema = z.strictObject({
     lifecycle: WorldLifecycleSchema,
     configurationRevision: RevisionSchema,
     worldRevision: RevisionSchema.nullable(),
-    editability: z.enum(['editable','fork-published']).optional(),
+    editability: z.enum(['editable','fork-published','identity-promoted']).optional(),
   }),
   validation: RunConfigurationDraftValidationViewSchema,
 });

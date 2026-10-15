@@ -15,6 +15,7 @@ import {
 import { StageConversation, StageJobs } from "./StageConversation.tsx";
 import { ForkPanel } from './ForkPanel.tsx';
 import { NarrationPanel } from './NarrationPanel.tsx';
+import {IdentityPromotionPanel} from './IdentityPromotionPanel.tsx';
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { HumanInteractionPanel } from "./HumanInteractionPanel.tsx";
 import { DramaticStructurePanel } from './DramaticStructurePanel.tsx';
@@ -145,6 +146,8 @@ export function RunStageWorkspace({
   onOpenRun?: (runId: string) => void;
   derivedPreparation?: boolean;
 }) {
+  const [inspection,setInspection]=React.useState({runId,allowed:false});
+  const inspectionPermission=React.useCallback((allowed:boolean)=>setInspection({runId,allowed}),[runId]);
   const [streamState, setStreamState] = React.useState<
     "connecting" | "active" | "polling"
   >("polling");
@@ -461,10 +464,12 @@ export function RunStageWorkspace({
             active={active}
           />
           <InspectorPanel
+            onPermissionChange={inspectionPermission}
             runId={runId}
             atWorldSeq={observation.stage.worldSeq}
             worldRevision={observation.stage.worldRevision}
           />
+          <IdentityPromotionPanel key={runId} runId={runId} active={active} historical={cut!==undefined} inspectionAllowed={inspection.runId===runId&&inspection.allowed}/>
           {cut === undefined && (
             <HumanInteractionPanel
               runId={runId}
