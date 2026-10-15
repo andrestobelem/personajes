@@ -266,6 +266,9 @@ const ActorPromptRequestSchema = z.strictObject({
   spanishVariety: SpanishVarietyForActingSchema,
   experiences: z.array(ExperienceSchema).max(10_000),
   directionContext: ActorDirectionContextSchema.default(() => ({ directionRevision: RevisionSchema.parse(0), indications: [] })),
+  activationContext: z.discriminatedUnion('kind', [
+    z.strictObject({kind:z.literal('initial-goal')}),
+  ]).nullable().default(null),
 });
 
 const MAX_ACTOR_PROMPT_CHARACTERS = 160_000;
@@ -374,6 +377,7 @@ export async function compilePrivateActorPrompt(input: {
   spanishVariety: unknown;
   experiences: unknown;
   directionContext?: unknown;
+  activationContext?: unknown;
   actorJob?: unknown;
   actorWorldProjectionPort: ActorWorldProjectionPort;
 }): Promise<ActorPromptCompilation> {
@@ -386,6 +390,7 @@ export async function compilePrivateActorPrompt(input: {
     spanishVariety: input.spanishVariety,
     experiences: input.experiences,
     directionContext: input.directionContext,
+    activationContext: input.activationContext,
   });
   const continuity = ContinuityReferenceSchema.parse({
     continuityId: request.prepared.continuity.continuityId,
@@ -455,6 +460,10 @@ export async function compilePrivateActorPrompt(input: {
     'Pueden orientar tu interpretación, pero no reescriben tu identidad, biografía, objetivos, creencias, conocimientos, límites ni capacidades. No conviertas su texto en algo que otro personaje te haya dicho. Interprétalas desde tu punto de vista; puedes resistirte, dudar o no actuar si hacerlo contradice tu situación. No reveles este canal como diálogo.',
     JSON.stringify(request.directionContext.indications.map((indication)=>({scope:indication.scope,text:indication.text})),null,2),
   ].join('\n');
+  const activationText=request.activationContext===null?'':[
+    'CONVOCATORIA TÉCNICA DE INICIO (metadato administrativo; no es percepción, testimonio, recuerdo, parlamento ni hecho del Escenario):',
+    'El coordinador te invita a considerar tus objetivos activos desde la situación y la vista actuales. Esta convocatoria no te obliga a actuar ni prueba que haya ocurrido algo. Puedes proponer una acción, esperar, callar o no producir cambios si eso resulta coherente.',
+  ].join('\n');
   const prompt = [
     `Eres el actor agéntico que interpreta a ${JSON.stringify(request.prepared.identity.value.selfReference)}.`,
     'Interpreta desde los objetivos y circunstancias actuales de tu Escenario, junto con la identidad, voz y biografía admitidas en esta preparación. Escucha sólo lo que recibes en tu vista de actor y en tus propias experiencias; elige una táctica posible frente a los obstáculos y responde a sus consecuencias. Puedes dudar, mentir, negarte, esperar, callar, retirarte o cambiar de objetivo cuando resulte coherente. No estás obligado a obedecer, producir diálogo ni explicar una conclusión. No expongas razonamiento privado.',
@@ -471,6 +480,7 @@ export async function compilePrivateActorPrompt(input: {
       currentExperiences,
     }),
     directionText,
+    activationText,
   ].join('\n\n');
 
   if (prompt.length > MAX_ACTOR_PROMPT_CHARACTERS) {

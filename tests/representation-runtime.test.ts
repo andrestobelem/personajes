@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream, type AssistantMessage } from '@earendil-works/pi-ai';
 import { test } from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 import { openLocalHost } from '../src/application/local-host.ts';
 import { createRepresentationRuntime } from '../src/application/representation-runtime.ts';
 import { createBudgetedStreamFunction, PiRuntime } from '../src/adapters/pi.ts';
@@ -80,7 +81,7 @@ function hostFromFixture(fixture: Fixture) {
   return openLocalHost({ privateDataRoot: fixture.directory });
 }
 
-function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true) {
+function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true, withInitialGoal = false) {
   const freshRunId = RunIdSchema.parse(randomUUID());
   const configuration = ReadyRunConfigurationSchema.parse({
     ...fixture.configuration,
@@ -90,7 +91,11 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
       ...fixture.configuration.worldSnapshot,
       runId: freshRunId,
       entities: fixture.configuration.worldSnapshot.entities.map((entity) => entity.kind === 'character'
-        ? { ...entity, mind: { ...entity.mind, experiences: entity.mind.experiences.map((experience) => ({ ...experience, runId: freshRunId })) } }
+        ? { ...entity, mind: { ...entity.mind,
+          goals: withInitialGoal && entity.characterId === actorId
+            ? [{ kind:'durable',id:randomUUID(),description:'Considerar la situación inicial.',priority:0.7,state:'active',revision:0,history:[] }]
+            : entity.mind.goals,
+          experiences: entity.mind.experiences.map((experience) => ({ ...experience, runId: freshRunId })) } }
         : entity),
     },
     snapshotFence: { ...fixture.configuration.snapshotFence, runId: freshRunId },
@@ -474,6 +479,84 @@ async function authorizeSyntheticStep(host: ReturnType<typeof openLocalHost>, ru
   assert.equal(completed.kind,'updated');
   return {principalId,preflightJobId:started.job.jobId,state};
 }
+
+test('step admite una convocatoria inicial durable por meta, con inbox vacío y sin alterar el Escenario',async()=>{
+  const fixture=await setup();const host=hostFromFixture(fixture);const runId=registerAdditionalRun(fixture,host,false,true);
+  try{
+    const running=host.journal.readWorldLifecycle({runId});assert.ok(running);
+    assert.equal(host.journal.setWorldLifecycle({runId,expectedWorldRevision:running.worldRevision,
+      expectedConfigRevision:running.configRevision,target:'paused'}),'updated');
+    const authorization=await authorizeSyntheticStep(host,runId);
+    const before=host.journal.loadWorld({runId});assert.ok(before);
+    const accepted=host.journal.applyRunLifecycleCommand({principalId:authorization.principalId,idempotencyKey:randomUUID(),runId,
+      expectedLifecycleRevision:authorization.state.lifecycleRevision,expectedConfigRevision:authorization.state.configRevision,
+      expectedWorldRevision:authorization.state.worldRevision,expectedStructureRevision:host.journal.readDramaticStructure({runId})?.structureRevision,
+      command:{kind:'step'},preflightJobId:authorization.preflightJobId});
+    assert.equal(accepted.kind,'accepted');if(accepted.kind!=='accepted')assert.fail('El step no fue admitido');
+    const begun=host.journal.beginCoordinatorPulse({runId});
+    assert.equal(begun.kind,'started');if(begun.kind!=='started')assert.fail('El step no abrió su pulso');
+    assert.equal(begun.pulse.cause.kind,'actorActivation');
+    assert.deepEqual(begun.pulse.cause.trigger,{kind:'initial-goal'});
+    assert.equal(begun.pulse.lifecycleRevision,accepted.state.lifecycleRevision);
+    assert.equal(begun.jobs.length,1);
+    assert.deepEqual(begun.jobs[0]?.perceptionIds,[]);
+    assert.equal(begun.jobs[0]?.activation?.trigger.kind,'initial-goal');
+    assert.equal(host.journal.readRunStepJob({runId,jobId:accepted.job.jobId})?.pulseId,begun.pulse.pulseId);
+    assert.deepEqual(host.journal.loadWorld({runId}),before,'la convocatoria técnica no modifica el Escenario');
+    const inspect=new DatabaseSync(join(fixture.directory,'world.sqlite'));
+    try{
+      assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM actor_activation_invitations WHERE state=\'assigned\'').get()?.count,1);
+      assert.equal(inspect.prepare('SELECT COUNT(*) AS count FROM world_perceptions WHERE run_id=?').get(runId)?.count,0);
+    }finally{inspect.close();}
+  }finally{host.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});
+
+test('cerrar una corrida terminaliza convocatorias iniciales pendientes y en curso',async()=>{
+  const fixture=await setup();const host=hostFromFixture(fixture);
+  try{
+    const admitInitialGoalByStep=async(runId:RunId)=>{
+      const running=host.journal.readWorldLifecycle({runId});assert.ok(running);
+      assert.equal(host.journal.setWorldLifecycle({runId,expectedWorldRevision:running.worldRevision,
+        expectedConfigRevision:running.configRevision,target:'paused'}),'updated');
+      const authorization=await authorizeSyntheticStep(host,runId);
+      const accepted=host.journal.applyRunLifecycleCommand({principalId:authorization.principalId,idempotencyKey:randomUUID(),runId,
+        expectedLifecycleRevision:authorization.state.lifecycleRevision,expectedConfigRevision:authorization.state.configRevision,
+        expectedWorldRevision:authorization.state.worldRevision,expectedStructureRevision:host.journal.readDramaticStructure({runId})?.structureRevision,
+        command:{kind:'step'},preflightJobId:authorization.preflightJobId});
+      assert.equal(accepted.kind,'accepted');if(accepted.kind!=='accepted')assert.fail('No se admitió step para convocar la meta inicial');
+    };
+    const pendingRunId=registerAdditionalRun(fixture,host,false,true);
+    await admitInitialGoalByStep(pendingRunId);
+    const pendingState=host.journal.readWorldLifecycle({runId:pendingRunId});assert.ok(pendingState);
+    assert.equal(host.journal.setWorldLifecycle({runId:pendingRunId,expectedWorldRevision:pendingState.worldRevision,
+      expectedConfigRevision:pendingState.configRevision,target:'closed'}),'updated');
+
+    const runningRunId=registerAdditionalRun(fixture,host,false,true);
+    await admitInitialGoalByStep(runningRunId);
+    const pulse=host.journal.beginCoordinatorPulse({runId:runningRunId});
+    assert.equal(pulse.kind,'started');if(pulse.kind!=='started')assert.fail('No se inició la convocatoria inicial');
+    const runningState=host.journal.readWorldLifecycle({runId:runningRunId});assert.ok(runningState);
+    assert.equal(host.journal.setWorldLifecycle({runId:runningRunId,expectedWorldRevision:runningState.worldRevision,
+      expectedConfigRevision:runningState.configRevision,target:'closed'}),'updated');
+
+    const inspect=new DatabaseSync(join(fixture.directory,'world.sqlite'));
+    try{
+      assert.deepEqual({ ...inspect.prepare(`SELECT state,failure_reason FROM actor_activation_causes WHERE run_id=?`).get(pendingRunId) },
+        {state:'blocked',failure_reason:'run-closed'});
+      assert.deepEqual({ ...inspect.prepare(`SELECT state,failure_reason FROM actor_activation_invitations WHERE run_id=?`).get(pendingRunId) },
+        {state:'blocked',failure_reason:'run-closed'});
+      assert.deepEqual({ ...inspect.prepare(`SELECT state FROM coordinator_pulses WHERE run_id=?`).get(runningRunId) },{state:'blocked'});
+      assert.deepEqual({ ...inspect.prepare(`SELECT state,failure_code FROM actor_turn_jobs WHERE run_id=?`).get(runningRunId) },
+        {state:'blocked',failure_code:'job-inactive'});
+      assert.deepEqual({ ...inspect.prepare(`SELECT state,failure_reason FROM actor_activation_causes WHERE run_id=?`).get(runningRunId) },
+        {state:'blocked',failure_reason:'run-closed'});
+      assert.deepEqual({ ...inspect.prepare(`SELECT state,failure_reason FROM actor_activation_invitations WHERE run_id=?`).get(runningRunId) },
+        {state:'blocked',failure_reason:'run-closed'});
+    }finally{inspect.close();}
+    assert.equal(host.journal.listCoordinatorPulseTargets().some((target)=>target.runId===pendingRunId||target.runId===runningRunId),false,
+      'el cierre no deja causas técnicas recuperables en una corrida terminal');
+  }finally{host.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});
 
 test('step durable compone preflight fresco, ICM y actuación SDK local; segunda causa permanece sin inferencia',realIcmOptions,async()=>{
   assert.ok(realIcmBinary);

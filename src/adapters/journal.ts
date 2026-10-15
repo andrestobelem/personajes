@@ -177,8 +177,9 @@ import {
 } from '../domain/model-time-budget.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { ContinuityReferenceSchema } from '../domain/preparation.ts';
+import { planActorActivationInvitations } from '../domain/actor-activation.ts';
 import {
-  CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
+  ActorActivationIdSchema, ActorActivationInvitationIdSchema, CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
   EventIdSchema, FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
 } from '../domain/values.ts';
 
@@ -507,7 +508,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1649,6 +1650,66 @@ export function openJournal(input: { path: string }) {
     catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
   }
 
+  if (initialVersion === undefined || initialVersion < 31) {
+    try {
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE coordinator_pulses_v31(
+          pulse_id TEXT PRIMARY KEY REFERENCES pulses(pulse_id) ON DELETE RESTRICT,
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          origin_kind TEXT NOT NULL CHECK(origin_kind IN('humanIntervention','actorAttempt','actorActivation')),
+          origin_id TEXT NOT NULL,commit_index INTEGER CHECK(commit_index IS NULL OR commit_index>=1),
+          configuration_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('running','completed','blocked')),
+          created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,lifecycle_revision INTEGER CHECK(lifecycle_revision IS NULL OR lifecycle_revision>=0),
+          UNIQUE(run_id,origin_kind,origin_id),
+          FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT,
+          CHECK((origin_kind='actorActivation' AND commit_index IS NULL) OR (origin_kind<>'actorActivation' AND commit_index IS NOT NULL))
+        );
+        INSERT INTO coordinator_pulses_v31 SELECT pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,created_at,updated_at,lifecycle_revision
+          FROM coordinator_pulses;
+        DROP TABLE coordinator_pulses;
+        ALTER TABLE coordinator_pulses_v31 RENAME TO coordinator_pulses;
+        CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
+        CREATE TABLE IF NOT EXISTS actor_activation_causes(
+          activation_id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          trigger_kind TEXT NOT NULL CHECK(trigger_kind='initial-goal'),
+          configuration_hash TEXT NOT NULL,lifecycle_revision INTEGER NOT NULL CHECK(lifecycle_revision>=0),
+          world_revision INTEGER NOT NULL CHECK(world_revision>=0),world_seq INTEGER NOT NULL CHECK(world_seq>=0),fictional_at INTEGER NOT NULL CHECK(fictional_at>=0),
+          state TEXT NOT NULL CHECK(state IN('pending','running','completed','blocked')),
+          failure_reason TEXT,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(run_id,trigger_kind),UNIQUE(run_id,activation_id),
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        CREATE TABLE IF NOT EXISTS actor_activation_invitations(
+          invitation_id TEXT PRIMARY KEY,activation_id TEXT NOT NULL,run_id TEXT NOT NULL,actor_id TEXT NOT NULL,
+          identity_version INTEGER NOT NULL CHECK(identity_version>=0),trigger_kind TEXT NOT NULL CHECK(trigger_kind='initial-goal'),
+          state TEXT NOT NULL CHECK(state IN('pending','assigned','consumed','blocked')),
+          failure_reason TEXT,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(activation_id,actor_id),UNIQUE(run_id,invitation_id),
+          FOREIGN KEY(run_id,activation_id) REFERENCES actor_activation_causes(run_id,activation_id) ON DELETE RESTRICT,
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        CREATE TABLE IF NOT EXISTS actor_activation_invitation_jobs(
+          run_id TEXT NOT NULL,invitation_id TEXT NOT NULL,actor_id TEXT NOT NULL,job_id TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK(generation>=0),assigned_at INTEGER NOT NULL CHECK(assigned_at>=0),
+          PRIMARY KEY(run_id,invitation_id),UNIQUE(run_id,actor_id,job_id,generation),
+          FOREIGN KEY(run_id,invitation_id) REFERENCES actor_activation_invitations(run_id,invitation_id) ON DELETE RESTRICT,
+          FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS actor_activation_causes_pending ON actor_activation_causes(run_id,state,created_at);
+        CREATE INDEX IF NOT EXISTS actor_activation_invitations_pending ON actor_activation_invitations(activation_id,state,actor_id);
+        INSERT OR IGNORE INTO schema_version VALUES(31);
+      `);
+      const foreignKeyViolations = database.prepare('PRAGMA foreign_key_check').all();
+      if (foreignKeyViolations.length !== 0) {
+        throw new Error(`Migración v31 produjo referencias inválidas: ${JSON.stringify(foreignKeyViolations)}`);
+      }
+      database.exec('COMMIT; PRAGMA foreign_keys=ON;');
+    } catch (error) {
+      try { database.exec('ROLLBACK; PRAGMA foreign_keys=ON;'); } catch { /* Migration is atomic. */ }
+      database.close(); throw error;
+    }
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -1972,12 +2033,34 @@ export function openJournal(input: { path: string }) {
       }
       return input.perception_id;
     });
-    if (inputs.length === 0) throw new Error('Job de actor sin percepciones asignadas');
+    const activationValue = database.prepare(`SELECT i.activation_id,i.invitation_id,i.identity_version,i.trigger_kind,i.state,
+        c.state AS cause_state
+      FROM actor_activation_invitation_jobs j
+      JOIN actor_activation_invitations i ON i.run_id=j.run_id AND i.invitation_id=j.invitation_id
+      JOIN actor_activation_causes c ON c.run_id=i.run_id AND c.activation_id=i.activation_id
+      WHERE j.run_id=? AND j.actor_id=? AND j.job_id=? AND j.generation=?`)
+      .get(row.run_id,row.actor_id,row.job_id,row.generation);
+    const activation = activationValue === undefined ? null : z.strictObject({
+      activation_id:ActorActivationIdSchema,invitation_id:ActorActivationInvitationIdSchema,identity_version:counter,
+      trigger_kind:z.literal('initial-goal'),state:z.enum(['pending','assigned','consumed','blocked']),
+      cause_state:z.enum(['pending','running','completed','blocked']),
+    }).parse(activationValue);
+    if (activation !== null) {
+      if (inputs.length !== 0 || activation.trigger_kind !== 'initial-goal'
+        || (row.state === 'queued' && activation.state !== 'assigned')
+        || (row.state === 'running' && activation.state !== 'assigned')
+        || (row.state === 'accepted' && !['assigned','consumed'].includes(activation.state))
+        || (row.state === 'blocked' && !['assigned','blocked'].includes(activation.state))) {
+        throw new Error('La relación técnica de activación no coincide con el job actoral');
+      }
+    } else if (inputs.length === 0) throw new Error('Job de actor sin percepciones asignadas');
     return ActorTurnJobViewSchema.parse({
       runId: row.run_id, actorId: row.actor_id, jobId: row.job_id, generation: row.generation,
       pulseId: row.pulse_id, lifecycleRevision: row.lifecycle_revision, state: row.state,
       failureCode: row.failure_code, perceptionIds: inputs, frozenPerceptionIds, frozenWorldCut,
       frozenDirectionRevision: row.frozen_direction_revision,
+      activation:activation === null?null:{activationId:activation.activation_id,invitationId:activation.invitation_id,
+        identityVersion:activation.identity_version,trigger:{kind:'initial-goal'}},
     });
   }
 
@@ -2013,21 +2096,36 @@ export function openJournal(input: { path: string }) {
     const value = database.prepare(`SELECT c.*,p.max_calls,p.consumed FROM coordinator_pulses c JOIN pulses p ON p.pulse_id=c.pulse_id
       WHERE c.run_id=? AND c.pulse_id=?`).get(input.runId, input.pulseId);
     if (value === undefined) return undefined;
-    const row = z.strictObject({ pulse_id: PulseIdSchema, run_id: RunIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt']),
-      origin_id: z.string(), commit_index: counter, configuration_hash: HashSchema, state: z.enum(['running','completed','blocked']),
+    const row = z.strictObject({ pulse_id: PulseIdSchema, run_id: RunIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','actorActivation']),
+      origin_id: z.string(), commit_index: counter.nullable(), configuration_hash: HashSchema, state: z.enum(['running','completed','blocked']),
       lifecycle_revision: counter.nullable(), created_at: counter, updated_at: counter, max_calls: counter, consumed: counter }).parse(value);
     const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(input.runId));
     if (row.configuration_hash !== run.row.configuration_hash) throw new Error('Configuración del pulso coordinador difiere de la corrida');
     const jobs = database.prepare(`SELECT * FROM actor_turn_jobs j WHERE run_id=? AND pulse_id=?
       AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.job_id=j.job_id AND newer.generation>j.generation)
       ORDER BY actor_id,job_id`).all(input.runId, input.pulseId).map(actorTurnJobView);
+    const cause = row.origin_kind === 'actorActivation'
+      ? (() => {
+        if (row.commit_index !== null) throw new Error('Pulso técnico de activación contiene commit index');
+        const activationId=ActorActivationIdSchema.parse(row.origin_id);
+        const activationValue=database.prepare('SELECT state FROM actor_activation_causes WHERE run_id=? AND activation_id=?')
+          .get(row.run_id,activationId);
+        if(activationValue===undefined)throw new Error('Pulso técnico sin causa de activación durable');
+        z.strictObject({state:z.enum(['pending','running','completed','blocked'])}).parse(activationValue);
+        return {kind:'actorActivation' as const,id:activationId,trigger:{kind:'initial-goal' as const}};
+      })()
+      : (() => {
+        if (row.commit_index === null) throw new Error('Pulso causado por evento sin commit index');
+        return {kind:row.origin_kind,id:row.origin_id,commitIndex:row.commit_index};
+      })();
     return CoordinatorPulseViewSchema.parse({ runId: row.run_id, pulseId: row.pulse_id,
       lifecycleRevision: row.lifecycle_revision,
-      cause: { kind: row.origin_kind, id: row.origin_id, commitIndex: row.commit_index }, state: row.state,
+      cause, state: row.state,
       maxCalls: row.max_calls, consumed: row.consumed, jobs });
   }
 
   function assignCoordinatorCauseJobs(run: ReturnType<typeof parseWorldRun>, configuration: z.infer<typeof ReadyRunConfigurationSchema>, pulse: z.infer<typeof CoordinatorPulseViewSchema>) {
+    if(pulse.cause.kind==='actorActivation')return;
     const scene = run.snapshot.scenes.find((item) => item.id === run.snapshot.activeSceneId);
     const inputs = database.prepare(`SELECT i.actor_id,i.perception_id FROM actor_turn_intents i
       JOIN world_deliveries d ON d.perception_id=i.perception_id JOIN world_perceptions p ON p.perception_id=i.perception_id
@@ -2428,6 +2526,11 @@ export function openJournal(input: { path: string }) {
     const job = claimedActorJob(execution);
     if (job === undefined) return { kind: 'inactive', reason: 'claim_inactive' };
     if (!actorJobEpochCurrent(job, run)) return { kind: 'inactive', reason: 'lifecycle_epoch_stale' };
+    const invitationId=actorActivationInvitationForJob({runId:job.run_id,actorId:job.actor_id,jobId:job.job_id,generation:job.generation});
+    if(invitationId!==undefined){
+      const activationReason=activationInvitationIneligibility({run,configuration:ReadyRunConfigurationSchema.parse(run.configuration),invitationId});
+      if(activationReason!==undefined)return {kind:'inactive',reason:activationReason};
+    }
     if (!characterCanReceiveAt({snapshot:run.snapshot,characterId:execution.actorId})) return {kind:'inactive',reason:'actor_unavailable'};
     const cut = frozenActorTurnWorldCut(job);
     if (cut === null) return { kind: 'inactive', reason: 'input_cut_missing' };
@@ -2504,10 +2607,47 @@ export function openJournal(input: { path: string }) {
     }
   }
 
+  function blockPendingActorActivationsForClosedRun(runId: z.infer<typeof RunIdSchema>, timestamp: number): void {
+    const causes = database.prepare(`SELECT activation_id FROM actor_activation_causes
+      WHERE run_id=? AND state IN('pending','running')`).all(runId)
+      .map((value) => z.strictObject({ activation_id: ActorActivationIdSchema }).parse(value).activation_id);
+    for (const activationId of causes) {
+      database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
+        WHERE run_id=? AND state='queued' AND EXISTS(
+          SELECT 1 FROM actor_activation_invitation_jobs link
+          JOIN actor_activation_invitations invitation ON invitation.run_id=link.run_id AND invitation.invitation_id=link.invitation_id
+          WHERE link.run_id=actor_turn_jobs.run_id AND link.actor_id=actor_turn_jobs.actor_id
+            AND link.job_id=actor_turn_jobs.job_id AND link.generation=actor_turn_jobs.generation
+            AND invitation.activation_id=?)`).run(timestamp,runId,activationId);
+      database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND state='assigned' AND EXISTS(
+        SELECT 1 FROM actor_turn_jobs job JOIN actor_activation_invitation_jobs link
+          ON link.run_id=job.run_id AND link.actor_id=job.actor_id AND link.job_id=job.job_id AND link.generation=job.generation
+        JOIN actor_activation_invitations invitation ON invitation.run_id=link.run_id AND invitation.invitation_id=link.invitation_id
+        WHERE job.run_id=actor_turn_job_inputs.run_id AND job.actor_id=actor_turn_job_inputs.actor_id
+          AND job.job_id=actor_turn_job_inputs.job_id AND job.generation=actor_turn_job_inputs.generation
+          AND invitation.activation_id=? AND job.state='blocked')`).run(runId,activationId);
+      database.prepare(`UPDATE actor_activation_invitations SET state=CASE WHEN EXISTS(
+          SELECT 1 FROM actor_activation_invitation_jobs link JOIN actor_turn_jobs job
+            ON job.run_id=link.run_id AND job.actor_id=link.actor_id AND job.job_id=link.job_id AND job.generation=link.generation
+          WHERE link.run_id=actor_activation_invitations.run_id AND link.invitation_id=actor_activation_invitations.invitation_id
+            AND job.state='accepted') THEN 'consumed' ELSE 'blocked' END,
+        failure_reason=CASE WHEN EXISTS(SELECT 1 FROM actor_activation_invitation_jobs link JOIN actor_turn_jobs job
+          ON job.run_id=link.run_id AND job.actor_id=link.actor_id AND job.job_id=link.job_id AND job.generation=link.generation
+          WHERE link.run_id=actor_activation_invitations.run_id AND link.invitation_id=actor_activation_invitations.invitation_id
+            AND job.state='accepted') THEN NULL ELSE 'run-closed' END,updated_at=?
+        WHERE run_id=? AND activation_id=? AND state IN('pending','assigned')`).run(timestamp,runId,activationId);
+      database.prepare(`UPDATE coordinator_pulses SET state='blocked',updated_at=? WHERE run_id=?
+        AND origin_kind='actorActivation' AND origin_id=? AND state='running'`).run(timestamp,runId,activationId);
+      database.prepare(`UPDATE actor_activation_causes SET state='blocked',failure_reason='run-closed',updated_at=?
+        WHERE run_id=? AND activation_id=? AND state IN('pending','running')`).run(timestamp,runId,activationId);
+    }
+  }
+
   function reconcileRunLifecycleEpoch(runId: z.infer<typeof RunIdSchema>, lifecycle: z.infer<typeof WorldLifecycleSchema>, revision: number, timestamp: number): void {
     if (lifecycle !== 'running') {
       finishStepJob(runId, 'canceled');
       blockRunningActorJobs(runId, timestamp);
+      if (lifecycle === 'closed') blockPendingActorActivationsForClosedRun(runId,timestamp);
       return;
     }
     database.prepare(`UPDATE coordinator_pulses SET lifecycle_revision=?,updated_at=? WHERE run_id=? AND state='running'`)
@@ -3809,6 +3949,63 @@ export function openJournal(input: { path: string }) {
     return {episodeId,cut};
   }
 
+  function admitInitialGoalActivation(run:ReturnType<typeof parseWorldRun>,configuration:z.infer<typeof ReadyRunConfigurationSchema>,recordedAt:number) {
+    const existing=database.prepare("SELECT activation_id FROM actor_activation_causes WHERE run_id=? AND trigger_kind='initial-goal'")
+      .get(run.row.run_id);
+    if(existing!==undefined)return;
+    const invitations=planActorActivationInvitations({snapshot:run.snapshot,activeCharacterIds:configuration.roster.activeCharacterIds})
+      .filter((invitation)=>invitation.trigger.kind==='initial-goal');
+    if(invitations.length===0)return;
+    const activationId=ActorActivationIdSchema.parse(randomUUID());
+    database.prepare(`INSERT INTO actor_activation_causes(activation_id,run_id,trigger_kind,configuration_hash,lifecycle_revision,
+      world_revision,world_seq,fictional_at,state,failure_reason,created_at,updated_at)
+      VALUES(?,?,'initial-goal',?,?,?,?,?,'pending',NULL,?,?)`)
+      .run(activationId,run.row.run_id,run.row.configuration_hash,run.row.lifecycle_revision,run.row.world_revision,run.row.last_seq,
+        run.snapshot.clock.instant,recordedAt,recordedAt);
+    for(const invitation of invitations){
+      const invitationId=ActorActivationInvitationIdSchema.parse(randomUUID());
+      database.prepare(`INSERT INTO actor_activation_invitations(invitation_id,activation_id,run_id,actor_id,identity_version,
+        trigger_kind,state,failure_reason,created_at,updated_at)
+        VALUES(?,?,?, ?,?,'initial-goal','pending',NULL,?,?)`)
+        .run(invitationId,activationId,run.row.run_id,invitation.actorId,invitation.identityVersion,recordedAt,recordedAt);
+    }
+  }
+
+  function activationInvitationIneligibility(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;invitationId:string}):string|undefined {
+    const value=database.prepare(`SELECT i.activation_id,i.actor_id,i.identity_version,i.state,c.state AS cause_state,
+        c.configuration_hash
+      FROM actor_activation_invitations i JOIN actor_activation_causes c ON c.run_id=i.run_id AND c.activation_id=i.activation_id
+      WHERE i.run_id=? AND i.invitation_id=?`).get(input.run.row.run_id,input.invitationId);
+    if(value===undefined)return 'invitation_missing';
+    const row=z.strictObject({activation_id:ActorActivationIdSchema,actor_id:CharacterIdSchema,identity_version:counter,
+      state:z.enum(['pending','assigned','consumed','blocked']),cause_state:z.enum(['pending','running','completed','blocked']),
+      configuration_hash:HashSchema}).parse(value);
+    if(row.state!=='pending'&&row.state!=='assigned')return 'invitation_not_pending';
+    if(row.cause_state!=='pending'&&row.cause_state!=='running')return 'activation_not_pending';
+    if(row.configuration_hash!==input.run.row.configuration_hash)return 'configuration_changed';
+    const actor=input.run.snapshot.entities.find((entity)=>entity.kind==='character'&&entity.characterId===row.actor_id);
+    const scene=input.run.snapshot.scenes.find((item)=>item.id===input.run.snapshot.activeSceneId);
+    if(!input.configuration.roster.activeCharacterIds.includes(row.actor_id)
+      ||!input.configuration.roster.preparedCharacters.some((item)=>item.characterId===row.actor_id&&item.identityVersion===row.identity_version)
+      ||actor?.kind!=='character'||actor.preparation.kind!=='prepared'||actor.preparation.identityVersion!==row.identity_version
+      ||!actor.mind.goals.some((goal)=>goal.state==='active')||scene?.lifecycle.kind!=='open'||!scene.participantIds.includes(row.actor_id)
+      ||actor.presence.kind!=='present'||actor.presence.sceneId!==scene.id
+      ||!characterCanReceiveAt({snapshot:input.run.snapshot,characterId:row.actor_id}))return 'actor_ineligible';
+    return undefined;
+  }
+
+  function blockActivationInvitation(invitationId:string,reason:string,recordedAt:number):void {
+    database.prepare(`UPDATE actor_activation_invitations SET state='blocked',failure_reason=?,updated_at=?
+      WHERE invitation_id=? AND state IN('pending','assigned')`).run(reason,recordedAt,invitationId);
+  }
+
+  function actorActivationInvitationForJob(scope:{runId:string;actorId:string;jobId:string;generation:number}):string|undefined {
+    const value=database.prepare(`SELECT invitation_id FROM actor_activation_invitation_jobs
+      WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+      .get(scope.runId,scope.actorId,scope.jobId,scope.generation);
+    return value===undefined?undefined:z.strictObject({invitation_id:ActorActivationInvitationIdSchema}).parse(value).invitation_id;
+  }
+
   function readDramaticStructureOperation(input:unknown) {
     const request=DramaticStructureLookupSchema.parse(input);
     if(structuralOperationCrossExists(request.principalId,request.idempotencyKey))return DramaticStructureLookupResultSchema.parse({kind:'idempotencyConflict'});
@@ -4294,6 +4491,9 @@ export function openJournal(input: { path: string }) {
         if (changed.changes !== 1) throw new Error('CAS de lifecycle cambió dentro de la transacción');
         run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
         reconcileRunLifecycleEpoch(request.runId, run.row.lifecycle, run.row.lifecycle_revision, now);
+        if(request.command.kind==='start'||request.command.kind==='resume'||request.command.kind==='step'){
+          admitInitialGoalActivation(run,ReadyRunConfigurationSchema.parse(run.configuration),now);
+        }
         if (request.command.kind === 'step') {
           const interrupted = database.prepare("SELECT job_id FROM run_step_jobs WHERE run_id=? AND state='interrupted' ORDER BY updated_at DESC LIMIT 1").get(request.runId);
           const jobId = interrupted === undefined ? JobIdSchema.parse(randomUUID()) : z.strictObject({job_id:JobIdSchema}).parse(interrupted).job_id;
@@ -6317,6 +6517,12 @@ export function openJournal(input: { path: string }) {
             }
             database.prepare(`UPDATE coordinator_pulses SET state='blocked',updated_at=? WHERE run_id=? AND pulse_id=? AND state='running'`)
               .run(now,request.runId,pulseId);
+            if(pulse.cause.kind==='actorActivation'){
+              database.prepare(`UPDATE actor_activation_invitations SET state='blocked',failure_reason='lifecycle_epoch_changed',updated_at=?
+                WHERE activation_id=? AND state IN('pending','assigned')`).run(now,pulse.cause.id);
+              database.prepare(`UPDATE actor_activation_causes SET state='blocked',failure_reason='lifecycle_epoch_changed',updated_at=?
+                WHERE run_id=? AND activation_id=? AND state IN('pending','running')`).run(now,request.runId,pulse.cause.id);
+            }
             return CoordinatorPulseBeginResultSchema.parse({kind:'existing',pulse:coordinatorPulseView({runId:request.runId,pulseId})!,jobs:coordinatorPulseView({runId:request.runId,pulseId})!.jobs});
           }
           assignCoordinatorCauseJobs(run,configuration,pulse);
@@ -6335,6 +6541,62 @@ export function openJournal(input: { path: string }) {
         if (pending.length > 100_000) throw new Error('Demasiadas intenciones para coordinar un pulso');
         const cause = pending[0];
         if (cause === undefined) {
+          const activationValue=database.prepare(`SELECT activation_id FROM actor_activation_causes
+            WHERE run_id=? AND state='pending' ORDER BY created_at,activation_id LIMIT 1`).get(request.runId);
+          if(activationValue!==undefined){
+            const activationId=z.strictObject({activation_id:ActorActivationIdSchema}).parse(activationValue).activation_id;
+            const invitationRows=database.prepare(`SELECT invitation_id,actor_id FROM actor_activation_invitations
+              WHERE activation_id=? AND state='pending' ORDER BY actor_id,invitation_id`).all(activationId)
+              .map((item)=>z.strictObject({invitation_id:ActorActivationInvitationIdSchema,actor_id:CharacterIdSchema}).parse(item));
+            const eligible:typeof invitationRows=[];
+            const timestamp=Date.now();
+            for(const invitation of invitationRows){
+              const ineligibility=activationInvitationIneligibility({run,configuration,invitationId:invitation.invitation_id});
+              if(ineligibility!==undefined){blockActivationInvitation(invitation.invitation_id,ineligibility,timestamp);continue;}
+              const activeJob=database.prepare(`SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND state IN('queued','running') LIMIT 1`)
+                .get(request.runId,invitation.actor_id);
+              if(activeJob===undefined)eligible.push(invitation);
+              else blockActivationInvitation(invitation.invitation_id,'actor_job_active',timestamp);
+            }
+            if(eligible.length===0){
+              const remaining=database.prepare("SELECT 1 FROM actor_activation_invitations WHERE activation_id=? AND state='pending' LIMIT 1").get(activationId);
+              if(remaining!==undefined)return CoordinatorPulseBeginResultSchema.parse({kind:'idle'});
+              database.prepare(`UPDATE actor_activation_causes SET state='blocked',failure_reason='no-eligible-invitations',updated_at=?
+                WHERE run_id=? AND activation_id=? AND state='pending'`).run(timestamp,request.runId,activationId);
+              if(step!==undefined)finishStepJob(request.runId,'failed');
+              return CoordinatorPulseBeginResultSchema.parse({kind:'idle'});
+            }
+            const existingBudget=database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId);
+            if(existingBudget===undefined)database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)')
+              .run(request.runId,configuration.budget.maxPiCallsPerRun);
+            else if(budgetRow.parse(existingBudget).max_calls!==configuration.budget.maxPiCallsPerRun)throw new Error('Presupuesto run difiere de configuración ready');
+            ensureModelTimeRunState(request.runId);
+            const pulseId=PulseIdSchema.parse(randomUUID());
+            database.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)')
+              .run(pulseId,request.runId,configuration.budget.maxPiCallsPerPulse);
+            database.prepare(`INSERT INTO coordinator_pulses(pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,
+              created_at,updated_at,lifecycle_revision) VALUES(?,?, 'actorActivation', ?,NULL,?,'running',?,?,?)`)
+              .run(pulseId,request.runId,activationId,run.row.configuration_hash,timestamp,timestamp,run.row.lifecycle_revision);
+            const causeUpdated=database.prepare(`UPDATE actor_activation_causes SET state='running',updated_at=?
+              WHERE run_id=? AND activation_id=? AND state='pending'`)
+              .run(timestamp,request.runId,activationId);
+            if(causeUpdated.changes!==1)throw new Error('La convocatoria inicial cambió antes de abrir el pulso');
+            for(const invitation of eligible){
+              const jobId=JobIdSchema.parse(randomUUID());
+              database.prepare(`INSERT INTO actor_turn_jobs(run_id,actor_id,job_id,generation,pulse_id,state,owner_token,claim_token,
+                created_at,updated_at,lifecycle_revision) VALUES(?,?,?,0,?,'queued',NULL,NULL,?,?,?)`)
+                .run(request.runId,invitation.actor_id,jobId,pulseId,timestamp,timestamp,run.row.lifecycle_revision);
+              database.prepare(`INSERT INTO actor_activation_invitation_jobs(run_id,invitation_id,actor_id,job_id,generation,assigned_at)
+                VALUES(?,?,?,?,0,?)`).run(request.runId,invitation.invitation_id,invitation.actor_id,jobId,timestamp);
+              const assigned=database.prepare(`UPDATE actor_activation_invitations SET state='assigned',updated_at=?
+                WHERE invitation_id=? AND state='pending'`).run(timestamp,invitation.invitation_id);
+              if(assigned.changes!==1)throw new Error('La invitación cambió antes de asignarse al job técnico');
+            }
+            bindStep(pulseId);
+            const pulse=coordinatorPulseView({runId:request.runId,pulseId});
+            if(pulse===undefined)throw new Error('Pulso técnico no persistido');
+            return CoordinatorPulseBeginResultSchema.parse({kind:'started',pulse,jobs:pulse.jobs});
+          }
           if (step !== undefined) finishStepJob(request.runId,'succeeded');
           return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
         }
@@ -6398,7 +6660,8 @@ export function openJournal(input: { path: string }) {
          EXISTS(SELECT 1 FROM coordinator_pulses c WHERE c.run_id=r.run_id AND c.state='running') OR
          EXISTS(SELECT 1 FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id
            WHERE i.run_id=r.run_id AND i.state='queued' AND d.state='delivered'
-           AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))))
+           AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))) OR
+         EXISTS(SELECT 1 FROM actor_activation_causes a WHERE a.run_id=r.run_id AND a.state='pending'))
         ORDER BY run_id LIMIT ?`).all(request.limit).map((item) => z.strictObject({ run_id: RunIdSchema }).parse(item)).map((item) => ({ runId: item.run_id }));
     },
     closeCoordinatorPulse(input: unknown) {
@@ -6407,7 +6670,7 @@ export function openJournal(input: { path: string }) {
         const pulse = coordinatorPulseView(request);
         if (pulse === undefined) throw new Error('Pulso coordinador inexistente');
         if (pulse.state !== 'running') return pulse;
-        const awaiting = database.prepare(`SELECT 1 FROM actor_turn_intents i JOIN world_perceptions p ON p.perception_id=i.perception_id
+        const awaiting = pulse.cause.kind==='actorActivation' ? false : database.prepare(`SELECT 1 FROM actor_turn_intents i JOIN world_perceptions p ON p.perception_id=i.perception_id
           WHERE i.run_id=? AND p.origin_kind=? AND p.origin_id=?
             AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
             AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a JOIN actor_turn_jobs j ON j.run_id=a.run_id AND j.actor_id=a.actor_id AND j.job_id=a.job_id AND j.generation=a.generation
@@ -6426,8 +6689,32 @@ export function openJournal(input: { path: string }) {
           AND NOT EXISTS(SELECT 1 FROM administrative_jobs newer WHERE newer.job_id=j.job_id AND newer.generation>j.generation)`)
           .all(request.runId,request.pulseId).map(value=>z.strictObject({state:z.enum(['running','accepted','blocked'])}).parse(value));
         const adminsTerminal=admins.every(job=>job.state!=='running');
-        if (terminal && !awaiting && adminsTerminal) database.prepare(`UPDATE coordinator_pulses SET state=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='running'`)
-          .run(pulse.jobs.some((job) => job.state === 'blocked') || admins.some(job=>job.state==='blocked') ? 'blocked' : 'completed', Date.now(), request.runId, request.pulseId);
+        if (terminal && !awaiting && adminsTerminal) {
+          const now=Date.now();
+          if(pulse.cause.kind==='actorActivation'){
+            database.prepare(`UPDATE actor_activation_invitations SET state=CASE WHEN EXISTS(
+                SELECT 1 FROM actor_activation_invitation_jobs j JOIN actor_turn_jobs a
+                  ON a.run_id=j.run_id AND a.actor_id=j.actor_id AND a.job_id=j.job_id AND a.generation=j.generation
+                WHERE j.run_id=actor_activation_invitations.run_id AND j.invitation_id=actor_activation_invitations.invitation_id
+                  AND a.state='accepted') THEN 'consumed' ELSE 'blocked' END,
+              failure_reason=CASE WHEN EXISTS(SELECT 1 FROM actor_activation_invitation_jobs j JOIN actor_turn_jobs a
+                ON a.run_id=j.run_id AND a.actor_id=j.actor_id AND a.job_id=j.job_id AND a.generation=j.generation
+                WHERE j.run_id=actor_activation_invitations.run_id AND j.invitation_id=actor_activation_invitations.invitation_id
+                  AND a.state='accepted') THEN NULL ELSE COALESCE(failure_reason,'actor-job-blocked') END,updated_at=?
+              WHERE activation_id=? AND state='assigned'`).run(now,pulse.cause.id);
+            database.prepare(`UPDATE actor_activation_invitations SET state='blocked',failure_reason='activation-pulse-closed',updated_at=?
+              WHERE activation_id=? AND state='pending'`).run(now,pulse.cause.id);
+          }
+          const blockedInvitations=pulse.cause.kind==='actorActivation'
+            &&database.prepare("SELECT 1 FROM actor_activation_invitations WHERE activation_id=? AND state='blocked' LIMIT 1").get(pulse.cause.id)!==undefined;
+          const terminalState=pulse.jobs.some((job) => job.state === 'blocked') || admins.some(job=>job.state==='blocked') || blockedInvitations
+            ? 'blocked' : 'completed';
+          database.prepare(`UPDATE coordinator_pulses SET state=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='running'`)
+            .run(terminalState,now,request.runId,request.pulseId);
+          if(pulse.cause.kind==='actorActivation')database.prepare(`UPDATE actor_activation_causes SET state=?,failure_reason=?,updated_at=?
+            WHERE run_id=? AND activation_id=? AND state IN('pending','running')`)
+            .run(terminalState,terminalState==='blocked'?'invitation-blocked':null,now,request.runId,pulse.cause.id);
+        }
         const closed = coordinatorPulseView(request);
         if (closed === undefined) throw new Error('Pulso perdió registro al cerrar');
         return closed;
@@ -6555,6 +6842,22 @@ export function openJournal(input: { path: string }) {
           const blocked = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
             .get(row.run_id,row.actor_id,row.job_id,row.generation);
           return ActorTurnJobClaimResultSchema.parse({kind:'blocked',job:actorTurnJobView(blocked)});
+        }
+        if(row.state==='queued'){
+          const invitationId=actorActivationInvitationForJob({runId:row.run_id,actorId:row.actor_id,jobId:row.job_id,generation:row.generation});
+          if(invitationId!==undefined){
+            const reason=activationInvitationIneligibility({run,configuration:ReadyRunConfigurationSchema.parse(run.configuration),invitationId});
+            if(reason!==undefined){
+              const now=Date.now();
+              blockActivationInvitation(invitationId,reason,now);
+              database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
+                WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='queued'`)
+                .run(now,row.run_id,row.actor_id,row.job_id,row.generation);
+              const blocked=database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+                .get(row.run_id,row.actor_id,row.job_id,row.generation);
+              return ActorTurnJobClaimResultSchema.parse({kind:'blocked',job:actorTurnJobView(blocked)});
+            }
+          }
         }
         const job = actorTurnJobView(rowValue);
         if (row.state === 'accepted') return ActorTurnJobClaimResultSchema.parse({ kind: 'accepted', job });

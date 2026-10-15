@@ -56,14 +56,14 @@ test('schema futuro no se migra ni se altera al rechazarlo', () => {
   const path = join(directory, 'world.sqlite');
   const database = new DatabaseSync(path);
   try {
-    database.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(31)');
+    database.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(32)');
     assert.throws(() => openJournal({ path }), /no soportada/);
-    assert.deepEqual(database.prepare('SELECT version FROM schema_version').all().map((row) => row.version), [31]);
+    assert.deepEqual(database.prepare('SELECT version FROM schema_version').all().map((row) => row.version), [32]);
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name='experiences'").get(), undefined);
   } finally { database.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('migraciones explícitas v1→v30 conservan experiencias, ledger, percepciones, jobs e intenciones', () => {
+test('migraciones explícitas v1→v31 conservan experiencias, ledger, percepciones, jobs e intenciones', () => {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-migrate-v2-'));
   const path = join(directory, 'world.sqlite');
   const database = new DatabaseSync(path);
@@ -103,7 +103,7 @@ test('migraciones explícitas v1→v30 conservan experiencias, ledger, percepcio
       const versions = new DatabaseSync(path);
       try {
         assert.deepEqual(versions.prepare('SELECT version FROM schema_version ORDER BY version').all()
-          .map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
+          .map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
         const perceptionColumns = versions.prepare("PRAGMA table_info('world_perceptions')").all();
         assert.equal(perceptionColumns.find((row) => row.name === 'attempt_id')?.notnull, 0);
         assert.deepEqual(versions.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='world_commits'")
@@ -126,6 +126,55 @@ test('migraciones explícitas v1→v30 conservan experiencias, ledger, percepcio
     try { database.close(); } catch { /* Closed before migration. */ }
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('migración v30→v31 crea el ledger de activación y replay mantiene el esquema', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'personajes-migrate-v31-'));
+  const path = join(directory, 'world.sqlite');
+  let journal = openJournal({ path });
+  try {
+    journal.close();
+    const legacy = new DatabaseSync(path);
+    try {
+      legacy.exec(`
+        PRAGMA foreign_keys=OFF;
+        DROP TABLE actor_activation_invitation_jobs;
+        DROP TABLE actor_activation_invitations;
+        DROP TABLE actor_activation_causes;
+        DROP TABLE coordinator_pulses;
+        CREATE TABLE coordinator_pulses(
+          pulse_id TEXT PRIMARY KEY REFERENCES pulses(pulse_id) ON DELETE RESTRICT,
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          origin_kind TEXT NOT NULL CHECK(origin_kind IN('humanIntervention','actorAttempt')),
+          origin_id TEXT NOT NULL,commit_index INTEGER NOT NULL CHECK(commit_index>=1),
+          configuration_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('running','completed','blocked')),
+          created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,lifecycle_revision INTEGER CHECK(lifecycle_revision IS NULL OR lifecycle_revision>=0),
+          UNIQUE(run_id,origin_kind,origin_id),
+          FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT
+        );
+        CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
+        DELETE FROM schema_version WHERE version=31;
+        PRAGMA foreign_keys=ON;
+      `);
+    } finally { legacy.close(); }
+
+    journal = openJournal({ path });
+    journal.close();
+    const migrated = new DatabaseSync(path);
+    try {
+      assert.equal(migrated.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 31);
+      assert.deepEqual(migrated.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'actor_activation_%' ORDER BY name")
+        .all().map((row) => row.name), ['actor_activation_causes', 'actor_activation_invitation_jobs', 'actor_activation_invitations']);
+      assert.deepEqual(migrated.prepare('PRAGMA foreign_key_check').all(), []);
+    } finally { migrated.close(); }
+
+    journal = openJournal({ path });
+    const replay = new DatabaseSync(path);
+    try {
+      assert.equal(replay.prepare('SELECT COUNT(*) AS count FROM schema_version WHERE version=31').get()?.count, 1);
+      assert.deepEqual(replay.prepare('PRAGMA foreign_key_check').all(), []);
+    } finally { replay.close(); }
+  } finally { journal.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('la migración v4 revierte esquema y versión si una review heredada es inválida', () => {

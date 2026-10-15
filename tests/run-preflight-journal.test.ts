@@ -93,7 +93,8 @@ test('v23 crea jobs preflight para Ready/pausa/detenida y conserva receipt inici
     const beforeMigration=new DatabaseSync(path);
     try{beforeMigration.exec(`DROP TABLE run_preflight_job_operations;DROP TABLE run_preflight_job_results;DROP TABLE run_preflight_job_history;DROP TABLE run_preflight_jobs;
       DROP TABLE model_time_spans; DROP TABLE model_time_run_state;
-      DELETE FROM schema_version WHERE version IN(21,22,23,24,25,26,27,28,29,30);`);}finally{beforeMigration.close();}
+      DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes;
+      DELETE FROM schema_version WHERE version IN(21,22,23,24,25,26,27,28,29,30,31);`);}finally{beforeMigration.close();}
     journal.close();journal=openJournal({path});
     const result=journal.createRunPreflightJob({principalId,idempotencyKey:uuid(12),runId:created.draft.runId,expectedConfigurationRevision:0,expectedWorldRevision:4});
     assert.equal(result.kind,'created');if(result.kind!=='created')assert.fail('No job');
@@ -103,7 +104,7 @@ test('v23 crea jobs preflight para Ready/pausa/detenida y conserva receipt inici
     const found=journal.readRunPreflightJob({runId:created.draft.runId,jobId:result.job.jobId});assert.equal(found.kind,'found');
     if(found.kind==='found'){assert.equal(found.document.report.kind,'current');assert.equal(found.document.report.result,null);}
     assert.equal(journal.readRunConfigurationDraftState({runId:created.draft.runId})?.lifecycle,'ready');
-    const inspect=new DatabaseSync(path);try{assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version,30);
+    const inspect=new DatabaseSync(path);try{assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version,31);
       assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_events').get()?.n,0);assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_commits').get()?.n,0);
       assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(),[]);}finally{inspect.close();}
   }finally{journal.close();fixture.close();rmSync(directory,{recursive:true,force:true});}

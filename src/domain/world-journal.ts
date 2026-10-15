@@ -16,6 +16,7 @@ import { HumanInterventionResolutionSchema } from './human-intervention.ts';
 import { ActorWorldProjectionRequestSchema, ContinuityReferenceSchema } from './preparation.ts';
 import {
   HashSchema, CharacterIdSchema, FictionalInstantSchema, HumanParticipantIdSchema, PerceptionIdSchema, ProposalIdSchema, RevisionSchema, RunIdSchema,
+  ActorActivationIdSchema, ActorActivationInvitationIdSchema,
   JobIdSchema, PulseIdSchema, WorldSeqSchema,
 } from './values.ts';
 
@@ -391,6 +392,13 @@ export const ActorTurnJobViewSchema = z.strictObject({
   frozenWorldCut: FrozenActorWorldCutSchema.nullable(),
   /** Direction ledger revision frozen on the first claim; null means legacy/unavailable. */
   frozenDirectionRevision: RevisionSchema.nullable(),
+  /** Present only when a technical invitation, rather than a perception, admitted this actor job. */
+  activation: z.strictObject({
+    activationId: ActorActivationIdSchema,
+    invitationId: ActorActivationInvitationIdSchema,
+    identityVersion: RevisionSchema,
+    trigger: z.strictObject({ kind: z.literal('initial-goal') }),
+  }).nullable().default(null),
 });
 
 export const CoordinatorPulseRequestSchema = z.strictObject({ runId: RunIdSchema });
@@ -398,7 +406,10 @@ export const CoordinatorPulseLookupSchema = z.strictObject({ runId: RunIdSchema,
 export const CoordinatorPulseViewSchema = z.strictObject({
   runId: RunIdSchema, pulseId: PulseIdSchema,
   lifecycleRevision: RevisionSchema.nullable(),
-  cause: z.strictObject({ kind: z.enum(['humanIntervention', 'actorAttempt']), id: z.string().min(1).max(200), commitIndex: z.number().int().positive() }),
+  cause: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.enum(['humanIntervention', 'actorAttempt']), id: z.string().min(1).max(200), commitIndex: z.number().int().positive() }),
+    z.strictObject({ kind: z.literal('actorActivation'), id: ActorActivationIdSchema, trigger: z.strictObject({kind:z.literal('initial-goal')}) }),
+  ]),
   state: z.enum(['running', 'completed', 'blocked']), maxCalls: z.number().int().nonnegative(), consumed: z.number().int().nonnegative(),
   jobs: z.array(ActorTurnJobViewSchema).min(1).max(1_000),
 });

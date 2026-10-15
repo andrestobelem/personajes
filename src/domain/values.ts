@@ -19,6 +19,8 @@ export const ProposalIdSchema = z.union([uuid, deterministicUuid]).brand<'Propos
 export const JobIdSchema = uuid.brand<'JobId'>();
 export const PulseIdSchema = uuid.brand<'PulseId'>();
 export const OperationIdSchema = uuid.brand<'OperationId'>();
+export const ActorActivationIdSchema = uuid.brand<'ActorActivationId'>();
+export const ActorActivationInvitationIdSchema = uuid.brand<'ActorActivationInvitationId'>();
 export const CharacterIdSchema = z.string().min(1).max(80)
   .regex(/^[a-z0-9-]+$/).brand<'CharacterId'>();
 export const HumanParticipantIdSchema = z.string().min(1).max(80)

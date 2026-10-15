@@ -2,6 +2,12 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 35: convocatoria inicial durable por metas
+
+El journal v31 registra una causa técnica y sus invitaciones a actores con metas activas al iniciar, reanudar o solicitar un paso. Cada invitación se vincula a un job actoral con inbox vacío; no crea percepciones, eventos ni commits ficticios. El coordinador revalida identidad, meta, disponibilidad y pertenencia a escena antes del pulso y del claim; conserva el corte de admisión como procedencia y congela el corte confirmado vigente al reclamar. `start`/`resume`/`step` admiten la causa de forma idempotente, y el ledger permite recuperar el mismo pulso tras reiniciar SQLite. Pausa y stop preservan el trabajo reanudable; cerrar la corrida terminaliza las invitaciones técnicas abiertas.
+
+La migración v30→v31 comprueba sus claves foráneas antes del commit y conserva el esquema tras reopen. `npm run typecheck` pasó; con ICM local, `npm run verify` terminó con **562 pruebas aprobadas, cero fallidas y una omitida** por plataforma. `npm run build` pasó con 433 módulos. `git diff --check` pasó. No se invocaron proveedores de inferencia reales. La convocatoria por ventanas, el avance automático y durable del reloj ficticio, la fidelidad/ritmo audiovisual y la aceptación integral de los 77 requisitos siguen pendientes.
+
 ## Corte 34: compositor gráfico de metaindicaciones
 
 La vista de representación incluye un panel separado para activar la sesión Director con alcance de corrida o escena, seleccionar personajes preparados, escribir instrucciones privadas y consultar el historial durable. La lectura usa el ledger autenticado; los envíos fijan CSRF, ETag e idempotencia y conservan la misma operación si la respuesta queda incierta. El DTO público de escena incluye su membresía para filtrar destinatarios visibles. El panel explica que la guía no sustituye identidad, memoria, deseos ni punto de vista del actor; una indicación de escena fuera de la escena activa aparece como no vigente para turnos nuevos. No crea hechos, eventos ficticios, memoria ni convocatorias.
