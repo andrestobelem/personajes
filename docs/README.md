@@ -63,7 +63,7 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - [Continuación y evidencia en Codex Cloud](auditoria/continuacion-cloud.md).
 - [Cobertura de la conversación](auditoria/conversacion-y-cobertura.md) y [registro de agentes](auditoria/registro-de-agentes.md).
 - [Diálogo constitucional](auditoria/dialogo-constitucional.md) y [respuestas del custodio](auditoria/respuestas-del-concepto.md).
-- [Revisión integral](auditoria/revision-integral.md).
+- [Revisión integral histórica (corte del 14 de octubre)](auditoria/revision-integral.md): snapshot anterior a los cortes C50–C61; consultar la trazabilidad y el progreso para el estado actual.
 - [Participación humana: identidad y brecha de integración](auditoria/participacion-humana.md).
 - [Puerto Pi y frontera de despacho](auditoria/puerto-pi-y-frontera-de-despacho.md).
 - [Tools tipadas y reformulación](auditoria/tools-tipadas-y-reformulacion.md).

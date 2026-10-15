@@ -1975,12 +1975,12 @@
     "docs/specs/04-api-y-autoridad.md": "c53f3ceaf2f894631df1b7834f121de6482adbf7fcb4268796d2098c84565d08",
     "docs/specs/05-interfaz.md": "d3c7972ec8793e45ce14323480a4667d5daa9f483ae302c1dd635062d822ca52",
     "docs/specs/06-voces-y-ritmo.md": "426f4d395accf518d7be4db47e6c99fcc7ea5809319a069d571207c2ce1c4bf6",
-    "docs/specs/07-verificacion.md": "6a1e28233c6877f18ab6ab55dd12845c23c834056d0720023c654aa910422454",
+    "docs/specs/07-verificacion.md": "03fe001493bbe1f614e8d5af3a87a28902a31f4888469ea639c089d4b8a19e9a",
     "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"
   },
   "currentSpecHashDate": "2026-10-15",
-  "currentPrdHash": "ee8d05cdfe9dd80e7a3d1cfa02f6538c691677eecae56084f487405bc2889e7b",
-  "currentChangeNote": "R10 15/10: C55 incorpora login OAuth de Anthropic junto a Codex; C56 integra posesión de objetos en Stage e Inspector privado con cortes SQLite históricos; C57 exige proveedor explícito en el puerto OAuth de representación y comparte sólo la credencial del host; C58 prueba la intervención HTTP hasta la respuesta actoral con SQLite/ICM real y transporte Pi controlado, incluyendo replay idempotente sin duplicación; C59 acredita pausa visible al agotarse el presupuesto en una actuación; C60 prueba refresco SSE de proyecciones y descarte de respuestas atrasadas en RunStageWorkspace; C61 permite abrir desde cada escena los commits locales de apertura/cierre y pagina la historia estructural completa, sin atribuir cortes locales a escenas heredadas. S03 precisa que el wrapper de presupuesto conserva el proveedor OAuth del perfil elegido; S05 formaliza la navegación por escena. Login real, aceptación visual integral y cumplimiento de los 77 requisitos siguen pendientes.",
+  "currentPrdHash": "3787d23e1b5016ba2e2b80d81f93f464683d09e62989bffc84a44749bfd4d65e",
+  "currentChangeNote": "R11 15/10: se precisa que los 77 requisitos siguen pendientes de aceptación integral, aunque varios tienen implementación y evidencia parcial; se conserva OAuth explícito del proveedor elegido, sin fallback a API key. S07 incorpora evidencia C52–C61 y corrige el estado del fork; la trazabilidad refleja evidencia local de ACT-04/05 y ESC-04 sin cerrar sus criterios artísticos o end-to-end. Se corrigen el conteo de cinco cargas de YouTube y las descripciones de la app parcial; la revisión integral del 14/10 queda identificada como snapshot histórico. Hashes actualizados de PRD y S07. Login real, aceptación visual integral y cumplimiento de los 77 requisitos siguen pendientes.",
   "subresults": {
     "P21-REC": {
       "parentTest": "P21",

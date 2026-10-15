@@ -13,7 +13,7 @@ Esta carpeta convierte las definiciones del proyecto en instrucciones, contratos
 - [Narrador opcional](narrador/CONTEXT.md): voz en off para espectadores, con revisión propia y sin crear hechos del escenario.
 - [Dirección](direccion/CONTEXT.md): línea dramática y registro de etapas por evidencias.
 - [Escenario](escenario/CONTEXT.md): estado compartido, tiempo, eventos y resolución de acciones.
-- [Interfaz gráfica completa](interfaz/CONTEXT.md): prioridad funcional y visual para entender y operar configuración, escenografía, interacción, evolución e historia; todavía sin aplicación implementada.
+- [Interfaz gráfica completa](interfaz/CONTEXT.md): prioridad funcional y visual para entender y operar configuración, escenografía, interacción, evolución e historia; la aplicación y varias superficies ya están implementadas, pero la interfaz completa y su aceptación integral siguen pendientes.
 - [Observación](observacion/CONTEXT.md): conversaciones y evolución accesibles al observador.
 - [Verificación](references/verificacion.md): pruebas del protocolo y revisión de una corrida.
 
@@ -27,7 +27,7 @@ El perfil por representación puede ser **GPT-6.1 Sol bajo**, predeterminado med
 
 ## Cómo usarlo
 
-Un agente con lectura y escritura de archivos puede abrir `obra/CONTEXT.md` y preparar la configuración. La representación posterior requiere una instancia Pi distinta por personaje; el Coordinador invoca a cada una mediante los contratos de `stages/` y marca el pulso. No representa al elenco rotando roles en un único contexto. Los handoffs son archivos Markdown. No se ha instalado un motor LLM, servidor, scheduler ni interfaz gráfica. La navegación del repositorio permite inspeccionar registros, pero el producto requiere una interfaz gráfica completa, principalmente funcional y visual, para entender la obra, prepararla, observarla, conversar, dirigir y examinar evolución mediante controles claros y funciones verificables. El [contrato de interfaz](interfaz/references/contrato.md) conserva ese alcance; no está implementada.
+Un agente con lectura y escritura de archivos puede abrir `obra/CONTEXT.md` y preparar la configuración. La representación requiere una instancia Pi distinta por personaje; el Coordinador invoca a cada una mediante los contratos de `stages/` y marca el pulso. No representa al elenco rotando roles en un único contexto. El repositorio ya incluye una aplicación web, servidor HTTP, launcher y runtime Pi, además de superficies gráficas parciales para biblioteca, preparación y representación. Estas piezas no significan que se haya iniciado una obra ni que haya habido login o inferencia con cuentas reales. La interfaz gráfica completa, principalmente funcional y visual, todavía debe permitir recorrer y operar configuración, escenografía, interacción, evolución e historia con aceptación integral. El [contrato de interfaz](interfaz/references/contrato.md) conserva ese alcance.
 
 La primera operación es configurar una escena: seleccionar la etapa de la continuidad, uno o más personajes participantes, qué sabe cada uno, dónde está y qué herramientas tiene. En este estado no se ha elegido una etapa de la serie ni asignado una misión. Los campos pendientes no se convierten en hechos por inferencia silenciosa. El configurador puede elaborar una propuesta de puesta en escena dentro del encargo del usuario, marcando lo que inventa.
 

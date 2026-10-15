@@ -11,7 +11,7 @@ Fecha de actualización: **15 de octubre de 2026**. Se revisaron los pedidos dis
 - **Por definir/implementar:** elección de puesta o producto futuro explícitamente pendiente.
 - **Sin instrucción interpretable:** texto que no permite deducir una tarea concreta; no se inventó su alcance.
 
-El [índice general](../README.md), la [constitución](../constitucion.md), el [registro de agentes](registro-de-agentes.md) y la [revisión integral](revision-integral.md) son las entradas de control.
+El [índice general](../README.md), la [constitución](../constitucion.md), el [registro de agentes](registro-de-agentes.md) y la [revisión integral histórica](revision-integral.md) son las entradas de control. Para avances posteriores al corte del 14 de octubre, consultar [el progreso de implementación](implementacion-progreso.md) y [PENDIENTES](../PENDIENTES.md).
 
 ## 1. Concepto, identidad, agencia y dramaturgia
 
@@ -50,7 +50,7 @@ El [índice general](../README.md), la [constitución](../constitucion.md), el [
 | I10 | Buscar ICM en internet, guardar investigación y paper. | [Estudio ICM](../investigaciones/icm-contexto-interpretable.md), [PDF v2](../fuentes/icm/van-clief-mcdermott-2026-icm-arxiv-2603.16021v2.pdf), [procedencia](../fuentes/icm/README.md). | Realizado. PDF y hash comprobados; evidencia del paper y adaptación del proyecto distinguidas. |
 | I11 | Investigación profunda de Pi SDK, system prompt y herramientas. | [Pi Coding Agent](../investigaciones/pi-coding-agent-runtime.md). | Guardado y cotejado documentalmente con código/versiones; no login ni sesión ejecutados. |
 | I12 | Investigación profunda de ICM Memory con SQLite. | [ICM Memory](../investigaciones/icm-memory-sqlite.md). | Guardado. Proyecto distinto del ICM de carpetas; backend/base fijados por host, ámbitos no equivalen a permisos. |
-| I13 | Investigar en YouTube longitud de respuestas y ritmo de episodio. | [Investigación](../investigaciones/get-smart-ritmo-youtube.md), [inventario](../fuentes/youtube-get-smart/inventario.csv). | **Parcial:** cuatro cargas localizadas, metadatos y tres fotogramas; sin audio interpretable o transcripciones. Falta medir réplicas, pausas y ritmo por escucha. |
+| I13 | Investigar en YouTube longitud de respuestas y ritmo de episodio. | [Investigación](../investigaciones/get-smart-ritmo-youtube.md), [inventario](../fuentes/youtube-get-smart/inventario.csv). | **Parcial:** cinco cargas localizadas, metadatos y tres fotogramas; sin audio interpretable o transcripciones. Falta medir réplicas, pausas y ritmo por escucha. |
 | I14 | Añadir a cada personaje cómo crear una voz ElevenLabs. | [Guía](../investigaciones/elevenlabs-diseno-de-voces.md) y secciones individuales de los dossiers. | Preparado: 26 recetas de voz humana; Fang con efectos caninos; familia y narrador aparte. No se generaron previews, voces ni audio. |
 
 ## 3. Escenario, interfaz, interacción y moderación
