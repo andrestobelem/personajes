@@ -88,7 +88,7 @@ export function createRunLifecycleApplication(input: {
       audio: {mode:storedConfiguration.audio.mode},
     });
     const reservedCalls = Math.min(modelBudget.reservedPiCalls, modelBudget.runCallsUsed);
-    const callRemaining = Math.max(0, modelBudget.maxPiCallsPerRun - modelBudget.runCallsUsed);
+    const callRemaining = modelBudget.maxPiCallsPerRun === null ? null : Math.max(0, modelBudget.maxPiCallsPerRun - modelBudget.runCallsUsed);
     const wallTimeMeasured = modelBudget.wallTimeMeasuredMs;
     const wallTimeRemaining = modelBudget.wallTimeRemainingMs;
     const budgetStatus = modelBudget.status === 'legacy-unknown' ? 'unknown'
@@ -104,7 +104,7 @@ export function createRunLifecycleApplication(input: {
       catch { /* Audio availability must not prevent pausing a model request. */ }
     }
     const budget = RunBudgetViewSchema.parse({
-      modelCalls: counters(modelBudget.maxPiCallsPerRun, modelBudget.runCallsUsed - reservedCalls, reservedCalls),
+      modelCalls: modelBudget.maxPiCallsPerRun === null ? { limit: null, used: modelBudget.runCallsUsed - reservedCalls, reserved: reservedCalls, remaining: null } : counters(modelBudget.maxPiCallsPerRun, modelBudget.runCallsUsed - reservedCalls, reservedCalls),
       modelWallTimeMs: {
         limit: modelBudget.maxWallTimeMs,
         measured: wallTimeMeasured,
@@ -201,7 +201,7 @@ export function createRunLifecycleApplication(input: {
     const request = ControlInputSchema.parse(rawInput);
 
     const journalCommand = request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step'
-      ? { kind: request.command.kind }
+      ? { kind: request.command.kind, ...(request.command.kind === 'resume' && request.command.retryBlockedActors === true ? {retryBlockedActors: true} : {}) }
       : request.command;
     const preflightJobId = request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step'
       ? JobIdSchema.parse(request.command.preflightJobId) : undefined;

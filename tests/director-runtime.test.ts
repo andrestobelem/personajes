@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { PiRuntime, createPiSession } from '../src/adapters/pi.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -129,4 +131,21 @@ test('grants Director comprueban rol, sesión, época y prueba terminal; recover
     assert.equal((await worker.run({runId:fixture.claim.runId,pulseId:fixture.pulseId})).kind,'blocked');
     assert.equal(sessions,0);assert.equal(fixture.journal.readRunModelTimeBudget({runId:fixture.claim.runId})?.runCallsUsed,0);
   }finally{fixture.close();}
+});
+
+
+test('production Director session reaches its request gate with local synthetic OAuth and no provider transport', async () => {
+  const f = await fixtureWithTerminalPulse();
+  let reached = false;
+  const diagnostics: unknown[] = [];
+  try {
+    const access = `e30.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'synthetic-test-account' } })).toString('base64url')}.synthetic`;
+    writeFileSync(join(f.directory,'pi','auth','auth.json'), JSON.stringify({ 'openai-codex': {type:'oauth',refresh:'synthetic',access,expires:Date.now()+86400000} }), {mode:0o600});
+    const runtime = await PiRuntime.create({privateDataRoot:f.directory});
+    const worker = createDirectorPiWorker({journal:f.journal,runtime,ownerToken:randomUUID(),onDiagnostic:d=>diagnostics.push(d),
+      sessionFactory: input => createPiSession({...input,requestPort:{...input.requestPort,async recordCheckpointCandidate(candidate){try{return await input.requestPort.recordCheckpointCandidate(candidate);}catch(error){diagnostics.push(error instanceof Error?error.message:String(error));throw error;}},reserveNextRequest(){reached=true;throw new Error('SYNTHETIC_STOP_BEFORE_TRANSPORT');}}}),
+    });
+    await worker.run({runId:f.claim.runId,pulseId:f.pulseId});
+    assert.equal(reached,true,JSON.stringify(diagnostics));
+  } finally { f.journal.close(); (await import('node:fs')).rmSync(f.directory,{recursive:true,force:true}); }
 });

@@ -70,8 +70,8 @@ export function createConfiguratorPiWorker(input: { ledger: Ledger; journal: Jou
       const configuration = ReadyRunConfigurationSchema.parse(input.journal.readWorldConfiguration({ runId: initial.runId }));
       // This is a technical quota cohort only. No coordinator pulse, episode,
       // event, perception or character turn is created for an administrative job.
-      input.journal.configureRun({ runId: initial.runId, maxCalls: configuration.budget.maxPiCallsPerRun });
-      input.journal.configurePulse({ runId: initial.runId, pulseId: initial.jobId, maxCalls: configuration.budget.maxPiCallsPerPulse });
+      input.journal.configureRun({ runId: initial.runId, maxCalls: configuration.budget.maxPiCallsPerRun ?? 0 });
+      input.journal.configurePulse({ runId: initial.runId, pulseId: initial.jobId, maxCalls: configuration.budget.maxPiCallsPerPulse ?? 0 });
 
       const tool = createConfiguratorProposalTool({ context: claimed.context, checkEligibility: eligibility,
         ...(options.signal === undefined ? {} : { signal: options.signal }) });

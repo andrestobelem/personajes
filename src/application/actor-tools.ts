@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Type } from '@earendil-works/pi-ai';
 import { z } from 'zod';
+import type { ActorWorldProjection } from '../domain/actor-world-projection.ts';
 import type { IcmActorMemoryReader } from '../adapters/icm.ts';
 import type { openJournal } from '../adapters/journal.ts';
 import type { PiCustomTool } from '../adapters/pi.ts';
@@ -46,6 +47,7 @@ export function createActorTools(input: {
   context: unknown;
   journal: ActorToolsJournal;
   memory: IcmActorMemoryReader;
+  communicationChannels?: ActorWorldProjection['world']['channels'];
   /** The host advances this only between settled prompts after a reformulation verdict. */
   getProposalVersion?: () => number;
 }): readonly PiCustomTool[] {
@@ -92,6 +94,7 @@ export function createActorTools(input: {
     description: [
       'Registra una sola acción tipada para esta generación. No afirma que ya ocurrió: queda pendiente de revisión del Continuista y resolución de Escenario.',
       'El parámetro action contiene un objeto WorldAttempt sin attemptId, runId, actorId ni expectedRevision; el host agrega esos campos desde el corte y el job autenticados.',
+      'Para communicate, revisa el scope del canal: addressed requiere uno o más audienceHandles de personajes conocidos; broadcast requiere la lista vacía. No inventes handles para personas humanas que carecen de ellos.',
       'Kinds: observe (target visual/auditory), move (destinationHandle), communicate (channelHandle, audienceHandles, content), take (objectHandle), offer (objectHandle, recipientHandle), acceptOffer (offerHandle), useDevice (deviceHandle, operationId), wait/rest (durationMs), reviseGoal (goalId, change), reviseBelief (change, evidenceExperienceIds), reviseRelationship (targetHandle, stance, confidence, evidenceExperienceIds).',
     ].join(' '),
     parameters: PublishedProposalParameters,
@@ -110,6 +113,13 @@ export function createActorTools(input: {
         actorId: context.actorId,
         expectedRevision: context.worldRevision,
       });
+      if (attempt.kind === 'communicate') {
+        const channel = input.communicationChannels?.find(item => item.handle === attempt.channelHandle);
+        if (channel?.scope === 'addressed' && attempt.audienceHandles.length === 0)
+          throw new Error('El canal es dirigido (addressed): indica al menos un audienceHandle de un personaje conocido. La propuesta no fue registrada.');
+        if (channel?.scope === 'broadcast' && attempt.audienceHandles.length > 0)
+          throw new Error('El canal es de difusión (broadcast): audienceHandles debe estar vacío. La propuesta no fue registrada.');
+      }
       const registration = WorldProposalRegistrationSchema.parse({
         runId: context.runId,
         proposalId,

@@ -27,7 +27,7 @@ export function controlledDirectorSessionFactory(input:{root:string;physicalSess
       async abortAndDispose(){await session.abort();session.dispose();if(input.stats!==undefined)input.stats.disposed+=1;},
       async prompt(prompt:PiPromptInput){
         const context=DirectorContextSchema.parse(JSON.parse(prompt.text));let lastRequest:PiRequestReference|undefined;let requests=0;
-        await sessionInput.requestPort.recordCheckpointCandidate({identity:sessionInput.identity,purpose:{kind:'job-base',baseScope:prompt.scope},snapshot:checkpoint()});
+        await sessionInput.requestPort.recordCheckpointCandidate({identity:sessionInput.identity,purpose:{kind:'job-base',baseScope:prompt.scope},snapshot:{...checkpoint(),candidateLeafId:null}});
         session.agent.streamFunction=createBudgetedStreamFunction({identity:sessionInput.identity,runId:prompt.scope.runId,clockEpochId:sessionInput.runtime.clockEpochId,
           requireWallTime:true,sessionManager:manager,port:sessionInput.requestPort,getScope:()=>prompt.scope,
           onRequestReserved(request){lastRequest=request;},original(actualModel){

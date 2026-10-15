@@ -181,6 +181,7 @@ try {
     readCredentialFingerprint: authentication.readCredentialFingerprint, ownerToken: host.ownerToken, signal: oauthController.signal });
   preflightJobs = await createRunPreflightJobs({
     journal: host.journal, ownerToken: host.ownerToken, signal: oauthController.signal,
+    onDiagnostic: diagnosticSink,
     readCredentialFingerprint: authentication.readCredentialFingerprint,
     createHost: () => createProductionPreflightHost({ journal: host.journal, catalog, piRuntime, authentication,
       readVoiceReadiness: async request => voices?.readPreflightReadiness(request) ?? Promise.resolve({kind:'unavailable',code:'voice-runtime-unavailable'}),
@@ -244,7 +245,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   const configuredVoices=voices;
   const runLifecycle = createRunLifecycleApplication({
     journal: host.journal,
-    ...(preflightJobs === undefined ? {} : { preflights: preflightJobs }),
+    ...(preflightJobs === undefined ? {} : { preflights: { readJob: preflightJobs.readLifecycleDocument } }),
     ...(representation === undefined ? {} : { runtime: representation }),
     ...(configuredVoices===undefined?{}:{readVoiceBudget:(runId:string)=>configuredVoices.service.budget(runId),readVoiceReadiness:(request:{runId:string;configRevision:number})=>configuredVoices.readPreflightReadiness(request)}),
   });

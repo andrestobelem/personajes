@@ -198,7 +198,7 @@ Cada ID representa una obligación del producto. Las specs deben asignarle compo
 | TIM-01 | Operar reloj ficticio, día/noche, rutinas y disponibilidad. | Horarios/descanso influyen en encuentros y percepción; no se sincroniza por defecto con equipo o latencia. |
 | TIM-02 | Definir inicio/pausa/reanuda/paso/detención y trabajo en curso. | Semántica de §4.6: pausa congela reloj y nuevas convocatorias, conserva trabajo pendiente sin efectos tardíos; paso ejecuta un pulso acotado, detener cancela y preserva, cerrar finaliza sin borrar. |
 | TIM-03 | Configurar duración de acciones/escala temporal y avance fuera de línea. | Política explícita por puesta; por defecto no se adelanta historia al cerrar aplicación sin regla habilitada. |
-| TIM-04 | Respetar presupuesto de llamadas, tiempo operativo y activación. | Al agotarlo se pausa con diagnóstico; no rebaja perfil ni hace actuar continuamente al catálogo entero. |
+| TIM-04 | Respetar la configuración de llamadas, tiempo operativo y activación. | Las llamadas por representación y por pulso, y el tiempo acumulado, admiten «sin límite» explícito por pedido posterior del usuario. Sólo los topes configurados pausan por agotamiento; no hay cuota de tokens propia ni sustitución de perfil. Timeout, cancelación y concurrencia siguen siendo controles operativos. |
 
 ### 5.6 Interfaz y participación
 
@@ -250,7 +250,7 @@ Cada ID representa una obligación del producto. Las specs deben asignarle compo
 | NFR-03 | Persistencia local durable y recuperación comprobada. | Pruebas reales de transacciones, interrupciones, deduplicación, backups y restauración; no sólo tests con mocks. |
 | NFR-04 | Fallos aislados y diagnósticos trazables. | IDs de corrida/actor/propuesta/evento permiten relacionar estados; logs no contienen tokens ni razonamiento interno. |
 | NFR-05 | UI permanece operable mientras hay inferencia. | Acceso a historial/configuración/pausa durante trabajos en curso; indicadores de latencia real sin confundirla con tiempo ficticio. |
-| NFR-06 | Coste y activación controlables. | Configuración previa de límites, contador observado y pausa al agotarlos; mediciones del proveedor pendientes no se inventan. |
+| NFR-06 | Uso y activación observables y controlables. | Contadores observados, límites opcionales de llamadas y pausa al agotar sólo los topes configurados. La opción sin límite no altera restricciones del proveedor o del modelo ni inventa costos medidos. |
 | NFR-07 | Dependencias/versiones y ejecución reproducibles. | Lockfile, scripts de desarrollo/build/tests, requisitos de host y guía de operación que funcionen. |
 | NFR-08 | Recursos y fuentes con procedencia. | Fotos/paper/skills retienen condiciones propias; arte final no se declara libre sin evidencia. |
 | NFR-09 | Separación servidor/cliente y acceso de control. | Credenciales sólo host; endpoint/cookie/control impiden elevar rol desde diálogo o import; exposición pública no activada por defecto. |

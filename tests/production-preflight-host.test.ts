@@ -76,7 +76,7 @@ test('budget host usa conteos medidos del journal y bloquea legacy desconocido, 
     for (const variant of [
       { value: RunModelTimeBudgetSchema.parse({ ...observed, status: 'legacy-unknown', wallTimeMeasuredMs: null, wallTimeRemainingMs: null, unknownLegacyRequests: 1 }), code: 'run-wall-time-legacy-unknown' },
       { value: RunModelTimeBudgetSchema.parse({ ...observed, status: 'uncertain', uncertainRequests: 1 }), code: 'run-wall-time-uncertain' },
-      { value: RunModelTimeBudgetSchema.parse({ ...observed, maxWallTimeMs: observed.maxWallTimeMs + 1 }), code: 'run-budget-scope-mismatch' },
+      { value: RunModelTimeBudgetSchema.parse({ ...observed, maxWallTimeMs: (observed.maxWallTimeMs ?? 0) + 1 }), code: 'run-budget-scope-mismatch' },
       { value: RunModelTimeBudgetSchema.parse({ ...observed, wallTimeRemainingMs: 0 }), code: 'budget-exhausted' },
     ]) {
       const unavailable = createProductionPreflightHost({ journal: { ...fixture.journal, readRunModelTimeBudget() { return variant.value; } }, catalog, piRuntime: fixture.runtime, authentication });

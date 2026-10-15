@@ -55,7 +55,7 @@ function refreshFor(stage: ReturnType<typeof stageFixture>): RunRefresh {
   });
 }
 
-test("run.refresh recarga las proyecciones visibles y una respuesta anterior no revierte el corte", async () => {
+for (const live of [false, true]) test(`run.refresh recarga ${live ? "la representación en vivo" : "las proyecciones visibles"} y una respuesta anterior no revierte el corte`, async () => {
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="personajes-bootstrap" content="0123456789abcdefghijklmnopqrstuv"></head><body><div id="root"></div></body></html>',
     { url: "http://localhost/", pretendToBeVisual: true },
@@ -133,7 +133,7 @@ test("run.refresh recarga las proyecciones visibles y una respuesta anterior no 
     assert.ok(container);
     const root = createRoot(container);
     unmount = () => root.unmount();
-    await act(async () => { root.render(React.createElement(RunStageWorkspace, { runId: first.runId, api })); });
+    await act(async () => { root.render(React.createElement(RunStageWorkspace, { runId: first.runId, api, live })); });
 
     const deadline = Date.now() + 3_000;
     while ((ControlledEventSource.current === undefined || calls.stage !== 1) && Date.now() < deadline)
@@ -146,7 +146,7 @@ test("run.refresh recarga las proyecciones visibles y una respuesta anterior no 
       source.emit(refreshFor(olderStage));
       source.emit(refreshFor(newerStage));
     });
-    while ((calls.stage < 2 || !container.textContent?.includes("Escenario 5")) && Date.now() < deadline)
+    while ((calls.stage < 2 || !container.textContent?.includes(live ? "Secuencia 9" : "Escenario 5")) && Date.now() < deadline)
       await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 5)); });
 
     assert.equal(calls.stage, 2, "La revisión SSE debe provocar una nueva lectura de Escenario.");
@@ -158,7 +158,7 @@ test("run.refresh recarga las proyecciones visibles y una respuesta anterior no 
 
     delayedOldResponse.resolve(olderStage);
     await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 25)); });
-    assert.match(container.textContent ?? "", /Escenario 5/);
+    assert.match(container.textContent ?? "", live ? /Secuencia 9/ : /Escenario 5/);
     assert.match(container.textContent ?? "", /Sala nueva/);
     assert.doesNotMatch(container.textContent ?? "", /Sala antigua/);
   } finally {

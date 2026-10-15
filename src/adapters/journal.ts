@@ -531,7 +531,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1956,6 +1956,94 @@ export function openJournal(input: { path: string }) {
     database.exec('INSERT INTO schema_version VALUES(40);COMMIT;PRAGMA foreign_keys=ON;');
     }catch(error){try{database.exec('ROLLBACK;PRAGMA foreign_keys=ON;');}catch{/* Atomic migration. */}database.close();throw error;}
   }
+  // Fictional instants are signed epoch milliseconds; real recording times remain nonnegative.
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=41').get()) {
+    try {
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE actor_activation_causes_v41(
+          activation_id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          trigger_kind TEXT NOT NULL CHECK(trigger_kind IN('initial-goal','routine-boundary')),
+          boundary_at INTEGER ,activation_key TEXT NOT NULL,
+          configuration_hash TEXT NOT NULL,lifecycle_revision INTEGER NOT NULL CHECK(lifecycle_revision>=0),
+          world_revision INTEGER NOT NULL CHECK(world_revision>=0),world_seq INTEGER NOT NULL CHECK(world_seq>=0),fictional_at INTEGER NOT NULL ,
+          state TEXT NOT NULL CHECK(state IN('pending','running','completed','blocked')),
+          failure_reason TEXT,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(run_id,activation_key),UNIQUE(run_id,activation_id),
+          CHECK((trigger_kind='initial-goal' AND boundary_at IS NULL AND activation_key='initial-goal') OR
+            (trigger_kind='routine-boundary' AND boundary_at IS NOT NULL AND activation_key='routine:'||boundary_at)),
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        INSERT INTO actor_activation_causes_v41 SELECT * FROM actor_activation_causes;
+        DROP TABLE actor_activation_causes;
+        ALTER TABLE actor_activation_causes_v41 RENAME TO actor_activation_causes;
+        CREATE TABLE actor_activation_invitations_v41(
+          invitation_id TEXT PRIMARY KEY,activation_id TEXT NOT NULL,run_id TEXT NOT NULL,actor_id TEXT NOT NULL,
+          identity_version INTEGER NOT NULL CHECK(identity_version>=0),trigger_kind TEXT NOT NULL CHECK(trigger_kind IN('initial-goal','routine-boundary')),
+          boundary_at INTEGER ,
+          state TEXT NOT NULL CHECK(state IN('pending','assigned','consumed','blocked')),
+          failure_reason TEXT,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(activation_id,actor_id),UNIQUE(run_id,invitation_id),
+          FOREIGN KEY(run_id,activation_id) REFERENCES actor_activation_causes(run_id,activation_id) ON DELETE RESTRICT,
+          CHECK((trigger_kind='initial-goal' AND boundary_at IS NULL) OR (trigger_kind='routine-boundary' AND boundary_at IS NOT NULL)),
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        INSERT INTO actor_activation_invitations_v41 SELECT * FROM actor_activation_invitations;
+        DROP TABLE actor_activation_invitations;
+        ALTER TABLE actor_activation_invitations_v41 RENAME TO actor_activation_invitations;
+        CREATE TABLE routine_clock_advances_v41(
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,operation_id TEXT NOT NULL,
+          request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,
+          from_revision INTEGER NOT NULL CHECK(from_revision>=0),to_revision INTEGER NOT NULL CHECK(to_revision>from_revision),
+          from_at INTEGER NOT NULL ,to_at INTEGER NOT NULL CHECK(to_at>from_at),
+          event_id TEXT NOT NULL UNIQUE,commit_index INTEGER NOT NULL CHECK(commit_index>0),created_at INTEGER NOT NULL CHECK(created_at>=0),
+          PRIMARY KEY(run_id,operation_id),UNIQUE(run_id,from_revision,to_revision),UNIQUE(run_id,commit_index),
+          FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT
+        );
+        INSERT INTO routine_clock_advances_v41 SELECT * FROM routine_clock_advances;
+        DROP TABLE routine_clock_advances;
+        ALTER TABLE routine_clock_advances_v41 RENAME TO routine_clock_advances;
+        CREATE INDEX actor_activation_causes_pending ON actor_activation_causes(run_id,state,created_at);
+        CREATE INDEX actor_activation_invitations_pending ON actor_activation_invitations(activation_id,state,actor_id);
+      `);
+      if (database.prepare('PRAGMA foreign_key_check').all().length !== 0) throw new Error('Migración v41 produjo referencias inválidas');
+      database.exec('INSERT INTO schema_version VALUES(41); COMMIT; PRAGMA foreign_keys=ON;');
+    } catch (error) {
+      try { database.exec('ROLLBACK; PRAGMA foreign_keys=ON;'); } catch { /* Atomic migration. */ }
+      database.close(); throw error;
+    }
+  }
+  function retryActorTurnJobWithinTransaction(request:z.infer<typeof ActorTurnJobRetrySchema>) {
+        const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+        if (runValue === undefined) throw new Error('World run del retry actoral inexistente');
+        const run = parseWorldRun(runValue);
+        if (run.row.lifecycle !== 'running') throw new Error('Retry actoral requiere la corrida en running');
+        const value = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+          .get(request.runId, request.actorId, request.jobId, request.expectedGeneration);
+        if (value === undefined) throw new Error('Job actoral inexistente');
+        const row = ActorTurnJobDbRowSchema.parse(value);
+        if (row.state !== 'blocked' || row.pulse_id !== request.pulseId) throw new Error('Retry exige job bloqueado y su mismo pulso');
+        const generation = RevisionSchema.parse(request.expectedGeneration + 1);
+        const next = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+          .get(request.runId, request.actorId, request.jobId, generation);
+        if (next !== undefined) return ActorTurnJobRetryResultSchema.parse({ kind: 'existing', job: actorTurnJobView(next) });
+        const pending = database.prepare(`SELECT i.perception_id FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id JOIN world_perceptions p ON p.perception_id=i.perception_id
+          LEFT JOIN coordinator_pulses c ON c.pulse_id=?
+          WHERE i.run_id=? AND i.actor_id=? AND i.state='queued' AND d.state='delivered' AND (c.pulse_id IS NULL OR (p.origin_kind=c.origin_kind AND p.origin_id=c.origin_id))
+            AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
+          ORDER BY i.world_seq,i.perception_id LIMIT 100001`).all(request.pulseId, request.runId, request.actorId)
+          .map((item) => z.strictObject({ perception_id: PerceptionIdSchema }).parse(item).perception_id);
+        if (pending.length === 0 || pending.length > 100_000) throw new Error('Retry requiere intenciones pendientes dentro del límite');
+        const timestamp = Date.now();
+        database.prepare(`UPDATE coordinator_pulses SET state='running',lifecycle_revision=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='blocked'`)
+          .run(run.row.lifecycle_revision,timestamp, request.runId, request.pulseId);
+        database.prepare(`INSERT INTO actor_turn_jobs(run_id,actor_id,job_id,generation,pulse_id,state,owner_token,claim_token,created_at,updated_at,lifecycle_revision)
+          VALUES(?,?,?,?,?,'queued',NULL,NULL,?,?,?)`).run(request.runId, request.actorId, request.jobId, generation, request.pulseId, timestamp, timestamp,run.row.lifecycle_revision);
+        for (const perceptionId of pending) database.prepare(`INSERT INTO actor_turn_job_inputs(run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at)
+          VALUES(?,?,?,?,?,'assigned',?,NULL)`).run(request.runId, request.actorId, request.jobId, generation, perceptionId, timestamp);
+        return ActorTurnJobRetryResultSchema.parse({ kind: 'retried', job: actorTurnJobView(database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+          .get(request.runId, request.actorId, request.jobId, generation)) });
+
+  }
   let identityPromotionPorts:IdentityPromotionPorts|undefined;
 
   const pendingInitialActorCuts = new Set<string>();
@@ -2854,8 +2942,8 @@ export function openJournal(input: { path: string }) {
       .get(row.run_id,row.actor_id,row.job_id,row.generation);
     const activation = activationValue === undefined ? null : z.strictObject({
       activation_id:ActorActivationIdSchema,invitation_id:ActorActivationInvitationIdSchema,identity_version:counter,
-      trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:counter.nullable(),
-      cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:counter.nullable(),
+      trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:z.number().int().nullable(),
+      cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:z.number().int().nullable(),
       state:z.enum(['pending','assigned','consumed','blocked']),
       cause_state:z.enum(['pending','running','completed','blocked']),
     }).parse(activationValue);
@@ -2928,7 +3016,7 @@ export function openJournal(input: { path: string }) {
           .get(row.run_id,activationId);
         if(activationValue===undefined)throw new Error('Pulso técnico sin causa de activación durable');
         const activation=z.strictObject({state:z.enum(['pending','running','completed','blocked']),
-          trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:counter.nullable()}).parse(activationValue);
+          trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:z.number().int().nullable()}).parse(activationValue);
         const trigger=activation.trigger_kind==='initial-goal'?{kind:'initial-goal' as const}
           :{kind:'routine-boundary' as const,boundaryAt:FictionalInstantSchema.parse(activation.boundary_at)};
         return {kind:'actorActivation' as const,id:activationId,trigger};
@@ -3634,9 +3722,9 @@ export function openJournal(input: { path: string }) {
       const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
       if (configuration.success) {
         const counts = modelTimeCounts(span.run_id);
-        if (counts.measured_ms >= configuration.data.budget.maxWallTimeMs
-          || budgetRow.parse(database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(span.run_id)).consumed
-            >= configuration.data.budget.maxPiCallsPerRun) pauseRunForModelTimeBudget(span.run_id);
+        if ((configuration.data.budget.maxWallTimeMs !== null && counts.measured_ms >= configuration.data.budget.maxWallTimeMs)
+          || (configuration.data.budget.maxPiCallsPerRun !== null && budgetRow.parse(database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(span.run_id)).consumed
+            >= configuration.data.budget.maxPiCallsPerRun)) pauseRunForModelTimeBudget(span.run_id);
       }
     }
     return 'settled';
@@ -3712,9 +3800,9 @@ export function openJournal(input: { path: string }) {
         const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
         if (configuration.success) {
           const counts = modelTimeCounts(row.run_id);
-          if (counts.measured_ms >= configuration.data.budget.maxWallTimeMs
-            || budgetRow.parse(database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(row.run_id)).consumed
-              >= configuration.data.budget.maxPiCallsPerRun) pauseRunForModelTimeBudget(row.run_id);
+          if ((configuration.data.budget.maxWallTimeMs !== null && counts.measured_ms >= configuration.data.budget.maxWallTimeMs)
+            || (configuration.data.budget.maxPiCallsPerRun !== null && budgetRow.parse(database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(row.run_id)).consumed
+              >= configuration.data.budget.maxPiCallsPerRun)) pauseRunForModelTimeBudget(row.run_id);
         }
       }
     }
@@ -3731,11 +3819,14 @@ export function openJournal(input: { path: string }) {
     const run = budgetRow.parse(database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId));
     const pulse = pulseRow.parse(database.prepare('SELECT run_id,max_calls,consumed FROM pulses WHERE pulse_id=?').get(request.pulseId));
     if (pulse.run_id !== request.runId) throw new Error('Pulso ajeno a corrida');
-    if (run.consumed >= run.max_calls) {
+    const readyBudgetRow = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+    const readyConfiguration = ReadyRunConfigurationSchema.safeParse(readyBudgetRow === undefined ? undefined : parseWorldRun(readyBudgetRow).configuration);
+    const readyBudget = readyConfiguration.success ? readyConfiguration.data.budget : undefined;
+    if (readyBudget?.maxPiCallsPerRun !== null && run.consumed >= run.max_calls) {
       pauseRunForModelTimeBudget(request.runId);
       return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'run' });
     }
-    if (pulse.consumed >= pulse.max_calls) return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'pulse' });
+    if (readyBudget?.maxPiCallsPerPulse !== null && pulse.consumed >= pulse.max_calls) return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'pulse' });
 
     let stateValue = database.prepare('SELECT unknown_legacy_requests FROM model_time_run_state WHERE run_id=?').get(request.runId);
     if (stateValue === undefined) {
@@ -3770,7 +3861,7 @@ export function openJournal(input: { path: string }) {
       if (counts.active_count >= configuration.budget.maxConcurrentPiRequests) {
         return ReserveResultSchema.parse({ kind: 'busy', scope: 'concurrency' });
       }
-      const remainingMs = Math.max(0, configuration.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
+      const remainingMs = configuration.budget.maxWallTimeMs === null ? effectiveRequestTimeoutMs(configuration.budget) : Math.max(0, configuration.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
       if (remainingMs < 1) {
         pauseRunForModelTimeBudget(request.runId);
         return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'wall-time' });
@@ -4635,7 +4726,7 @@ export function openJournal(input: { path: string }) {
       unknownLegacyRequests,
     };
     if (unknownLegacyRequests > 0) return RunModelTimeBudgetSchema.parse({ ...base, status: 'legacy-unknown', wallTimeMeasuredMs: null, wallTimeRemainingMs: null });
-    const wallTimeRemainingMs = Math.max(0, configuration.data.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
+    const wallTimeRemainingMs = configuration.data.budget.maxWallTimeMs === null ? null : Math.max(0, configuration.data.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
     if (counts.uncertain_count > 0) return RunModelTimeBudgetSchema.parse({ ...base, status: 'uncertain', wallTimeMeasuredMs: counts.measured_ms, wallTimeRemainingMs });
     return RunModelTimeBudgetSchema.parse({ ...base, status: 'known', wallTimeMeasuredMs: counts.measured_ms, wallTimeRemainingMs });
   }
@@ -4948,9 +5039,9 @@ export function openJournal(input: { path: string }) {
       WHERE i.run_id=? AND i.invitation_id=?`).get(input.run.row.run_id,input.invitationId);
     if(value===undefined)return 'invitation_missing';
     const row=z.strictObject({activation_id:ActorActivationIdSchema,actor_id:CharacterIdSchema,identity_version:counter,
-      trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:counter.nullable(),
+      trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:z.number().int().nullable(),
       state:z.enum(['pending','assigned','consumed','blocked']),cause_state:z.enum(['pending','running','completed','blocked']),
-      configuration_hash:HashSchema,cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:counter.nullable()}).parse(value);
+      configuration_hash:HashSchema,cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:z.number().int().nullable()}).parse(value);
     if(row.state!=='pending'&&row.state!=='assigned')return 'invitation_not_pending';
     if(row.cause_state!=='pending'&&row.cause_state!=='running')return 'activation_not_pending';
     if(row.configuration_hash!==input.run.row.configuration_hash)return 'configuration_changed';
@@ -5617,7 +5708,7 @@ export function openJournal(input: { path: string }) {
 
         if (request.command.kind === 'start' || request.command.kind === 'resume' || request.command.kind === 'step') {
           const budget = readRunModelTimeBudget({runId:request.runId});
-          if (budget === undefined || budget.status !== 'known' || budget.runCallsUsed >= budget.maxPiCallsPerRun || budget.wallTimeRemainingMs === 0) {
+          if (budget === undefined || budget.status !== 'known' || (budget.maxPiCallsPerRun !== null && budget.runCallsUsed >= budget.maxPiCallsPerRun) || budget.wallTimeRemainingMs === 0) {
             return record(RunLifecycleCommandResultSchema.parse({kind:'budgetExhausted'}));
           }
         }
@@ -5636,6 +5727,25 @@ export function openJournal(input: { path: string }) {
         if (changed.changes !== 1) throw new Error('CAS de lifecycle cambió dentro de la transacción');
         run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
         reconcileRunLifecycleEpoch(request.runId, run.row.lifecycle, run.row.lifecycle_revision, now);
+        if (request.command.kind === 'resume' && request.command.retryBlockedActors === true) {
+          // Explicit operator recovery of one blocked pulse, never an implicit retry.
+          const blockedPulse = database.prepare(`SELECT j.pulse_id FROM actor_turn_jobs j
+            WHERE j.run_id=? AND j.state='blocked'
+              AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs n WHERE n.job_id=j.job_id AND n.generation>j.generation)
+              AND EXISTS(SELECT 1 FROM actor_turn_job_inputs i WHERE i.job_id=j.job_id AND i.generation=j.generation AND i.state='released')
+            ORDER BY j.updated_at,j.job_id LIMIT 1`).get(request.runId);
+          if (blockedPulse !== undefined) {
+            const pulseId=z.strictObject({pulse_id:PulseIdSchema}).parse(blockedPulse).pulse_id;
+            const jobs=database.prepare(`SELECT actor_id,job_id,generation FROM actor_turn_jobs j
+              WHERE j.run_id=? AND j.pulse_id=? AND j.state='blocked'
+                AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs n WHERE n.job_id=j.job_id AND n.generation>j.generation)
+                AND EXISTS(SELECT 1 FROM actor_turn_job_inputs i WHERE i.job_id=j.job_id AND i.generation=j.generation AND i.state='released')
+              ORDER BY j.actor_id,j.job_id`).all(request.runId,pulseId)
+              .map(row=>z.strictObject({actor_id:CharacterIdSchema,job_id:JobIdSchema,generation:RevisionSchema}).parse(row));
+            for (const job of jobs) retryActorTurnJobWithinTransaction({runId:request.runId,pulseId,actorId:job.actor_id,jobId:job.job_id,expectedGeneration:job.generation});
+          }
+        }
+
         if(request.command.kind==='start'||request.command.kind==='resume'||request.command.kind==='step'){
           admitInitialGoalActivation(run,ReadyRunConfigurationSchema.parse(run.configuration),now);
         }
@@ -7100,7 +7210,7 @@ export function openJournal(input: { path: string }) {
             registerWorldRunWithinTransaction({initialSnapshot:configuration.worldSnapshot,configurationRevision:configuration.configRevision,configuration,
               continuityFence:{kind:'prepared-contexts',atWorldSeq:configuration.worldSnapshot.seq,contexts},lifecycle:'ready'},true);
             const budget=database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId);
-            if(budget!==undefined&&budgetRow.parse(budget).consumed===0)database.prepare('UPDATE run_budgets SET max_calls=? WHERE run_id=? AND consumed=0').run(configuration.budget.maxPiCallsPerRun,request.runId);
+            if(budget!==undefined&&budgetRow.parse(budget).consumed===0)database.prepare('UPDATE run_budgets SET max_calls=? WHERE run_id=? AND consumed=0').run((configuration.budget.maxPiCallsPerRun ?? 0),request.runId);
             result=RunDraftValidationResultSchema.parse({kind:'ready',runId:request.runId,revision:entry.draft.revision,worldRevision:configuration.worldSnapshot.revision,configurationHash:hashJson(configuration).hash});
           }
         }
@@ -7831,12 +7941,12 @@ export function openJournal(input: { path: string }) {
             }
             const existingBudget=database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId);
             if(existingBudget===undefined)database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)')
-              .run(request.runId,configuration.budget.maxPiCallsPerRun);
-            else if(budgetRow.parse(existingBudget).max_calls!==configuration.budget.maxPiCallsPerRun)throw new Error('Presupuesto run difiere de configuración ready');
+              .run(request.runId,(configuration.budget.maxPiCallsPerRun ?? 0));
+            else if(budgetRow.parse(existingBudget).max_calls!==(configuration.budget.maxPiCallsPerRun ?? 0))throw new Error('Presupuesto run difiere de configuración ready');
             ensureModelTimeRunState(request.runId);
             const pulseId=PulseIdSchema.parse(randomUUID());
             database.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)')
-              .run(pulseId,request.runId,configuration.budget.maxPiCallsPerPulse);
+              .run(pulseId,request.runId,(configuration.budget.maxPiCallsPerPulse ?? 0));
             database.prepare(`INSERT INTO coordinator_pulses(pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,
               created_at,updated_at,lifecycle_revision) VALUES(?,?, 'actorActivation', ?,NULL,?,'running',?,?,?)`)
               .run(pulseId,request.runId,activationId,run.row.configuration_hash,timestamp,timestamp,run.row.lifecycle_revision);
@@ -7889,12 +7999,12 @@ export function openJournal(input: { path: string }) {
           return CoordinatorPulseBeginResultSchema.parse({ kind: 'idle' });
         }
         const existingBudget = database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId);
-        if (existingBudget === undefined) database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)').run(request.runId, configuration.budget.maxPiCallsPerRun);
-        else if (budgetRow.parse(existingBudget).max_calls !== configuration.budget.maxPiCallsPerRun) throw new Error('Presupuesto run difiere de configuración ready');
+        if (existingBudget === undefined) database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)').run(request.runId, (configuration.budget.maxPiCallsPerRun ?? 0));
+        else if (budgetRow.parse(existingBudget).max_calls !== (configuration.budget.maxPiCallsPerRun ?? 0)) throw new Error('Presupuesto run difiere de configuración ready');
         ensureModelTimeRunState(request.runId);
         const pulseId = PulseIdSchema.parse(randomUUID());
         const timestamp = Date.now();
-        database.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)').run(pulseId, request.runId, configuration.budget.maxPiCallsPerPulse);
+        database.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)').run(pulseId, request.runId, (configuration.budget.maxPiCallsPerPulse ?? 0));
         database.prepare(`INSERT INTO coordinator_pulses(
           pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,created_at,updated_at,lifecycle_revision
         ) VALUES(?,?,?,?,?,?,'running',?,?,?)`)
@@ -8213,37 +8323,7 @@ export function openJournal(input: { path: string }) {
 
     retryActorTurnJob(input: unknown) {
       const request = ActorTurnJobRetrySchema.parse(input);
-      return transact(() => {
-        const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
-        if (runValue === undefined) throw new Error('World run del retry actoral inexistente');
-        const run = parseWorldRun(runValue);
-        if (run.row.lifecycle !== 'running') throw new Error('Retry actoral requiere la corrida en running');
-        const value = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
-          .get(request.runId, request.actorId, request.jobId, request.expectedGeneration);
-        if (value === undefined) throw new Error('Job actoral inexistente');
-        const row = ActorTurnJobDbRowSchema.parse(value);
-        if (row.state !== 'blocked' || row.pulse_id !== request.pulseId) throw new Error('Retry exige job bloqueado y su mismo pulso');
-        const generation = RevisionSchema.parse(request.expectedGeneration + 1);
-        const next = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
-          .get(request.runId, request.actorId, request.jobId, generation);
-        if (next !== undefined) return ActorTurnJobRetryResultSchema.parse({ kind: 'existing', job: actorTurnJobView(next) });
-        const pending = database.prepare(`SELECT i.perception_id FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id JOIN world_perceptions p ON p.perception_id=i.perception_id
-          LEFT JOIN coordinator_pulses c ON c.pulse_id=?
-          WHERE i.run_id=? AND i.actor_id=? AND i.state='queued' AND d.state='delivered' AND (c.pulse_id IS NULL OR (p.origin_kind=c.origin_kind AND p.origin_id=c.origin_id))
-            AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
-          ORDER BY i.world_seq,i.perception_id LIMIT 100001`).all(request.pulseId, request.runId, request.actorId)
-          .map((item) => z.strictObject({ perception_id: PerceptionIdSchema }).parse(item).perception_id);
-        if (pending.length === 0 || pending.length > 100_000) throw new Error('Retry requiere intenciones pendientes dentro del límite');
-        const timestamp = Date.now();
-        database.prepare(`UPDATE coordinator_pulses SET state='running',lifecycle_revision=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='blocked'`)
-          .run(run.row.lifecycle_revision,timestamp, request.runId, request.pulseId);
-        database.prepare(`INSERT INTO actor_turn_jobs(run_id,actor_id,job_id,generation,pulse_id,state,owner_token,claim_token,created_at,updated_at,lifecycle_revision)
-          VALUES(?,?,?,?,?,'queued',NULL,NULL,?,?,?)`).run(request.runId, request.actorId, request.jobId, generation, request.pulseId, timestamp, timestamp,run.row.lifecycle_revision);
-        for (const perceptionId of pending) database.prepare(`INSERT INTO actor_turn_job_inputs(run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at)
-          VALUES(?,?,?,?,?,'assigned',?,NULL)`).run(request.runId, request.actorId, request.jobId, generation, perceptionId, timestamp);
-        return ActorTurnJobRetryResultSchema.parse({ kind: 'retried', job: actorTurnJobView(database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
-          .get(request.runId, request.actorId, request.jobId, generation)) });
-      });
+      return transact(() => retryActorTurnJobWithinTransaction(request));
     },
 
     /**

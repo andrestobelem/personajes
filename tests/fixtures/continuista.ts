@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { openJournal } from '../../src/adapters/journal.ts';
 import { PiRuntime, type CreatePiSessionInput, type PiPromptInput } from '../../src/adapters/pi.ts';
 import { createDeliverWorldWorker } from '../../src/application/deliver-world.ts';
-import { createEmptyRunConfigurationDraft, ProductionAudioSchema, RunConfigurationDraftSchema, type DramaticReferences, type ProductionRoster } from '../../src/domain/production.ts';
+import { createEmptyRunConfigurationDraft, ProductionAudioSchema, RunConfigurationDraftSchema, type DramaticReferences, type RunBudget, type ProductionRoster } from '../../src/domain/production.ts';
 import { ContinuityContextSchema, PreparedCharacterSchema, SpanishVarietyForActingSchema, type PreparedCharacter } from '../../src/domain/preparation.ts';
 import { WorldSnapshotSchema, type WorldSnapshot } from '../../src/domain/world.ts';
 import { validateRunConfiguration, ReadyRunConfigurationSchema, type ReadyRunConfiguration } from '../../src/application/production-preflight.ts';
@@ -95,7 +95,7 @@ function preparedFixture(input: { characterId?: string; nonverbal?: boolean } = 
   });
 }
 
-function worldFixture(input: {
+export function worldFixture(input: {
   nonverbal?: boolean;
   time?: number;
   availability?: 'available' | 'unavailable';
@@ -222,7 +222,7 @@ export function canonical(value: unknown): string {
   return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(',')}}`;
 }
 
-export async function setup(inferenceProfile?: PersistedInferenceProfile | 'historical', dramaticReferences?: DramaticReferences) {
+export async function setup(inferenceProfile?: PersistedInferenceProfile | 'historical', dramaticReferences?: DramaticReferences, budgetOverride?: Partial<RunBudget>) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-actor-worker-'));
   const journal = openJournal({ path: join(directory, 'journal.sqlite') });
   const baseConfiguration = readyFixture({ humanParticipants: [{
@@ -238,6 +238,7 @@ export async function setup(inferenceProfile?: PersistedInferenceProfile | 'hist
   const { inferenceProfile: originalProfile, ...historicalConfiguration } = baseConfiguration;
   const selectedConfiguration = inferenceProfile === 'historical' ? historicalConfiguration : baseConfiguration;
   const configuration = ReadyRunConfigurationSchema.parse({ ...selectedConfiguration,
+    budget: { ...baseConfiguration.budget, ...budgetOverride },
     ...(inferenceProfile === undefined || inferenceProfile === 'historical' ? {} : { inferenceProfile }),
     roster: { ...baseConfiguration.roster, eligibleCharacterIds: [actorId, other.characterId],
       preparedCharacters: [...baseConfiguration.roster.preparedCharacters, { ...other, identity: { ...other.identity,
@@ -263,8 +264,8 @@ export async function setup(inferenceProfile?: PersistedInferenceProfile | 'hist
   assert.equal(speech.resolution.kind, 'applied');
   assert.equal((await createDeliverWorldWorker({ journal, runId, actorId }).drain()).kind, 'completed');
   const pulseId = PulseIdSchema.parse(randomUUID());
-  journal.configureRun({ runId, maxCalls: 20 });
-  journal.configurePulse({ runId, pulseId, maxCalls: 10 });
+  journal.configureRun({ runId, maxCalls: configuration.budget.maxPiCallsPerRun ?? 0 });
+  journal.configurePulse({ runId, pulseId, maxCalls: configuration.budget.maxPiCallsPerPulse ?? 0 });
   const scheduled = journal.scheduleActorTurnJob({ runId, actorId, pulseId });
   assert.equal(scheduled.kind, 'scheduled');
   if (scheduled.kind !== 'scheduled') throw new Error('Fixture sin job');

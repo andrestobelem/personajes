@@ -951,7 +951,7 @@ export const ActorWorldViewSchema = z.strictObject({
     experiences: z.array(z.strictObject({ experienceId: ExperienceIdSchema, kind: z.enum(['perception', 'testimony', 'inference', 'belief', 'recollection']), content: z.string().min(1), fictitiousAt: FictionalInstantSchema, confidence: z.number().finite().min(0).max(1) })).max(100_000),
   }),
   entities: z.array(ActorViewEntitySchema).max(100_000),
-  channels: z.array(z.strictObject({ handle: ChannelHandleSchema, kind: z.enum(['speech', 'gesture']), label: z.string().min(1).max(120) })).max(1_000),
+  channels: z.array(z.strictObject({ handle: ChannelHandleSchema, kind: z.enum(['speech', 'gesture']), scope: AudienceScopeSchema.optional(), label: z.string().min(1).max(120) })).max(1_000),
   offers: z.array(z.strictObject({
     handle: OfferHandleSchema, objectHandle: EntityHandleSchema, objectLabel: z.string().min(1).max(500),
     fromHandle: EntityHandleSchema, expiresAt: FictionalInstantSchema,

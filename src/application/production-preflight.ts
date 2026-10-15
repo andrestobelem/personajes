@@ -1038,10 +1038,10 @@ function validateBudget(input: {
     input.checks.push(check({ kind: 'unavailable', checkId: 'budget', code: input.result.code, detail: 'No se pudo leer el presupuesto y las reservas actuales.' }));
     return;
   }
-  const within = input.result.runCallsUsed < input.expected.budget.maxPiCallsPerRun
-    && input.result.pulseCallsUsed < input.expected.budget.maxPiCallsPerPulse
+  const within = (input.expected.budget.maxPiCallsPerRun === null || input.result.runCallsUsed < input.expected.budget.maxPiCallsPerRun)
+    && (input.expected.budget.maxPiCallsPerPulse === null || input.result.pulseCallsUsed < input.expected.budget.maxPiCallsPerPulse)
     && input.result.activePiRequests < input.expected.budget.maxConcurrentPiRequests
-    && input.result.wallTimeUsedMs < input.expected.budget.maxWallTimeMs;
+    && (input.expected.budget.maxWallTimeMs === null || input.result.wallTimeUsedMs < input.expected.budget.maxWallTimeMs);
   input.checks.push(within
     ? check({ kind: 'passed', checkId: 'budget', detail: 'Hay presupuesto de requests, concurrencia y tiempo operativo disponible.' })
     : check({ kind: 'blocked', checkId: 'budget', code: 'budget-exhausted', detail: 'Una cuota de corrida/pulso, concurrencia o tiempo operativo ya alcanzó su límite.' }));

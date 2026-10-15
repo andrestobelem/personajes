@@ -59,6 +59,7 @@ export async function createRunPreflightJobs(input: {
   readCredentialFingerprint: ReturnType<typeof createPiAuthFingerprint>['readCredentialFingerprint'];
   principalId?: string;
   signal?: AbortSignal;
+  onDiagnostic?: (diagnostic: { kind: 'preflightEvaluationFailed'; issues: Array<{ code: string; path: string }> }) => void;
 }) {
   const ownerToken = z.string().uuid().parse(input.ownerToken);
   const principalId = z.string().trim().min(1).max(200).parse(input.principalId ?? 'local-operator');
@@ -96,7 +97,9 @@ export async function createRunPreflightJobs(input: {
           expectedRevision: task.revision, lease: task.lease, evaluation }));
       }
       if (!['updated', 'existing', 'terminal'].includes(completed.kind)) throw new Error('Preflight completion unavailable');
-    } catch {
+    } catch (error: unknown) {
+      try { input.onDiagnostic?.({ kind: 'preflightEvaluationFailed', issues: error instanceof z.ZodError
+        ? error.issues.map(issue => ({ code: issue.code, path: issue.path.map(String).join('.') })) : [] }); } catch { /* Diagnostics do not change the durable result. */ }
       if (task.lease !== undefined) {
         try { input.journal.failRunPreflightJob({ runId: job.runId, jobId: job.jobId, expectedRevision: task.revision, lease: task.lease, safeCode: 'evaluation-failed' }); }
         catch { /* Lost lease or committed result stays authoritative; no proof is overwritten. */ }
@@ -146,6 +149,13 @@ export async function createRunPreflightJobs(input: {
       });
     },
     readJob(value: { runId: string; jobId: string }) { return track(() => readDocument({ runId: RunIdSchema.parse(value.runId), jobId: JobIdSchema.parse(value.jobId) })); },
+    /** Lifecycle admission consumes a document, rather than the HTTP lookup envelope. */
+    readLifecycleDocument(value: { runId: string; jobId: string }) { return track(async () => {
+      const result = await readDocument({ runId: RunIdSchema.parse(value.runId), jobId: JobIdSchema.parse(value.jobId) });
+      return result.kind === 'missing' ? undefined : RunPreflightJobDocumentSchema.parse({
+        kind: 'run-preflight-job-document', job: result.job, report: result.report,
+      });
+    }); },
     listJobs(value: { runId: string; offset: number; limit: number }) { return track(async () => {
       const runId = RunIdSchema.parse(value.runId); const offset = z.number().int().min(0).max(1_000).parse(value.offset);
       const limit = z.number().int().min(1).max(100).parse(value.limit);

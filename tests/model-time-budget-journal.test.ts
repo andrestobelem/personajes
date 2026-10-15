@@ -212,7 +212,7 @@ test('la migración v21 conserva reservas enviadas como tiempo histórico descon
     try {
       old.prepare('INSERT INTO request_reservations VALUES(?,?,?,?,?,?)')
         .run(randomUUID(), 0, 0, one.runId, one.pulseId, 'completed');
-      old.exec('DROP TABLE model_time_spans; DROP TABLE model_time_run_state; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40);');
+      old.exec('DROP TABLE model_time_spans; DROP TABLE model_time_run_state; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41);');
     } finally { old.close(); }
     const migrated = openJournal({ path: `${fixture.directory}/journal.sqlite` });
     try {
@@ -224,7 +224,7 @@ test('la migración v21 conserva reservas enviadas como tiempo histórico descon
       assert.equal(migrated.reserveNextRequest({ ...one, jobId: randomUUID(), clockEpochId: randomUUID(), ownerToken: randomUUID() }).kind, 'exhausted');
       const inspect = new DatabaseSync(`${fixture.directory}/journal.sqlite`);
       try {
-        assert.equal(inspect.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 40);
+        assert.equal(inspect.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 41);
         assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(), []);
       } finally { inspect.close(); }
     } finally { migrated.close(); }
@@ -250,4 +250,44 @@ test('registrar el accounting tras requests previas conserva desconocido en vez 
     assert.equal(budget?.wallTimeMeasuredMs, null);
     assert.equal(budget?.unknownLegacyRequests, 1);
   } finally { cleanFixture(fixture); }
+});
+
+
+test('null call limits allow requests beyond old run and pulse ceilings while preserving accounting and concurrency', async () => {
+  const fixture = await setup(undefined, undefined, { maxPiCallsPerRun: null, maxPiCallsPerPulse: null, maxConcurrentPiRequests: 1 });
+  const one = scope(fixture);
+  const epoch = randomUUID(), ownerToken = randomUUID();
+  try {
+    for (let index = 0; index < 25; index++) {
+      const grant = fixture.journal.reserveNextRequest({ ...one, clockEpochId: epoch, ownerToken });
+      assert.equal(grant.kind, 'reserved'); if (grant.kind !== 'reserved') assert.fail();
+      assert.equal(fixture.journal.reserveNextRequest({ ...one, jobId: randomUUID(), clockEpochId: epoch, ownerToken }).kind, 'busy');
+      const target = { jobId: one.jobId, generation: one.generation, requestSeq: grant.requestSeq, ownerToken };
+      fixture.journal.transitionReservation({ ...target, target: 'dispatched', wallTime: { clockEpochId: epoch, monotonicNs: '1000000' } });
+      fixture.journal.transitionReservation({ ...target, target: 'completed', wallTime: { clockEpochId: epoch, monotonicNs: '2000000' } });
+    }
+    const budget = fixture.journal.readRunModelTimeBudget({ runId: one.runId });
+    assert.equal(budget?.maxPiCallsPerRun, null); assert.equal(budget?.maxPiCallsPerPulse, null);
+    assert.equal(budget?.runCallsUsed, 25); assert.equal(budget?.wallTimeMeasuredMs, 25);
+    assert.equal(fixture.journal.readWorldLifecycle({ runId: one.runId })?.lifecycle, 'running');
+  } finally { cleanFixture(fixture); }
+});
+
+
+test('unlimited accumulated time retains measurements and request timeout without exhausting future calls', async () => {
+  const fixture = await setup(undefined, undefined, { maxPiCallsPerRun: null, maxPiCallsPerPulse: null, maxWallTimeMs: null, requestTimeoutMs: 1000, maxConcurrentPiRequests: 1 });
+  const one = scope(fixture), epoch = randomUUID(), ownerToken = randomUUID();
+  try {
+    const grant = fixture.journal.reserveNextRequest({ ...one, clockEpochId: epoch, ownerToken });
+    assert.equal(grant.kind,'reserved'); if(grant.kind!=='reserved') assert.fail();
+    assert.equal(grant.wallTime?.reservedMs,1000);
+    const request = {jobId:one.jobId,generation:one.generation,requestSeq:grant.requestSeq,ownerToken};
+    fixture.journal.transitionReservation({...request,target:'dispatched',wallTime:{clockEpochId:epoch,monotonicNs:'1000000'}});
+    fixture.journal.transitionReservation({...request,target:'completed',wallTime:{clockEpochId:epoch,monotonicNs:'70001000000'}});
+    const budget=fixture.journal.readRunModelTimeBudget({runId:one.runId});
+    assert.equal(budget?.maxWallTimeMs,null); assert.equal(budget?.wallTimeRemainingMs,null);
+    assert.equal(budget?.wallTimeMeasuredMs,70000);
+    assert.equal(fixture.journal.readWorldLifecycle({runId:one.runId})?.lifecycle,'running');
+    assert.equal(fixture.journal.reserveNextRequest({...one,clockEpochId:epoch,ownerToken}).kind,'reserved');
+  } finally {cleanFixture(fixture);}
 });

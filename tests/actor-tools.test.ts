@@ -4,6 +4,7 @@ import { validateToolArguments } from '@earendil-works/pi-ai';
 import { WorldProposalRegistrationSchema } from '../src/domain/world-journal.ts';
 import type { IcmActorMemoryReader } from '../src/adapters/icm.ts';
 import type { PiCustomTool } from '../src/adapters/pi.ts';
+import { ChannelHandleSchema } from '../src/domain/world-schema.ts';
 import { createActorTools } from '../src/application/actor-tools.ts';
 import type { ActorToolsJournal } from '../src/application/actor-tools.ts';
 import { CharacterIdSchema, JobIdSchema, RunIdSchema, WorldSeqSchema } from '../src/domain/values.ts';
@@ -182,3 +183,20 @@ test('la misma sesión puede usar versiones de reformulación elegidas sólo por
     'otra generación no reutiliza el ID de una propuesta interrumpida');
 });
 
+
+test('el actor puede corregir destinatarios inválidos antes de registrar una propuesta', async () => {
+  const registrations: unknown[]=[];
+  const tools=createActorTools({
+    context:{runId,actorId,jobId,generation:2,worldRevision:7,throughWorldSeq:42,proposalVersion:1,proposalSlot:0},
+    communicationChannels:[{handle:ChannelHandleSchema.parse('canal-sala'),kind:'speech',label:'Sala',scope:'addressed'},{handle:ChannelHandleSchema.parse('difusion'),kind:'speech',label:'Difusión',scope:'broadcast'}],
+    journal:{registerWorldProposal(request){registrations.push(request);return 'stored';}},
+    memory:{async recall(){return {source:'ranked-recall',throughWorldSeq:WorldSeqSchema.parse(42),experiences:[],rejectedCount:0};}},
+  });
+  const proposal=tool(tools,'propose_action');
+  const content={kind:'speech',text:'Respuesta de prueba'};
+  await assert.rejects(()=>proposal.execute('empty',{action:{kind:'communicate',channelHandle:'canal-sala',audienceHandles:[],content}},undefined,undefined,{} as never),/dirigido/);
+  await assert.rejects(()=>proposal.execute('nonempty',{action:{kind:'communicate',channelHandle:'difusion',audienceHandles:['handle-99'],content}},undefined,undefined,{} as never),/difusión/);
+  assert.equal(registrations.length,0);
+  await proposal.execute('corrected',{action:{kind:'communicate',channelHandle:'canal-sala',audienceHandles:['handle-99'],content}},undefined,undefined,{} as never);
+  assert.equal(registrations.length,1);
+});

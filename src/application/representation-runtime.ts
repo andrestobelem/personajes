@@ -68,6 +68,7 @@ export interface ControlledPiTestTransport {
 }
 
 export type RepresentationRuntimeDiagnostic =
+  | {kind:'director-failure';stage:string;code:string}
   | { kind: 'memory-projection'; runId: RunId; actorId: ActorId; outcome: 'failed'; reason: 'busy' | 'store_failed' | 'journal_failed' | 'adapter_failed'; adapterCode?: string }
   | { kind: 'delivery'; runId: RunId; actorId: ActorId; outcome: 'failed'; reason: 'delivery_failed' | 'journal_failed' }
   | { kind: 'coordinator'; runId: RunId; failureKind: 'worker' | 'journal' | 'supervisor' };
@@ -225,7 +226,7 @@ export async function createRepresentationRuntime(input: {
     },
   });
 
-  const director=createDirectorPiWorker({journal:input.host.journal,runtime,ownerToken,
+  const director=createDirectorPiWorker({journal:input.host.journal,runtime,ownerToken,onDiagnostic:report,
     ...(testTransport===undefined?{}:{sessionFactory:testTransport.directorSessionFactory})});
 
   const narratorReady=testTransport===undefined||(testTransport.narratorSessionFactory!==undefined&&testTransport.narrationReviewSessionFactory!==undefined);

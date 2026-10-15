@@ -148,7 +148,7 @@ export function createActorTurnWorker(input: {
               generation: execution.generation, lease: execution.lease, worldRevision: cut.worldRevision,
               throughWorldSeq: cut.worldSeq, proposalVersion: 1, proposalSlot: 0 },
             getProposalVersion: () => version,
-            journal: input.journal, memory: input.memoryForActor(execution),
+            journal: input.journal, memory: input.memoryForActor(execution), communicationChannels: projection.world.channels,
           });
           const session = await (input.sessionFactory ?? createPiSession)({
             runtime: input.runtime, profile: inferenceProfile, runId: execution.runId, identity: { kind: 'actor', characterId: execution.actorId },

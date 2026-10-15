@@ -17,7 +17,7 @@ function downgradeTo32(database: DatabaseSync) {
     ALTER TABLE coordinator_pulses_legacy RENAME TO coordinator_pulses;
     CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
     DROP TABLE circumstance_operations;
-    DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(33,34,35,36,37,38,39,40);
+    DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(33,34,35,36,37,38,39,40,41);
     COMMIT; PRAGMA foreign_keys=ON;`);
 }
 
@@ -51,7 +51,7 @@ for (const corruptChild of [false, true]) {
       const after = new DatabaseSync(path);
       try {
         assert.deepEqual(after.prepare('SELECT * FROM coordinator_pulses').all(), expected);
-        assert.equal(after.prepare('SELECT MAX(version) AS n FROM schema_version').get()?.n, corruptChild ? 32 : 40);
+        assert.equal(after.prepare('SELECT MAX(version) AS n FROM schema_version').get()?.n, corruptChild ? 32 : 41);
         assert.equal(after.prepare("SELECT name FROM sqlite_master WHERE name='coordinator_pulses_v33'").get(), undefined);
         assert.equal(after.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='circumstance_operations'").get()?.n, corruptChild ? 0 : 1);
         if (!corruptChild) {

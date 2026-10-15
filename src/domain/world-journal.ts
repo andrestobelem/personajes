@@ -246,7 +246,7 @@ import { RunStepJobViewSchema } from './run-lifecycle.ts';
 export const RunLifecycleCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('start') }),
   z.strictObject({ kind: z.literal('pause') }),
-  z.strictObject({ kind: z.literal('resume') }),
+  z.strictObject({ kind: z.literal('resume'), retryBlockedActors: z.literal(true).optional() }),
   z.strictObject({ kind: z.literal('step') }),
   z.strictObject({ kind: z.literal('stop') }),
   z.strictObject({ kind: z.literal('close') }),

@@ -83,13 +83,21 @@ function matchesLegacyOAuthSchema(object:z.infer<typeof ApprovedJournalSchemaSch
  const sql=object.type==='table'&&object.name==='pi_oauth_jobs'?legacyOAuthTableSQL:object.type==='index'&&object.name==='pi_oauth_one_running'?legacyOAuthIndexSQL:undefined;
  return sql!==undefined&&object.sql===sql&&object.type===expected.type&&object.name===expected.name&&object.tbl_name===expected.tbl_name;
 }
+function matchesLegacyFictionalTimeSchema(object:z.infer<typeof ApprovedJournalSchemaSchema>[number],expected:z.infer<typeof ApprovedJournalSchemaSchema>[number]) {
+  if (![39,40].includes(request.manifest.journalVersion) || object.type !== 'table' || expected.type !== 'table'
+    || object.name !== expected.name || object.tbl_name !== expected.tbl_name
+    || !['actor_activation_causes','actor_activation_invitations','routine_clock_advances'].includes(object.name)) return false;
+  // Compare the entire known DDL after removing only the three obsolete sign restrictions.
+  const normalize = (sql:string|null) => sql?.replace(/CHECK\((?:fictional_at>=0|boundary_at IS NULL OR boundary_at>=0|from_at>=0)\)/g,'').replace(/\s+/g,' ').trim();
+  return normalize(object.sql) === normalize(expected.sql);
+}
 function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
   const source = readonly(sourcePath); let clean: DatabaseSync | undefined;
   try {
     const actual = schema(source.db); const approved = new Map(request.approvedJournalSchema.map(object => [`${object.type}:${object.name}`, object]));
     for (const object of actual) {
       const expected = approved.get(`${object.type}:${object.name}`);
-      if (expected === undefined || (JSON.stringify(object) !== JSON.stringify(expected)&&!matchesLegacyOAuthSchema(object,expected))) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
+      if (expected === undefined || (JSON.stringify(object) !== JSON.stringify(expected)&&!matchesLegacyOAuthSchema(object,expected)&&!matchesLegacyFictionalTimeSchema(object,expected))) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
       if (object.type === 'view' || (object.type === 'trigger' && !approvedAppendOnlyTrigger(object)) || object.sql?.startsWith('CREATE VIRTUAL TABLE')) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     // Only these append-only triggers may survive the exact trusted DDL check
@@ -104,7 +112,7 @@ function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
       if (!names.has(approved.name) && !/^(?:voice_|exchange_|memory_preparation_)/.test(approved.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     source.allow([...names]);
-    const version = z.strictObject({ version: z.union([z.literal(39),z.literal(40)]) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());
+    const version = z.strictObject({ version: z.union([z.literal(39),z.literal(40),z.literal(41)]) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());
     if (!version.success || request.manifest.journalVersion !== version.data.version) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
     for (const name of names) {
       const columns = z.array(z.object({ hidden: z.number() })).parse(source.db.prepare(`PRAGMA table_xinfo(${quote(name)})`).all());
@@ -163,7 +171,7 @@ function validate() {
     }
   }
   inventory(request.bundleRoot);
-  if (![39,40].includes(request.manifest.journalVersion)) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
+  if (![39,40,41].includes(request.manifest.journalVersion)) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
   const copies = new Map<string, string>(); let index = 0;
   for (const file of request.manifest.files) {
     const sqlite = file.path.endsWith('.sqlite'); const target = sqlite ? join(temporary, `input-${index++}.sqlite`) : undefined;

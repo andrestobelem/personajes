@@ -49,7 +49,7 @@ export function RunStatusView({ view }: { view: RunView }) {
           <dd>
             {view.budget.modelCalls.used} usadas ·{" "}
             {view.budget.modelCalls.reserved} reservadas ·{" "}
-            {view.budget.modelCalls.remaining} disponibles
+            {view.budget.modelCalls.remaining === null ? "Sin límite de llamadas" : `${view.budget.modelCalls.remaining} disponibles`}
           </dd>
         </div>
         <div>
@@ -59,8 +59,9 @@ export function RunStatusView({ view }: { view: RunView }) {
               ? "Desconocido"
               : `${view.budget.modelWallTimeMs.measured} ms medidos`}{" "}
             · {view.budget.modelWallTimeMs.reserved} ms reservados ·{" "}
-            {view.budget.modelWallTimeMs.remaining === null
-              ? "saldo desconocido"
+            {view.budget.status !== "unknown" && view.budget.modelWallTimeMs.limit === null
+              ? "Sin límite de tiempo acumulado"
+              : view.budget.modelWallTimeMs.remaining === null ? "saldo desconocido"
               : `${view.budget.modelWallTimeMs.remaining} ms disponibles`}
           </dd>
         </div>
@@ -290,7 +291,7 @@ export function RunControlsPanel({
       }
     }
   }
-  async function control(kind: RunLifecycleControlRequest["kind"]) {
+  async function control(kind: RunLifecycleControlRequest["kind"], retryBlockedActors = false) {
     const controller = lifetime.current;
     if (
       current === null ||
@@ -330,7 +331,7 @@ export function RunControlsPanel({
           captureRunControl({
             document: current,
             key: crypto.randomUUID(),
-            command: { kind, preflightJobId: passed.job.jobId },
+            command: { kind, preflightJobId: passed.job.jobId, ...(kind === "resume" && retryBlockedActors ? {retryBlockedActors:true} : {}) },
           }),
         );
       } catch {
@@ -390,6 +391,9 @@ export function RunControlsPanel({
           onClick={() => void control("resume")}
         >
           Reanudar
+        </button>
+        <button disabled={blocked || lifecycle !== "paused"} onClick={() => void control("resume", true)}>
+          Reanudar y reintentar actores bloqueados
         </button>
         <button
           disabled={blocked || stepPending || lifecycle !== "paused"}

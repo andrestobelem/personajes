@@ -492,7 +492,7 @@ export function buildActorWorldView(input: {
     if (!supported) continue;
     const binding = addChannelBinding(knowledge, channel.id, input.ids);
     knowledge = binding.knowledge;
-    channels.push({ handle: binding.handle, kind: channel.kind, label: channel.label });
+    channels.push({ handle: binding.handle, kind: channel.kind, scope: channel.scope, label: channel.label });
   }
   const offers: z.infer<typeof ActorWorldViewSchema>['offers'] = [];
   const inbox: z.infer<typeof ActorWorldViewSchema>['inbox'] = [];

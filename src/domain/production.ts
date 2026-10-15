@@ -104,20 +104,20 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const RequestTimeoutMsSchema = z.number().int().min(1_000).max(300_000);
 
 export const RunBudgetSchema = z.strictObject({
-  maxPiCallsPerRun: nonNegativeInteger.max(100_000),
-  maxPiCallsPerPulse: nonNegativeInteger.max(256),
+  maxPiCallsPerRun: nonNegativeInteger.max(100_000).nullable(),
+  maxPiCallsPerPulse: nonNegativeInteger.max(256).nullable(),
   maxConcurrentPiRequests: z.number().int().min(1).max(8),
-  maxWallTimeMs: nonNegativeInteger.max(31_536_000_000),
+  maxWallTimeMs: nonNegativeInteger.max(31_536_000_000).nullable(),
   /** Missing only in historical serialized budgets; resolve with effectiveRequestTimeoutMs without rewriting them. */
   requestTimeoutMs: RequestTimeoutMsSchema.optional(),
 }).superRefine((budget, context) => {
-  if (budget.maxPiCallsPerPulse > budget.maxPiCallsPerRun) {
+  if (budget.maxPiCallsPerPulse !== null && budget.maxPiCallsPerRun !== null && budget.maxPiCallsPerPulse > budget.maxPiCallsPerRun) {
     context.addIssue({
       code: 'custom', path: ['maxPiCallsPerPulse'],
       message: 'El límite por pulso no puede superar el límite de la corrida',
     });
   }
-  if (budget.maxPiCallsPerPulse > 0 && budget.maxConcurrentPiRequests > budget.maxPiCallsPerPulse) {
+  if (budget.maxPiCallsPerPulse !== null && budget.maxPiCallsPerPulse > 0 && budget.maxConcurrentPiRequests > budget.maxPiCallsPerPulse) {
     context.addIssue({
       code: 'custom', path: ['maxConcurrentPiRequests'],
       message: 'La concurrencia no puede superar el presupuesto por pulso',

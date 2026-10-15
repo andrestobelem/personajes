@@ -1,4 +1,5 @@
 import React from "react";
+import { LivePerformance } from "./LivePerformance.tsx";
 import { RunRefreshSchema } from "../domain/run-refresh.ts";
 import type { z } from "zod";
 import type {
@@ -138,6 +139,8 @@ export function RunStageWorkspace({
   api = client,
   onOpenRun,
   derivedPreparation = false,
+  live = false,
+  onExitLive = () => {},
 }: {
   runId: string;
   active?: boolean;
@@ -145,6 +148,8 @@ export function RunStageWorkspace({
   api?: RunObservationClient;
   onOpenRun?: (runId: string) => void;
   derivedPreparation?: boolean;
+  live?: boolean;
+  onExitLive?: () => void;
 }) {
   const [inspection,setInspection]=React.useState({runId,allowed:false});
   const inspectionPermission=React.useCallback((allowed:boolean)=>setInspection({runId,allowed}),[runId]);
@@ -191,7 +196,7 @@ export function RunStageWorkspace({
           let cursor: string | undefined;
           const items = new Map<string, ConversationView>();
           let nextCursor: string | null = null;
-          for (let index = 0; index < pageCount; index++) {
+          for (let index = 0; index < (live ? 5 : pageCount); index++) {
             const page = await api.conversations({
               runId,
               fromWorldSeq: from,
@@ -212,7 +217,7 @@ export function RunStageWorkspace({
           let cursor: string | undefined;
           const items = new Map<string, ConfirmedEvent>();
           let nextCursor: string | null = null;
-          for (let index = 0; index < pageCount; index++) {
+          for (let index = 0; index < (live ? 5 : pageCount); index++) {
             const page = await api.events({
               runId,
               fromWorldSeq: from,
@@ -233,7 +238,7 @@ export function RunStageWorkspace({
           let cursor: string | undefined;
           const items = new Map<string, TechnicalJobView>();
           let nextCursor: string | null = null;
-          for (let index = 0; index < pageCount; index++) {
+          for (let index = 0; index < (live ? 5 : pageCount); index++) {
             const page = await api.jobs(runId, controller.signal, cursor);
             for (const item of page.items) items.set(item.jobId, item);
             nextCursor = page.nextCursor;
@@ -308,7 +313,7 @@ export function RunStageWorkspace({
       if (timer !== undefined) clearTimeout(timer);
       if (lifetime.current === controller) lifetime.current = null;
     };
-  }, [api, runId, active, cut, fromSeq, refresh, pageCount]);
+  }, [api, runId, active, cut, fromSeq, refresh, pageCount, live]);
   React.useEffect(() => {
     if (!active || cut !== undefined || typeof EventSource === "undefined")
       return;
@@ -338,6 +343,9 @@ export function RunStageWorkspace({
       source.close();
     };
   }, [runId, active, cut]);
+  React.useEffect(() => {
+    if (live) { setCut(undefined); setFromSeq(undefined); setPageCount(1); }
+  }, [live]);
   function viewCommit(commitIndex: number) {
     setCut({ commitIndex });
     setObservation(null);
@@ -357,6 +365,13 @@ export function RunStageWorkspace({
     setMessage(null);
     setRefresh((value) => value + 1);
   }
+  if (live) return observation === null
+    ? <section className="live-performance"><button onClick={onExitLive}>Volver a los controles</button><p role="status">{message ?? 'Conectando con la representación…'}</p></section>
+    : <LivePerformance stage={observation.stage} items={observation.conversations} jobs={observation.jobs}
+        map={stageMapData(observation.stage)} connected={streamState === 'active'} error={message} onExit={onExitLive}>
+        <HumanInteractionPanel runId={runId} participants={observation.stage.humanParticipants}
+          lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)} />
+      </LivePerformance>;
   return (
     <div className="stage-workspace">
       <header>

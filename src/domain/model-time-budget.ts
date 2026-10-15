@@ -28,14 +28,14 @@ export const ModelTimeOwnerRecoverySchema = z.strictObject({ ownerToken: z.strin
 
 const RunModelTimeBudgetBaseSchema = z.strictObject({
   runId: RunIdSchema,
-  maxPiCallsPerRun: nonNegativeInteger,
+  maxPiCallsPerRun: nonNegativeInteger.nullable(),
   runCallsUsed: nonNegativeInteger,
   reservedPiCalls: nonNegativeInteger,
-  maxPiCallsPerPulse: nonNegativeInteger,
+  maxPiCallsPerPulse: nonNegativeInteger.nullable(),
   pulseCallsUsed: nonNegativeInteger,
   maxConcurrentPiRequests: positiveInteger,
   activePiRequests: nonNegativeInteger,
-  maxWallTimeMs: nonNegativeInteger,
+  maxWallTimeMs: nonNegativeInteger.nullable(),
   wallTimeReservedMs: nonNegativeInteger,
   requestTimeoutMs: positiveInteger,
   uncertainRequests: nonNegativeInteger,
@@ -46,12 +46,12 @@ export const RunModelTimeBudgetSchema = z.discriminatedUnion('status', [
   RunModelTimeBudgetBaseSchema.extend({
     status: z.literal('known'),
     wallTimeMeasuredMs: nonNegativeInteger,
-    wallTimeRemainingMs: nonNegativeInteger,
+    wallTimeRemainingMs: nonNegativeInteger.nullable(),
   }),
   RunModelTimeBudgetBaseSchema.extend({
     status: z.literal('uncertain'),
     wallTimeMeasuredMs: nonNegativeInteger,
-    wallTimeRemainingMs: nonNegativeInteger,
+    wallTimeRemainingMs: nonNegativeInteger.nullable(),
     uncertainRequests: positiveInteger,
   }),
   RunModelTimeBudgetBaseSchema.extend({

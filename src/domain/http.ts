@@ -398,15 +398,17 @@ const BudgetCountersSchema = z.strictObject({
 });
 
 export const RunBudgetViewSchema = z.strictObject({
-  modelCalls: BudgetCountersSchema,
+  modelCalls: z.union([BudgetCountersSchema, z.strictObject({ limit: z.null(), used: RevisionSchema, reserved: RevisionSchema, remaining: z.null() })]),
   modelWallTimeMs: z.strictObject({
-    limit: RevisionSchema,
+    limit: RevisionSchema.nullable(),
     measured: RevisionSchema.nullable(),
     reserved: RevisionSchema,
     remaining: RevisionSchema.nullable(),
   }).superRefine((budget, context) => {
-    if (budget.measured === null || budget.remaining === null) return;
-    if (budget.measured + budget.reserved > budget.limit || budget.remaining !== budget.limit - budget.measured - budget.reserved) {
+    if (budget.limit === null || budget.measured === null || budget.remaining === null) return;
+    // Measured transport may close after its timeout. Preserve the real usage,
+    // while reporting an exhausted balance instead of rejecting the run view.
+    if (budget.remaining !== Math.max(0, budget.limit - budget.measured - budget.reserved)) {
       context.addIssue({ code: 'custom', path: ['remaining'], message: 'Los contadores del presupuesto deben sumar su límite.' });
     }
   }),
@@ -417,7 +419,8 @@ export const RunBudgetViewSchema = z.strictObject({
   audioBudgetStatus: z.enum(['known','unavailable']).optional(),
   status: z.enum(['available', 'exhausted', 'uncertain', 'unknown']),
 }).superRefine((budget, context) => {
-  if ((budget.modelWallTimeMs.measured === null) !== (budget.modelWallTimeMs.remaining === null)) {
+  if ((budget.modelWallTimeMs.limit === null && budget.modelWallTimeMs.remaining !== null)
+    || (budget.modelWallTimeMs.limit !== null && (budget.modelWallTimeMs.measured === null) !== (budget.modelWallTimeMs.remaining === null))) {
     context.addIssue({ code: 'custom', path: ['modelWallTimeMs'], message: 'La medida y el saldo de wall time se ocultan juntos cuando el historial es desconocido.' });
   }
   if ((budget.status === 'unknown') !== (budget.modelWallTimeMs.measured === null)) {
@@ -427,11 +430,11 @@ export const RunBudgetViewSchema = z.strictObject({
 export type RunBudgetView = z.infer<typeof RunBudgetViewSchema>;
 
 export const RunLimitsSchema = z.strictObject({
-  maxModelCallsPerRun: z.number().int().min(0).max(100_000),
-  maxModelCallsPerPulse: z.number().int().min(0).max(256),
+  maxModelCallsPerRun: z.number().int().min(0).max(100_000).nullable(),
+  maxModelCallsPerPulse: z.number().int().min(0).max(256).nullable(),
   maxConcurrentCalls: z.number().int().min(1).max(8),
   requestTimeoutMs: z.number().int().min(1_000).max(300_000),
-  maxModelWallTimeMsPerRun: z.number().int().min(0).max(31_536_000_000),
+  maxModelWallTimeMsPerRun: z.number().int().min(0).max(31_536_000_000).nullable(),
   maxTtsCallsPerRun: z.number().int().min(0).max(10_000),
   maxDesignCallsPerRun: z.number().int().min(0).max(10_000),
   maxSfxCallsPerRun: z.number().int().min(0).max(10_000),

@@ -91,7 +91,7 @@ test('helper acepta un backup anterior a la preparación de memorias sin ejecuta
 test('helper aislado valida journal real y escribe fuente congelada exacta sin tocar bundle ni crear sidecars', async () => {
   const f = await fixture();
   try {
-    const before = inventory(f.bundleRoot); const result = await validateExternalBackup(f.request()); assert.equal(result.journalVersion, 40); assert.equal(result.sources.length, 1);
+    const before = inventory(f.bundleRoot); const result = await validateExternalBackup(f.request()); assert.equal(result.journalVersion, 41); assert.equal(result.sources.length, 1);
     const source = result.sources[0]; assert.ok(source); const bytes = readFileSync(source.path); assert.equal(hash(bytes), source.sha256); assert.equal(bytes.length, source.bytes);
     const data = ForkSourceDataSchema.parse(JSON.parse(bytes.toString('utf8'))); assert.equal(data.snapshot.runId, f.world.runId); assert.equal(data.snapshot.seq, f.world.seq);
     assert.ok(data.cuts.some(cut => cut.experiences.some(experience => experience.payloadHash === f.frozen.payloadHash)));
@@ -176,7 +176,7 @@ CREATE TABLE pi_oauth_jobs(job_id TEXT PRIMARY KEY,provider TEXT NOT NULL CHECK(
         revision INTEGER NOT NULL CHECK(revision>=0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,safe_code TEXT,
         owner_token TEXT,claim_token TEXT,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
         CHECK((owner_token IS NULL)=(claim_token IS NULL)),CHECK(state NOT IN('running','cancel-requested') OR owner_token IS NOT NULL));INSERT INTO pi_oauth_jobs SELECT * FROM saved_oauth;DROP TABLE saved_oauth;
- CREATE UNIQUE INDEX pi_oauth_one_running ON pi_oauth_jobs(provider) WHERE state IN('running','cancel-requested');DELETE FROM schema_version WHERE version=40;COMMIT;`));
+ CREATE UNIQUE INDEX pi_oauth_one_running ON pi_oauth_jobs(provider) WHERE state IN('running','cancel-requested');DELETE FROM schema_version WHERE version IN(40,41);COMMIT;`));
   f.declareVersion(39);const before=inventory(f.bundleRoot);const result=await validateExternalBackup(f.request());assert.equal(result.journalVersion,39);assert.equal(result.sources.length,1);assert.deepEqual(inventory(f.bundleRoot),before);
  }finally{await f.close();}
 });

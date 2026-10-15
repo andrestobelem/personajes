@@ -14,9 +14,11 @@ import { createRunPreflightJobs, projectRunPreflightReport } from '../src/applic
 import { validateRunConfiguration, type PreflightReport } from '../src/application/production-preflight.ts';
 import { draftFixture, canonical } from './fixtures/continuista.ts';
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, unlimited = false) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-preflight-broker-')); const path = join(directory, 'journal.sqlite');
-  const journal = openJournal({ path }); const result = validateRunConfiguration({ draft: draftFixture() });
+  const journal = openJournal({ path }); const draft = draftFixture();
+  if (unlimited && draft.budget.kind !== 'empty') { draft.budget.value.maxPiCallsPerRun = null; draft.budget.value.maxPiCallsPerPulse = null; }
+  const result = validateRunConfiguration({ draft });
   assert.ok(result.kind === 'ready'); const configuration = result.configuration;
   journal.registerWorldRun({ initialSnapshot: configuration.worldSnapshot, configurationRevision: configuration.configRevision, configuration, lifecycle: 'ready',
     continuityFence: { kind: 'prepared-contexts', atWorldSeq: configuration.worldSnapshot.seq, contexts: configuration.roster.preparedCharacters.map((actor) => ({ actorId: actor.characterId,
@@ -115,4 +117,18 @@ test('proyección omite details y códigos no conocidos; availability se resume 
   const result = projectRunPreflightReport(report, '2026-10-14T12:00:00.000Z');
   assert.deepEqual(result.checks, [{ kind: 'unavailable', checkId: 'budget', code: 'check-unavailable' }, { kind: 'deferred', checkId: 'participant-availability' }]);
   assert.doesNotMatch(JSON.stringify(result), /SECRET|personaje-sintetico|secret-sensitive/);
+});
+
+
+test('unlimited call configuration crosses durable preflight without evaluation failure', async t => {
+  const f = await fixture(t, true);
+  const broker = await createRunPreflightJobs({ journal: f.journal, ownerToken: randomUUID(), createHost: f.createHost, readCredentialFingerprint: f.authentication.readCredentialFingerprint });
+  try {
+    const started = await broker.start({ ...f.scopes, idempotencyKey: randomUUID() });
+    assert.ok(started.kind === 'created');
+    await until(async () => { const result = await broker.readJob({ runId: f.scopes.runId, jobId: started.job.jobId }); return result.kind === 'found' && ['completed','failed'].includes(result.job.state); });
+    const result = await broker.readJob({ runId: f.scopes.runId, jobId: started.job.jobId });
+    assert.ok(result.kind === 'found'); assert.equal(result.job.state, 'completed');
+    assert.ok(result.report.result?.checks.some(check => check.checkId === 'budget' && check.kind === 'passed'));
+  } finally { await broker.close(); }
 });

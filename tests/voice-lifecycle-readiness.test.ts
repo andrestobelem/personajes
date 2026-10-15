@@ -7,15 +7,16 @@ import { test } from 'node:test';
 import { openLocalHost } from '../src/application/local-host.ts';
 import { createVoiceRuntime } from '../src/application/voice-runtime.ts';
 import { createRunLifecycleApplication } from '../src/application/run-lifecycle.ts';
+import { createRunPreflightJobs } from '../src/application/run-preflight-jobs.ts';
 import { fingerprintInferenceProfile } from '../src/application/pi-access-check.ts';
 import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
-import { draftFixture } from './fixtures/continuista.ts';
+import { draftFixture, worldFixture } from './fixtures/continuista.ts';
 
-function fixture() {
+function fixture(fictionalTime?: number) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-voice-lifecycle-'));
   const host = openLocalHost({ privateDataRoot: directory });
   const voices = createVoiceRuntime({ host });
-  const { kind, schemaVersion, revision, runId: oldRunId, ...patch } = draftFixture();
+  const { kind, schemaVersion, revision, runId: oldRunId, ...patch } = draftFixture(fictionalTime === undefined ? {} : { moment: fictionalTime, world: worldFixture({ time: fictionalTime }) });
   const created = host.journal.createRunConfigurationDraft({ principalId: 'operator', idempotencyKey: randomUUID(), patch });
   assert.equal(created.kind, 'created'); if (created.kind !== 'created') assert.fail();
   const runId = created.draft.runId;
@@ -59,6 +60,31 @@ function fixture() {
     async close() { await voices.close(); host.close(); rmSync(directory, { recursive: true, force: true }); rmSync(`${directory}-auth`, { recursive: true, force: true }); } };
 }
 
+test('real preflight broker supplies lifecycle documents and preserves credential freshness at start', async () => {
+  const f = fixture();
+  let fingerprint: string | undefined = 'a'.repeat(64);
+  const broker = await createRunPreflightJobs({ journal: f.host.journal, ownerToken: f.host.ownerToken,
+    createHost() { throw new Error('Admission must not reevaluate the preflight'); },
+    async readCredentialFingerprint() { return fingerprint; },
+  });
+  let schedules = 0;
+  const app = createRunLifecycleApplication({ journal: f.host.journal,
+    preflights: { readJob: broker.readLifecycleDocument },
+    runtime: { async scheduleRun() { schedules++; return true; }, async cancelRun() { return true; } },
+    readVoiceReadiness: request => f.voices.readPreflightReadiness(request),
+  });
+  try {
+    const preflightJobId = f.passedPreflight();
+    assert.equal(await broker.readLifecycleDocument({ runId: f.runId, jobId: randomUUID() }), undefined);
+    fingerprint = undefined;
+    assert.equal((await app.controlRun(f.command({ kind: 'start', preflightJobId }))).kind, 'preflightStale');
+    assert.equal(schedules, 0);
+    fingerprint = 'a'.repeat(64);
+    assert.equal((await app.controlRun(f.command({ kind: 'start', preflightJobId }))).kind, 'updated');
+    assert.equal(schedules, 1);
+  } finally { await broker.close(); await f.close(); }
+});
+
 test('audio enabled after a passed preflight blocks start without advancing lifecycle; an accepted replay does not reread audio', async () => {
   const f = fixture(); try {
     const jobId = f.passedPreflight();
@@ -99,5 +125,18 @@ test('final local audio inspection runs after asynchronous preflight read and bl
       assert.deepEqual(f.state(), before);
     }
     assert.equal((await blockedApp.controlRun(f.command({ kind: 'close' }))).kind, 'updated'); assert.equal(f.reads, reads);
+  } finally { await f.close(); }
+});
+
+
+test('a 1966 representation starts and records initial goal activation with its signed fictional instant', async () => {
+  const instant = Date.UTC(1966, 5, 15, 14);
+  const f = fixture(instant);
+  try {
+    const preflightJobId = f.passedPreflight();
+    assert.equal((await f.app.controlRun(f.command({ kind: 'start', preflightJobId }))).kind, 'updated');
+    assert.equal(f.state().lifecycle, 'running');
+    assert.equal(f.schedules, 1);
+    assert.equal(f.host.journal.loadWorld({ runId: f.runId })?.clock.instant, instant);
   } finally { await f.close(); }
 });

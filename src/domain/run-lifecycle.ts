@@ -21,7 +21,7 @@ export type RunControlCommand = z.infer<typeof RunControlCommandSchema>;
 export const RunLifecycleControlRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('start'), preflightJobId: JobIdSchema }),
   z.strictObject({ kind: z.literal('pause') }),
-  z.strictObject({ kind: z.literal('resume'), preflightJobId: JobIdSchema }),
+  z.strictObject({ kind: z.literal('resume'), preflightJobId: JobIdSchema, retryBlockedActors: z.literal(true).optional() }),
   z.strictObject({ kind: z.literal('step'), preflightJobId: JobIdSchema }),
   z.strictObject({ kind: z.literal('stop') }),
   z.strictObject({ kind: z.literal('close') }),
