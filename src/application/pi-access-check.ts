@@ -71,7 +71,7 @@ export function createPiAccessCheck(input: {
           const model = input.modelRuntime.getModel(profile.provider, profile.model);
           if (!model || model.provider !== profile.provider || model.id !== profile.model || model.api !== profile.api || !model.reasoning || model.thinkingLevelMap?.[profile.reasoningEffort] !== profile.reasoningEffort) return { ...base, kind: 'failed', code: 'MODEL_UNAVAILABLE' };
           const auth = await input.modelRuntime.checkAuth(profile.provider, { signal });
-          if (!auth || (profile.provider === 'openai-codex' && auth.type !== 'oauth')) return { ...base, kind: 'failed', code: 'AUTH_REQUIRED' };
+          if (!auth || auth.type !== 'oauth') return { ...base, kind: 'failed', code: 'AUTH_REQUIRED' };
           if (!await input.modelRuntime.getAuth(model, { signal })) return { ...base, kind: 'failed', code: 'AUTH_REQUIRED' };
           const fingerprint = await input.readCredentialFingerprint({ provider: profile.provider, signal });
           if (fingerprint === undefined) return { ...base, kind: 'failed', code: 'AUTH_REQUIRED' };

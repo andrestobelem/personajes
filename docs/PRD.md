@@ -38,7 +38,7 @@ No se exige por inferencia multijugador, publicación pública, operación perma
 | Configurador | Prepara la puesta y contextos, y registra adaptaciones o consolidaciones de identidad. |
 | Narrador | Voz en off opcional para el público; puede narrar interioridad ficticia autorizada, sin crear hechos ni exponer razonamiento interno. |
 
-Las funciones administrativas pueden componerse; no se exige un proceso por nombre. Cada personaje sí tiene instancia Pi propia con prompt, contexto, historial, tools y memoria privados. Todos los roles que invoquen un modelo respetan el perfil seleccionado en la representación: GPT-6.1 Sol bajo mediante Codex OAuth, predeterminado, o Claude Opus 5.5 medio mediante Anthropic. Sin sustituciones silenciosas. Esta decisión posterior del usuario reemplaza Luna/xhigh; ver [ADR](adr/0003-perfiles-de-inferencia-seleccionables.md).
+Las funciones administrativas pueden componerse; no se exige un proceso por nombre. Cada personaje sí tiene instancia Pi propia con prompt, contexto, historial, tools y memoria privados. Todos los roles que invoquen un modelo respetan el perfil seleccionado en la representación: GPT-6.1 Sol bajo mediante login OAuth de OpenAI Codex, predeterminado, o Claude Opus 5.5 medio mediante login OAuth de Anthropic. Sin sustituciones silenciosas. Esta decisión posterior del usuario reemplaza Luna/xhigh; ver [ADR](adr/0003-perfiles-de-inferencia-seleccionables.md).
 
 ## 4. Usuarios, modos y recorridos completos
 
@@ -152,7 +152,7 @@ Cada ID representa una obligación del producto. Las specs deben asignarle compo
 | ID | Requisito | Evidencia de aceptación requerida |
 |---|---|---|
 | ACT-01 | Usar SDK Pi con una instancia independiente por personaje activo. | IDs de sesión, prompt, contexto, historial y tools distintos durante creación y reanudación. |
-| ACT-02 | Conectar mediante login OAuth `openai-codex`. | Flujo de login y estado real de cuenta; refresh/caducidad/cancelación controlados, sin tokens en actor/UI/log de contenido. |
+| ACT-02 | Conectar mediante login OAuth con OpenAI Codex o Anthropic, de acuerdo con el perfil elegido. | Flujo por proveedor y estado real de cuenta; refresh/caducidad/cancelación controlados, sin tokens ni códigos de autorización persistidos en actor/UI/log de contenido. |
 | ACT-03 | Exigir el perfil seleccionado: `gpt-6.1-sol`/`low` o `claude-opus-5-5`/`medium`, solicitado y efectivo. | Creación/reanudación verifica proveedor/modelo/esfuerzo y falla visiblemente si no coincide; no fallback. |
 | ACT-04 | Preparar como actores del Método mediante adaptación explícita: identidad, circunstancias, biografía pertinente, memoria, deseos, escucha, relación y táctica ante obstáculos. | Misma petición con cambio de circunstancia/relación/objetivo relevante: evaluar escucha, elección/táctica, voz y consecuencias; no exigir divergencia siempre ni afirmar memoria sentida, conciencia o una única escuela teatral. |
 | ACT-05 | Permitir iniciativa, espera, silencio, retirada, engaño y cambio coherente. | El actor elige sus tácticas; coordinador/director no escribe respuestas obligatorias. |
@@ -229,7 +229,7 @@ Cada ID representa una obligación del producto. Las specs deben asignarle compo
 5. **Idempotencia:** una propuesta base produce como máximo su efecto confirmado; entregas/reintentos no duplican diálogo, memoria, reloj o audio.
 6. **Procedencia:** hechos y experiencias conservan origen y tiempo; corregir deja rastro; creencia no se promueve a verdad por resumen.
 7. **Privacidad:** contextos, memorias y feedback separados; secretos de proveedor fuera de prompts, repo, export y logs de contenido.
-8. **Perfil explícito:** el proveedor, modelo y esfuerzo elegidos se conservan al crear y reanudar cualquier rol LLM; Codex exige OAuth, Anthropic credencial propia. Incompatibilidad visible, sin sustitución.
+8. **Perfil explícito:** el proveedor, modelo y esfuerzo elegidos se conservan al crear y reanudar cualquier rol LLM; OpenAI Codex y Anthropic se conectan con sus respectivos logins OAuth. Incompatibilidad visible, sin sustitución.
 9. **Historia:** replay de salidas guardadas; una nueva generación pertenece a nueva operación/corrida, no reescribe el pasado.
 10. **Honestidad de estado:** documentación, mocks, receta, login, llamada real, voz guardada, audio y aplicación tienen evidencias distintas.
 

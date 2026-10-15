@@ -14,6 +14,7 @@ import { JobIdSchema } from '../domain/values.ts';
 const InputSchema = z.strictObject({
   journal: z.custom<Journal>((value) => typeof value === 'object' && value !== null),
   oauth: z.custom<ReturnType<typeof createPiOAuthPort>>((value) => typeof value === 'object' && value !== null),
+  anthropicOAuth: z.custom<ReturnType<typeof createPiOAuthPort>>((value)=>typeof value==='object'&&value!==null).optional(),
   ownerToken: z.string().uuid(),
   principalId: z.string().trim().min(1).max(200).default('local-operator'),
   onDiagnostic: z.custom<(input: { jobId: string; code: 'claim-busy' | 'claim-stale' | 'journal-failure' | 'interaction-rejected' }) => void>(
@@ -93,20 +94,22 @@ function verifiedUserCodeEvent(input: Extract<AuthEvent, { type: 'device_code' }
 }
 
 /**
- * Executes durable OpenAI Codex auth jobs around one host-owned Pi OAuth port.
+ * Executes durable OpenAI Codex and Anthropic OAuth jobs around one host-owned Pi OAuth port.
  * Interaction values are kept only in an in-memory, browser-session-scoped
  * channel. No OAuth authorization code, token, URL or SDK error enters SQLite.
  */
 export async function createPiOAuthJobs(rawInput: {
   journal: Journal;
   oauth: OAuth;
+  anthropicOAuth?:OAuth;
   ownerToken: string;
   principalId?: string;
   onDiagnostic?: (input: { jobId: string; code: 'claim-busy' | 'claim-stale' | 'journal-failure' | 'interaction-rejected' }) => void;
 }) {
   const input = InputSchema.parse(rawInput);
   const journal = input.journal;
-  const oauth = input.oauth;
+  function oauthFor(provider:'openai-codex'|'anthropic'){const port=provider==='anthropic'?input.anthropicOAuth:input.oauth;if(port===undefined)throw new Error('OAUTH_PROVIDER_UNAVAILABLE');return port;}
+  const challenges=new Map<string,{challengeId:string;resolve:(value:string)=>void;reject:()=>void}>();
   const principalId = input.principalId;
   const onDiagnostic = input.onDiagnostic;
   let closed = false;
@@ -217,6 +220,7 @@ export async function createPiOAuthJobs(rawInput: {
       activeJob.lease = claim.lease;
       activeJob.expectedRevision = claim.job.revision;
       if (closed || activeJob.controller.signal.aborted) return;
+      const oauth=oauthFor(job.provider);
 
       if (claim.job.kind === 'logout') {
         const result = await oauth.logout({ signal: activeJob.controller.signal });
@@ -232,10 +236,18 @@ export async function createPiOAuthJobs(rawInput: {
         return;
       }
 
+      let authorizationUrl:string|undefined;
       const interaction: AuthInteraction = {
         signal: activeJob.controller.signal,
         async prompt(prompt: AuthPrompt): Promise<string> {
-          if (prompt.type === 'select' && prompt.options.some((option) => option.id === 'device_code')) return 'device_code';
+          if(job.provider==='anthropic'&&prompt.type==='select'&&prompt.options.some(option=>option.id==='copy_code'))return 'copy_code';
+          if(job.provider==='anthropic'&&prompt.type==='manual_code'&&authorizationUrl!==undefined){
+            const challengeId=randomUUID();const cursor=++nextCursor;const expiresAt=new Date(Date.now()+900_000).toISOString();
+            const event=PiOAuthInteractionViewSchema.parse({kind:'authorization-code',cursor,authorizationUrl,challengeId,expiresAt});
+            interactionScopes.set(job.jobId,sessionScope);interactions.set(job.jobId,event);lastCursorByJob.set(job.jobId,cursor);
+            return new Promise<string>((resolve,reject)=>{let settled=false;const signal=prompt.signal===undefined?activeJob.controller.signal:AbortSignal.any([prompt.signal,activeJob.controller.signal]);const timer=setTimeout(abort,900_000);timer.unref();function clean(){clearTimeout(timer);signal.removeEventListener('abort',abort);challenges.delete(job.jobId);interactions.delete(job.jobId);}function abort(){if(settled)return;settled=true;clean();reject(new Error('OAuth challenge ended'));}challenges.set(job.jobId,{challengeId,resolve(value){if(settled)return;settled=true;clean();resolve(value);},reject:abort});signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();});
+          }
+          if (job.provider==='openai-codex'&&prompt.type === 'select' && prompt.options.some((option) => option.id === 'device_code')) return 'device_code';
           activeJob.interactionRejected = true;
           report(job.jobId, 'interaction-rejected');
           activeJob.controller.abort();
@@ -243,7 +255,10 @@ export async function createPiOAuthJobs(rawInput: {
         },
         notify(event: AuthEvent): void {
           if (closed || activeJob.controller.signal.aborted) return;
-          if (event.type !== 'device_code') return;
+          if(job.provider==='anthropic'&&event.type==='auth_url'){
+            try{const url=new URL(event.url);if(url.protocol!=='https:'||url.hostname!=='claude.ai'||url.port!==''||url.pathname!=='/oauth/authorize'||url.username||url.password||url.hash)throw new Error();authorizationUrl=url.href;}catch{activeJob.interactionRejected=true;report(job.jobId,'interaction-rejected');activeJob.controller.abort();}return;
+          }
+          if (job.provider!=='openai-codex'||event.type !== 'device_code') return;
           try {
             const cursor = ++nextCursor;
             const safeEvent = verifiedUserCodeEvent(event, cursor, Date.now());
@@ -284,6 +299,7 @@ export async function createPiOAuthJobs(rawInput: {
         }
       } catch { report(job.jobId, 'journal-failure'); }
     } finally {
+      challenges.get(job.jobId)?.reject();
       if (active.get(job.jobId) === activeJob) active.delete(job.jobId);
       interactions.delete(job.jobId);
     }
@@ -292,12 +308,12 @@ export async function createPiOAuthJobs(rawInput: {
   // Startup recovery runs only after the host has acquired exclusive ownership.
   await journal.recoverAbandonedPiOAuthJobs({ ownerToken: input.ownerToken });
 
-  function startOperation(input: { kind: 'login' | 'logout'; idempotencyKey: string; sessionScope: string }) {
+  function startOperation(input: { kind: 'login' | 'logout'; idempotencyKey: string; sessionScope: string;provider?:'openai-codex'|'anthropic' }) {
     return track(async () => {
       if (closed) throw new Error('OAuth job broker is closed');
       const scope = SessionScopeSchema.parse(input.sessionScope);
       const result = PiOAuthJobCreateResultSchema.parse(await journal.createPiOAuthJob({
-        principalId, idempotencyKey: input.idempotencyKey, kind: input.kind,
+        principalId, idempotencyKey: input.idempotencyKey, kind: input.kind,provider:input.provider??'openai-codex',
       }));
       if (result.kind === 'idempotencyConflict') return result;
       const job = PiOAuthJobViewSchema.parse(result.job);
@@ -309,10 +325,10 @@ export async function createPiOAuthJobs(rawInput: {
     });
   }
 
-  function status() {
+  function status(request?:{provider?:'openai-codex'|'anthropic'}) {
     return track(async () => {
       if (closed) return { kind: 'failed', code: 'OAUTH_STATUS_UNAVAILABLE' } as const;
-      return await oauth.status();
+      try{return await oauthFor(request?.provider??'openai-codex').status();}catch{return {kind:'failed',code:'OAUTH_STATUS_UNAVAILABLE'} as const;}
     });
   }
 
@@ -387,7 +403,7 @@ export async function createPiOAuthJobs(rawInput: {
         return interactionWaiting(jobId);
       }
       const event = interactions.get(jobId);
-      if (event === undefined || event.kind !== 'device-code' || Date.parse(event.expiresAt) <= Date.now()) {
+      if (event === undefined || (event.kind !== 'device-code'&&event.kind!=='authorization-code') || Date.parse(event.expiresAt) <= Date.now()) {
         interactions.delete(jobId);
         return interactionWaiting(jobId);
       }
@@ -395,6 +411,12 @@ export async function createPiOAuthJobs(rawInput: {
       return event;
     });
   }
+
+  function respondInteraction(request:{jobId:string;challengeId:string;response:string;sessionScope:string}){return track(async()=>{
+    const jobId=JobIdSchema.parse(request.jobId);const scope=SessionScopeSchema.parse(request.sessionScope);if(await journal.readPiOAuthJob({jobId})===undefined)return {kind:'missing'} as const;if(interactionScopes.get(jobId)!==scope)return {kind:'forbidden'} as const;
+    const challenge=challenges.get(jobId);const event=interactions.get(jobId);if(closed||challenge===undefined||event?.kind!=='authorization-code'||event.challengeId!==request.challengeId||challenge.challengeId!==request.challengeId||Date.parse(event.expiresAt)<=Date.now())return {kind:'stale'} as const;
+    const response=z.string().trim().min(1).max(8192).refine(value=>!/[\r\n\0]/.test(value)).parse(request.response);challenge.resolve(response);return {kind:'accepted'} as const;
+  });}
 
   async function close(): Promise<void> {
     if (closing !== undefined) return closing;
@@ -414,12 +436,13 @@ export async function createPiOAuthJobs(rawInput: {
 
   return Object.freeze({
     status,
-    startLogin: (input: { idempotencyKey: string; sessionScope: string }) => startOperation({ ...input, kind: 'login' }),
-    startLogout: (input: { idempotencyKey: string; sessionScope: string }) => startOperation({ ...input, kind: 'logout' }),
+    startLogin: (input: { idempotencyKey: string; sessionScope: string;provider?:'openai-codex'|'anthropic' }) => startOperation({ ...input, kind: 'login' }),
+    startLogout: (input: { idempotencyKey: string; sessionScope: string;provider?:'openai-codex'|'anthropic' }) => startOperation({ ...input, kind: 'logout' }),
     readJob,
     listJobs,
     cancelJob,
     readInteraction,
+    respondInteraction,
     close,
     get isClosed() { return closed; },
     get backupBusy(){return active.size>0||queue.length>0||workers.size>0||inFlight.size>0||pump!==undefined;},

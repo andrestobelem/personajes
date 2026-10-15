@@ -1,6 +1,6 @@
 # Acceso Pi y preparación gráfica: corte v19
 
-Fecha: 14 de octubre de 2026. El objetivo completo sigue activo; este corte no certifica los 77 criterios de aceptación.
+Fecha: 14 de octubre de 2026. El objetivo completo sigue activo; este corte no certifica los 77 criterios de aceptación. Actualización posterior: el login dual de OpenAI Codex y Anthropic está documentado en [oauth-dual.md](oauth-dual.md); las rutas y pruebas descritas aquí corresponden al corte v19.
 
 ## Implementación
 

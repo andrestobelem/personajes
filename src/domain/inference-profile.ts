@@ -79,21 +79,12 @@ export const LEGACY_INFERENCE_PROFILE: PersistedInferenceProfile = PersistedInfe
 export type InferenceProvider = SelectableInferenceProfile['provider'];
 export type InferenceAuthenticationMethod = 'oauth' | 'api_key';
 
-/** Provider-specific auth policy. Anthropic accepts either SDK-supported auth method; Codex requires OAuth. */
+/** New representations require the explicit OAuth login for their selected provider. */
 export function isInferenceAuthenticationMethodAllowed(input: {
   provider: InferenceProvider;
   method: InferenceAuthenticationMethod;
 }): boolean {
-  switch (input.provider) {
-    case 'openai-codex':
-      return input.method === 'oauth';
-    case 'anthropic':
-      return input.method === 'api_key' || input.method === 'oauth';
-    default: {
-      const exhaustive: never = input.provider;
-      return exhaustive;
-    }
-  }
+  return input.method === 'oauth';
 }
 
 /** Interpret a historical profile for session recovery without rewriting its stored JSON/hash. */

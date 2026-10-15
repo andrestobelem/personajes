@@ -259,11 +259,11 @@ test('Luna sólo se puede leer como historia y un perfil ausente no se rellena r
   if (retired.kind === 'invalid') assert.ok(retired.issues.some((issue) => issue.code === 'legacy-inference-profile'));
 });
 
-test('la política de credenciales es específica por proveedor', () => {
+test('la política de credenciales requiere login OAuth para ambos proveedores', () => {
   assert.equal(isInferenceAuthenticationMethodAllowed({ provider: 'openai-codex', method: 'oauth' }), true);
   assert.equal(isInferenceAuthenticationMethodAllowed({ provider: 'openai-codex', method: 'api_key' }), false);
   assert.equal(isInferenceAuthenticationMethodAllowed({ provider: 'anthropic', method: 'oauth' }), true);
-  assert.equal(isInferenceAuthenticationMethodAllowed({ provider: 'anthropic', method: 'api_key' }), true);
+  assert.equal(isInferenceAuthenticationMethodAllowed({ provider: 'anthropic', method: 'api_key' }), false);
 });
 
 test('preflight no habilita OpenAI Codex con API key y exige un perfil nuevo en Ready histórico', async () => {
@@ -511,7 +511,7 @@ test('preflight comprueba dependencias reales registradas sin llamar modelos ni 
   assert.ok(report.checks.some((entry) => entry.kind === 'passed' && entry.checkId === 'icm-memory'));
 });
 
-test('Claude Opus 5.5 usa su propio perfil y acepta credencial API key', async () => {
+test('Claude Opus 5.5 usa su perfil y preflight exige OAuth aunque haya API key', async () => {
   const configuration = readyFixture({ inferenceProfile: CLAUDE_INFERENCE_PROFILE });
   let requestedProvider: string | undefined;
   const host = hostFixture({
@@ -525,8 +525,19 @@ test('Claude Opus 5.5 usa su propio perfil y acepta credencial API key', async (
     configuration, observedAt: '2026-10-14T12:30:00.000Z',
   });
   assert.equal(requestedProvider, 'anthropic');
-  assert.equal(report.kind, 'passed');
-  assert.ok(report.checks.some((entry) => entry.kind === 'passed' && entry.checkId === 'provider-authentication'));
+  assert.equal(report.kind, 'blocked');
+  assert.ok(report.checks.some((entry) => entry.kind === 'blocked' && entry.checkId === 'provider-authentication' && entry.code === 'authentication-method-incompatible'));
+  const oauthHost = hostFixture({
+    async readInferenceAuthenticationStatus({ provider }) {
+      assert.equal(provider, 'anthropic');
+      return { kind: 'authenticated', provider: 'anthropic', method: 'oauth', accountFingerprint };
+    },
+  }, configuration);
+  const oauthReport = await createProductionPreflightPort({ host: oauthHost }).preflight({
+    configuration, observedAt: '2026-10-14T12:30:00.000Z',
+  });
+  assert.equal(oauthReport.kind, 'passed');
+  assert.ok(oauthReport.checks.some((entry) => entry.kind === 'passed' && entry.checkId === 'provider-authentication'));
 });
 
 test('perfil Pi incorrecto bloquea sin fallback y sin access-check live implícito', async () => {

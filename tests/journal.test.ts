@@ -56,14 +56,14 @@ test('schema futuro no se migra ni se altera al rechazarlo', () => {
   const path = join(directory, 'world.sqlite');
   const database = new DatabaseSync(path);
   try {
-    database.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(40)');
+    database.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(41)');
     assert.throws(() => openJournal({ path }), /no soportada/);
-    assert.deepEqual(database.prepare('SELECT version FROM schema_version').all().map((row) => row.version), [40]);
+    assert.deepEqual(database.prepare('SELECT version FROM schema_version').all().map((row) => row.version), [41]);
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name='experiences'").get(), undefined);
   } finally { database.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('migraciones explícitas v1→v39 conservan experiencias, ledger, percepciones, jobs e intenciones', () => {
+test('migraciones explícitas v1→v40 conservan experiencias, ledger, percepciones, jobs e intenciones', () => {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-migrate-v2-'));
   const path = join(directory, 'world.sqlite');
   const database = new DatabaseSync(path);
@@ -103,7 +103,7 @@ test('migraciones explícitas v1→v39 conservan experiencias, ledger, percepcio
       const versions = new DatabaseSync(path);
       try {
         assert.deepEqual(versions.prepare('SELECT version FROM schema_version ORDER BY version').all()
-          .map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+          .map((row) => row.version), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]);
         const perceptionColumns = versions.prepare("PRAGMA table_info('world_perceptions')").all();
         assert.equal(perceptionColumns.find((row) => row.name === 'attempt_id')?.notnull, 0);
         assert.deepEqual(versions.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='world_commits'")
@@ -155,7 +155,7 @@ test('migración v30→v39 crea ledgers de activación y reloj con replay establ
           FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT
         );
         CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
-        DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(31,32,33,34,35,36,37,38,39);
+        DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(31,32,33,34,35,36,37,38,39,40);
         PRAGMA foreign_keys=ON;
       `);
     } finally { legacy.close(); }
@@ -164,7 +164,7 @@ test('migración v30→v39 crea ledgers de activación y reloj con replay establ
     journal.close();
     const migrated = new DatabaseSync(path);
     try {
-      assert.equal(migrated.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 39);
+      assert.equal(migrated.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 40);
       assert.deepEqual(migrated.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'actor_activation_%' ORDER BY name")
         .all().map((row) => row.name), ['actor_activation_causes', 'actor_activation_invitation_jobs', 'actor_activation_invitations']);
       assert.deepEqual(migrated.prepare('PRAGMA foreign_key_check').all(), []);

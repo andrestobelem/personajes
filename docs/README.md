@@ -73,6 +73,7 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - [Recuperación parental y composición del runtime](auditoria/recuperacion-parental-y-runtime.md).
 - [Launcher y preparación de representaciones](auditoria/launcher-y-borradores.md).
 - [Acceso Pi y preparación gráfica v19](auditoria/oauth-y-preparacion.md).
+- [Login OAuth dual para OpenAI Codex y Anthropic](auditoria/oauth-dual.md).
 - [Corrección de gates del preflight](auditoria/preflight-gates.md).
 - [Brecha de lifecycle y controles de representación](auditoria/controles-de-representacion.md).
 - [ADR de preparación y presencia operativa](adr/0002-preparacion-y-presencia-operativa.md).
@@ -85,7 +86,7 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - Revisiones Luna 6 xhigh de [investigaciones](auditoria/revision-luna-investigaciones.md), [personajes](auditoria/revision-luna-personajes.md) y [técnica](auditoria/revision-luna-tecnica.md).
 - [Skills instaladas](auditoria/skills-instaladas.md), [manifiesto](auditoria/skills-manifest.json) y [parche local](auditoria/skills-local.patch).
 
-Los pendientes sustantivos se mantienen visibles: no hay representación iniciada, interfaz completa de representación, login ejecutado ni voces generadas. La biblioteca local sí está implementada. La investigación de doblaje no obtuvo una medición de audio. La cobertura documental extensa del reparto no equivale a una auditoría audiovisual de todos los episodios ni a biografías sin lagunas.
+Los pendientes sustantivos se mantienen visibles: no hay representación iniciada, interfaz completa de representación, login de cuenta ejecutado ni voces generadas. El panel ofrece login OAuth para OpenAI Codex y Anthropic, pero no se ha autenticado ninguna cuenta. La biblioteca local sí está implementada. La investigación de doblaje no obtuvo una medición de audio. La cobertura documental extensa del reparto no equivale a una auditoría audiovisual de todos los episodios ni a biografías sin lagunas.
 
 - [Preflight durable](auditoria/preflight-durable.md): comprobación explícita del corte guardado, recuperación y obsolescencia, sin inicio ni inferencia implícitos.
 

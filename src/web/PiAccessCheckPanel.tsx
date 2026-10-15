@@ -74,7 +74,7 @@ export function PiAccessCheckPanel({ api = client }: { api?: PiAccessCheckClient
   return <section className="pi-access-panel" aria-labelledby="pi-check-title"><header><span className="eyebrow">Prueba explícita</span><h2 id="pi-check-title">Comprobar acceso al modelo</h2></header>
     <label>Perfil a comprobar<select disabled={busy || intent !== null} value={profileChoice} onChange={(event) => setProfileChoice(event.target.value)}><option value="sol">GPT-6.1 Sol · bajo</option><option value="opus">Claude Opus 5.5 · medio</option></select></label>
     <p>Esta acción envía una solicitud mínima al proveedor y puede consumir cuota o generar un cargo. No envía personajes, memorias ni contexto de la obra y no inicia una representación.</p>
-    {profileChoice === 'opus' && <p>Requiere una credencial propia de Anthropic configurada en el host; el login de OpenAI no habilita Claude.</p>}
+    {profileChoice === 'opus' && <p>Requiere login con tu cuenta de Anthropic. Elegí Anthropic en el panel de conexión y seleccioná este perfil antes de comprobarlo.</p>}
     <div className="draft-actions"><button type="button" disabled={busy || intent !== null || active || !terminal} onClick={() => void execute({ kind: 'start', key: crypto.randomUUID(), profile })}>Comprobar acceso · puede consumir cuota</button>
       <button type="button" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>Consultar historial local</button>
       {document && !terminal && <button type="button" disabled={busy || intent !== null} onClick={() => void execute({ kind: 'cancel', key: crypto.randomUUID(), document })}>Cancelar comprobación</button>}</div>

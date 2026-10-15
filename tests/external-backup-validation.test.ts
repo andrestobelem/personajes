@@ -78,7 +78,7 @@ async function fixture(memory = false) {
 test('helper aislado valida journal real y escribe fuente congelada exacta sin tocar bundle ni crear sidecars', async () => {
   const f = await fixture();
   try {
-    const before = inventory(f.bundleRoot); const result = await validateExternalBackup(f.request()); assert.equal(result.journalVersion, 39); assert.equal(result.sources.length, 1);
+    const before = inventory(f.bundleRoot); const result = await validateExternalBackup(f.request()); assert.equal(result.journalVersion, 40); assert.equal(result.sources.length, 1);
     const source = result.sources[0]; assert.ok(source); const bytes = readFileSync(source.path); assert.equal(hash(bytes), source.sha256); assert.equal(bytes.length, source.bytes);
     const data = ForkSourceDataSchema.parse(JSON.parse(bytes.toString('utf8'))); assert.equal(data.snapshot.runId, f.world.runId); assert.equal(data.snapshot.seq, f.world.seq);
     assert.ok(data.cuts.some(cut => cut.experiences.some(experience => experience.payloadHash === f.frozen.payloadHash)));
@@ -153,4 +153,17 @@ for (const table of ['run_configuration_revisions', 'actor_identity_epochs']) fo
     await assert.rejects(validateExternalBackup(f.request()), /EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID/);
     assert.deepEqual(inventory(f.bundleRoot), before);
   } finally { await f.close(); }
+});
+
+ test('helper acepta backup v39 por DDL histórico exacto y conserva la fuente al migrar', async()=>{
+ const f=await fixture();try{
+  f.mutate('world.sqlite',db=>db.exec(`PRAGMA foreign_keys=OFF;BEGIN;CREATE TABLE saved_oauth AS SELECT * FROM pi_oauth_jobs;DROP TABLE pi_oauth_jobs;
+CREATE TABLE pi_oauth_jobs(job_id TEXT PRIMARY KEY,provider TEXT NOT NULL CHECK(provider='openai-codex'),kind TEXT NOT NULL CHECK(kind IN('login','logout')),
+        principal_id TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('queued','running','cancel-requested','succeeded','failed','canceled','interrupted')),
+        revision INTEGER NOT NULL CHECK(revision>=0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,safe_code TEXT,
+        owner_token TEXT,claim_token TEXT,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        CHECK((owner_token IS NULL)=(claim_token IS NULL)),CHECK(state NOT IN('running','cancel-requested') OR owner_token IS NOT NULL));INSERT INTO pi_oauth_jobs SELECT * FROM saved_oauth;DROP TABLE saved_oauth;
+ CREATE UNIQUE INDEX pi_oauth_one_running ON pi_oauth_jobs(provider) WHERE state IN('running','cancel-requested');DELETE FROM schema_version WHERE version=40;COMMIT;`));
+  f.declareVersion(39);const before=inventory(f.bundleRoot);const result=await validateExternalBackup(f.request());assert.equal(result.journalVersion,39);assert.equal(result.sources.length,1);assert.deepEqual(inventory(f.bundleRoot),before);
+ }finally{await f.close();}
 });

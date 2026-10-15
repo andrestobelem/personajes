@@ -11,7 +11,7 @@ const frames = (events: unknown[]) => events.map((event) => `event: ${z.object({
 const syntheticToken = `e30.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'synthetic-test-account' } })).toString('base64url')}.synthetic`;
 async function harness(profile: PersistedInferenceProfile) {
   const credentials = new InMemoryCredentialStore();
-  await credentials.modify(profile.provider, async () => profile.provider === 'openai-codex' ? { type: 'oauth', refresh: 'synthetic-refresh', access: syntheticToken, expires: Date.now() + 86_400_000 } : { type: 'api_key', key: 'synthetic-api-key' });
+  await credentials.modify(profile.provider, async () => ({ type: 'oauth', refresh: 'synthetic-refresh', access: profile.provider === 'openai-codex' ? syntheticToken : 'synthetic-anthropic-oauth-access', expires: Date.now() + 86_400_000 }));
   const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });
   return { runtime, credentials };
 }
@@ -35,7 +35,7 @@ function responseFrames(profile: PersistedInferenceProfile): string {
   ]);
 }
 
-test('SDK real con OAuth/API key sintéticos y fetch controlado verifica payload/efuerzo de ambos perfiles, sin proveedor real', async () => {
+test('SDK real con OAuth sintético y fetch controlado verifica payload/esfuerzo de ambos perfiles, sin proveedor real', async () => {
   for (const profile of [DEFAULT_INFERENCE_PROFILE, CLAUDE_INFERENCE_PROFILE]) {
     const { runtime } = await harness(profile);
     let requests = 0;
@@ -66,10 +66,11 @@ test('SDK real con OAuth/API key sintéticos y fetch controlado verifica payload
 function assistant(model: Model<Api>, stopReason: AssistantMessage['stopReason'] = 'stop'): AssistantMessage {
   return { role: 'assistant', content: [{ type: 'text', text: 'PRIVATE-RESPONSE-DO-NOT-EXPOSE' }], api: model.api, provider: model.provider, model: model.id, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason, timestamp: 0 };
 }
-async function controlled(input: { authType?: 'oauth' | 'api_key'; behavior?: 'reject' | 'throw' | 'wrong' | 'abort' | 'pending' | 'no-payload'; afterFingerprint?: string; timeoutMs?: number } = {}) {
-  const { runtime } = await harness(DEFAULT_INFERENCE_PROFILE);
+async function controlled(input: { profile?: PersistedInferenceProfile; authType?: 'oauth' | 'api_key'; behavior?: 'reject' | 'throw' | 'wrong' | 'abort' | 'pending' | 'no-payload'; afterFingerprint?: string; timeoutMs?: number } = {}) {
+  const profile = input.profile ?? DEFAULT_INFERENCE_PROFILE;
+  const { runtime } = await harness(profile);
   let fingerprintReads = 0; let calls = 0;
-  const access = createPiAccessCheck({ profile: DEFAULT_INFERENCE_PROFILE, timeoutMs: input.timeoutMs ?? 500, readCredentialFingerprint: async () => ++fingerprintReads === 1 ? fingerprint : input.afterFingerprint ?? fingerprint, modelRuntime: {
+  const access = createPiAccessCheck({ profile, timeoutMs: input.timeoutMs ?? 500, readCredentialFingerprint: async () => ++fingerprintReads === 1 ? fingerprint : input.afterFingerprint ?? fingerprint, modelRuntime: {
     getModel: runtime.getModel.bind(runtime), checkAuth: async () => ({ type: input.authType ?? 'oauth' }), isUsingOAuth: () => input.authType !== 'api_key', getAuth: async () => ({ auth: { apiKey: 'PRIVATE-KEY' } }),
     streamSimple(model, _context, options) {
       calls++;
@@ -87,10 +88,13 @@ async function controlled(input: { authType?: 'oauth' | 'api_key'; behavior?: 'r
   return { access, calls: () => calls };
 }
 
-test('cancelación previa no lee auth ni despacha; API key Codex se rechaza sin transporte', async () => {
+test('cancelación previa no lee auth ni despacha; API keys de ambos perfiles se rechazan sin transporte', async () => {
   const { access, calls } = await controlled(); const controller = new AbortController(); controller.abort();
   assert.equal((await access.execute({ signal: controller.signal })).kind, 'aborted'); assert.equal(calls(), 0);
   const noOAuth = await controlled({ authType: 'api_key' }); assert.equal((await noOAuth.access.execute()).kind, 'failed'); assert.equal(noOAuth.calls(), 0);
+  const anthropicApiKey = await controlled({ profile: CLAUDE_INFERENCE_PROFILE, authType: 'api_key' });
+  const anthropicResult = await anthropicApiKey.access.execute(); assert.equal(anthropicResult.kind, 'failed');
+  assert.equal('code' in anthropicResult ? anthropicResult.code : undefined, 'AUTH_REQUIRED'); assert.equal(anthropicApiKey.calls(), 0);
 });
 
 test('rechazo confirmado, incertidumbre, esfuerzo no confirmado y cambio de credencial se distinguen y sanitizan', async () => {

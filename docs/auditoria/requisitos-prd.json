@@ -1971,11 +1971,11 @@
   "currentSpecHashes": {
     "docs/specs/01-dominio-y-catalogo.md": "c190ff486af58c8e6726a8c95edcc9c2e002ab457f90692237880560cc552ad0",
     "docs/specs/02-persistencia-e-icm.md": "2e3beb168a9c292b6ab7b83bb813d5c0315c34c187141489d0af61b688f0e5d8",
-    "docs/specs/03-pi-y-coordinacion.md": "64530da220a6caae5d5851c8f6178416fd388952bc306fca36a52f7e80bfe94e",
-    "docs/specs/04-api-y-autoridad.md": "a90b336059b10366fd73b2ff2c3879990f60e4d982dfc4e575310f827f57dd94",
-    "docs/specs/05-interfaz.md": "7de79d225237259a6126a9bd5e8d8f35a0cdd4bace3ee0c192b25e5b81a5d334",
+    "docs/specs/03-pi-y-coordinacion.md": "9f3fdf7ba050f310b9c0127ffa53561df47838810dd9069caaec8a2e07dc1a62",
+    "docs/specs/04-api-y-autoridad.md": "25b3f782e4ba0625cd8099844bffba73630c0933486568ada5284428f222c322",
+    "docs/specs/05-interfaz.md": "1c73c200caf27b266656675d806c465adfa54907339622e9adf3d89614227ae6",
     "docs/specs/06-voces-y-ritmo.md": "426f4d395accf518d7be4db47e6c99fcc7ea5809319a069d571207c2ce1c4bf6",
-    "docs/specs/07-verificacion.md": "e2265ead70787164b64fc6443805fa7faad84730ad6eaf78d5d42336afe769dd",
+    "docs/specs/07-verificacion.md": "6a1e28233c6877f18ab6ab55dd12845c23c834056d0720023c654aa910422454",
     "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"
   },
   "currentSpecHashDate": "2026-10-15",

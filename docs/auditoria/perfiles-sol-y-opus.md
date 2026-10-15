@@ -2,6 +2,8 @@
 
 Actualización posterior: el [corte v20](sondeos-durables.md) conecta el sondeo a journal, launcher, HTTP y GUI. Los límites de integración descritos aquí corresponden al corte anterior. El acceso live sigue sin acreditar.
 
+Actualización de autenticación: el [corte de OAuth dual](oauth-dual.md) reemplaza la descripción de credenciales de este documento. Tanto OpenAI Codex como Anthropic requieren login OAuth; una API key de Anthropic ya no satisface preflight ni access-check.
+
 
 Corte del 14 de octubre de 2026. La [decisión explícita del usuario](../adr/0003-perfiles-de-inferencia-seleccionables.md) reemplaza el requisito inicial de Luna/xhigh para nuevas inferencias.
 

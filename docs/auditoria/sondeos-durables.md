@@ -1,6 +1,6 @@
 # Sondeos de acceso durables y panel administrativo
 
-Corte v20, 14 de octubre de 2026. El objetivo completo y los 77 criterios integrales siguen pendientes.
+Corte v20, 14 de octubre de 2026. El objetivo completo y los 77 criterios integrales siguen pendientes. Actualización posterior: desde el [corte de OAuth dual](oauth-dual.md), el panel permite login OAuth tanto de OpenAI como de Anthropic. Este corte es anterior: cualquier mención a que Anthropic no tenía login desde GUI o aceptaba API key describe sólo el estado histórico y ya no es el requisito vigente.
 
 ## Implementación
 

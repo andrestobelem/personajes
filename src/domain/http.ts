@@ -79,19 +79,19 @@ const PiOAuthSafeCodeSchema = z.enum([
 /** Safe local status only; neither OAuth material nor a live access check is exposed. */
 export const PiIntegrationStatusSchema = z.strictObject({
   kind: z.literal('pi-integration-status'),
-  provider: z.literal('openai-codex'),
+  provider: z.enum(['openai-codex', 'anthropic']),
   authState: z.enum(['missing', 'present', 'error']),
-  requiredProfile: z.strictObject({
-    provider: z.literal('openai-codex'),
-    model: z.literal('gpt-6.1-sol'),
-    thinking: z.literal('low'),
-  }),
+  requiredProfile: z.discriminatedUnion('provider', [
+    z.strictObject({ provider: z.literal('openai-codex'), model: z.literal('gpt-6.1-sol'), thinking: z.literal('low') }),
+    z.strictObject({ provider: z.literal('anthropic'), model: z.literal('claude-opus-5-5'), thinking: z.literal('medium') }),
+  ]),
   /** Model availability and account entitlement are deliberately not inferred from stored auth. */
   effectiveProfile: PiAccessEffectiveProfileSchema.nullable(),
   accessCheck: z.enum(['notRun', 'passed', 'failed', 'stale']),
   checkedAt: z.string().datetime({ offset: true }),
   safeCode: z.union([PiOAuthSafeCodeSchema, PiAccessJobSafeCodeSchema]).nullable(),
 }).superRefine((status, context) => {
+  if (status.provider !== status.requiredProfile.provider) context.addIssue({ code: 'custom', path: ['requiredProfile'], message: 'El perfil requerido pertenece a otro proveedor.' });
   if ((status.accessCheck === 'passed') !== (status.effectiveProfile !== null)) context.addIssue({ code: 'custom', path: ['effectiveProfile'], message: 'Sólo una comprobación vigente aprobada informa un perfil efectivo.' });
 });
 export type PiIntegrationStatus = z.infer<typeof PiIntegrationStatusSchema>;
@@ -108,7 +108,7 @@ export const PiAccessStatusMetadataSchema = z.strictObject({
 export const PiOAuthJobViewSchema = z.strictObject({
   kind: z.literal('pi-oauth-job'),
   jobId: z.string().uuid(),
-  provider: z.literal('openai-codex'),
+  provider: z.enum(['openai-codex', 'anthropic']),
   operation: z.enum(['login', 'logout']),
   state: z.enum(['queued', 'running', 'cancel-requested', 'succeeded', 'failed', 'canceled', 'interrupted']),
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -156,8 +156,16 @@ export const RunPreflightJobPageSchema = z.strictObject({
 });
 export type RunPreflightJobPage = z.infer<typeof RunPreflightJobPageSchema>;
 
-/** The only interactive value currently exposed is the public device-login user code. */
+export const PiOAuthProviderSchema = z.enum(['openai-codex', 'anthropic']);
+export type PiOAuthProvider = z.infer<typeof PiOAuthProviderSchema>;
+export const PiOAuthAuthorizationUrlSchema = z.string().url().max(8192).refine(value => {
+  const url = new URL(value);
+  return url.protocol === 'https:' && url.hostname === 'claude.ai' && url.port === '' && url.pathname === '/oauth/authorize' && url.username === '' && url.password === '' && url.hash === '';
+}, 'La autorización debe usar la página oficial de Claude.');
+export const PiOAuthInteractionResponseSchema = z.strictObject({ challengeId: z.string().uuid(), response: z.string().trim().min(1).max(8192) });
+/** Ephemeral, session-scoped authorization guidance; never journalled. */
 export const PiOAuthInteractionViewSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('authorization-code'), cursor: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), authorizationUrl: PiOAuthAuthorizationUrlSchema, challengeId: z.string().uuid(), expiresAt: z.string().datetime({ offset: true }) }),
   z.strictObject({ kind: z.literal('waiting'), cursor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }),
   z.strictObject({
     kind: z.literal('device-code'),

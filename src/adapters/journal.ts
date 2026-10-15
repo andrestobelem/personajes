@@ -531,7 +531,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1941,6 +1941,21 @@ export function openJournal(input: { path: string }) {
     database.exec('INSERT INTO schema_version VALUES(39);COMMIT');
     }catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
   }
+  if(!database.prepare('SELECT 1 FROM schema_version WHERE version=40').get()){
+    try{database.exec(`PRAGMA foreign_keys=OFF;BEGIN IMMEDIATE;
+      CREATE TABLE pi_oauth_jobs_v40(job_id TEXT PRIMARY KEY,provider TEXT NOT NULL CHECK(provider IN('openai-codex','anthropic')),kind TEXT NOT NULL CHECK(kind IN('login','logout')),
+        principal_id TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('queued','running','cancel-requested','succeeded','failed','canceled','interrupted')),
+        revision INTEGER NOT NULL CHECK(revision>=0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,safe_code TEXT,
+        owner_token TEXT,claim_token TEXT,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        CHECK((owner_token IS NULL)=(claim_token IS NULL)),CHECK(state NOT IN('running','cancel-requested') OR owner_token IS NOT NULL));
+      INSERT INTO pi_oauth_jobs_v40 SELECT * FROM pi_oauth_jobs;
+      DROP TABLE pi_oauth_jobs;ALTER TABLE pi_oauth_jobs_v40 RENAME TO pi_oauth_jobs;
+      CREATE UNIQUE INDEX pi_oauth_one_running ON pi_oauth_jobs((1)) WHERE state IN('running','cancel-requested');
+    `);
+    if(database.prepare('PRAGMA foreign_key_check').all().length!==0)throw new Error('Migración OAuth v40 produjo referencias inválidas');
+    database.exec('INSERT INTO schema_version VALUES(40);COMMIT;PRAGMA foreign_keys=ON;');
+    }catch(error){try{database.exec('ROLLBACK;PRAGMA foreign_keys=ON;');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
   let identityPromotionPorts:IdentityPromotionPorts|undefined;
 
   const pendingInitialActorCuts = new Set<string>();
@@ -2551,7 +2566,7 @@ export function openJournal(input: { path: string }) {
 
   function piOAuthJobRow(input:z.infer<typeof PiOAuthJobLookupSchema>){
     const value=database.prepare('SELECT * FROM pi_oauth_jobs WHERE job_id=?').get(input.jobId);if(value===undefined)return undefined;
-    const row=z.strictObject({job_id:JobIdSchema,provider:z.literal('openai-codex'),kind:z.enum(['login','logout']),principal_id:z.string().trim().min(1).max(200),
+    const row=z.strictObject({job_id:JobIdSchema,provider:PiOAuthJobViewSchema.shape.provider,kind:z.enum(['login','logout']),principal_id:z.string().trim().min(1).max(200),
       state:PiOAuthJobViewSchema.shape.state,revision:RevisionSchema,created_at:z.string(),updated_at:z.string(),safe_code:PiOAuthJobViewSchema.shape.safeCode,
       owner_token:z.string().uuid().nullable(),claim_token:z.string().uuid().nullable(),payload_json:z.string(),payload_hash:HashSchema}).parse(value);
     const job=PiOAuthJobViewSchema.parse(parseStoredJson(row.payload_json));
@@ -6670,10 +6685,10 @@ export function openJournal(input: { path: string }) {
      * and IDs never change. A running job leaves later intentions for the next pulse.
      */
     createPiOAuthJob(input:unknown){
-      const request=PiOAuthJobCreateSchema.parse(input);const operation={principalId:request.principalId,idempotencyKey:request.idempotencyKey,kind:request.kind,requestHash:hashJson(request).hash};
+      const request=PiOAuthJobCreateSchema.parse(input);const operation={principalId:request.principalId,idempotencyKey:request.idempotencyKey,kind:request.kind,requestHash:hashJson(request.provider===undefined||request.provider==='openai-codex'?{principalId:request.principalId,idempotencyKey:request.idempotencyKey,kind:request.kind}:request).hash};
       return transact(()=>{
         const replay=replayPiOAuthOperation(operation);if(replay!==undefined){const original=PiOAuthJobCreateResultSchema.parse(replay);return original.kind==='created'?PiOAuthJobCreateResultSchema.parse({kind:'existing',job:original.job}):original;}
-        const timestamp=new Date().toISOString();const job=PiOAuthJobViewSchema.parse({jobId:randomUUID(),provider:'openai-codex',kind:request.kind,state:'queued',revision:0,createdAt:timestamp,updatedAt:timestamp,safeCode:null});
+        const timestamp=new Date().toISOString();const job=PiOAuthJobViewSchema.parse({jobId:randomUUID(),provider:request.provider??'openai-codex',kind:request.kind,state:'queued',revision:0,createdAt:timestamp,updatedAt:timestamp,safeCode:null});
         const payload=hashJson(job);database.prepare('INSERT INTO pi_oauth_jobs VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL,?,?)')
           .run(job.jobId,job.provider,job.kind,request.principalId,job.state,job.revision,job.createdAt,job.updatedAt,job.safeCode,payload.json,payload.hash);
         database.prepare('INSERT INTO pi_oauth_job_history VALUES(?,?,?,?)').run(job.jobId,0,payload.json,payload.hash);
@@ -6697,7 +6712,7 @@ export function openJournal(input: { path: string }) {
         return PiOAuthJobClaimResultSchema.parse({kind:'busy'});
       }
       if(current.job.revision!==request.expectedRevision)return PiOAuthJobClaimResultSchema.parse({kind:'stale',job:current.job});
-      if(database.prepare(`SELECT 1 FROM pi_oauth_jobs WHERE provider='openai-codex' AND state IN('running','cancel-requested') LIMIT 1`).get()!==undefined)return PiOAuthJobClaimResultSchema.parse({kind:'busy'});
+      if(database.prepare(`SELECT 1 FROM pi_oauth_jobs WHERE state IN('running','cancel-requested') LIMIT 1`).get()!==undefined)return PiOAuthJobClaimResultSchema.parse({kind:'busy'});
       const lease={ownerToken:request.ownerToken,claimToken:request.claimToken};const job=writePiOAuthJob({current,state:'running',safeCode:null,lease});
       return PiOAuthJobClaimResultSchema.parse({kind:'claimed',job,lease});
     });},

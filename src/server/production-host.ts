@@ -124,6 +124,7 @@ try {
   oauthJobs = await createPiOAuthJobs({
     journal: host.journal, ownerToken: host.ownerToken,
     oauth: createPiOAuthPort({ modelRuntime: piRuntime.modelRuntime, signal: oauthController.signal, loginOptions: { agentName: 'Personajes' } }),
+    anthropicOAuth: createPiOAuthPort({ provider: 'anthropic', modelRuntime: piRuntime.modelRuntime, signal: oauthController.signal, loginOptions: { agentName: 'Personajes' } }),
     onDiagnostic: (diagnostic) => diagnosticSink({ kind: 'piOAuthDiagnostic', diagnostic }),
   });
   const authentication = createPiAuthFingerprint({ privateDataRoot: host.privateDataRoot });

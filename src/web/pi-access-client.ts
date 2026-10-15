@@ -1,17 +1,17 @@
 import { z } from 'zod';
-import { ApiProblemSchema, PiIntegrationStatusSchema, PiOAuthInteractionViewSchema, PiOAuthJobPageSchema, PiOAuthJobReceiptSchema, PiOAuthJobViewSchema, type PiOAuthJobView } from '../domain/http.ts';
+import { ApiProblemSchema, PiIntegrationStatusSchema, PiOAuthInteractionViewSchema, PiOAuthJobPageSchema, PiOAuthJobReceiptSchema, PiOAuthJobViewSchema, type PiOAuthProvider, type PiOAuthJobView, PiOAuthProviderSchema, PiOAuthInteractionResponseSchema } from '../domain/http.ts';
 import { bootstrapSession } from './client.ts';
 
 const KeySchema = z.string().uuid();
 export type PiJobDocument = { job: PiOAuthJobView; etag: string };
-export type PiOAuthIntent = { kind: 'login' | 'logout'; key: string } | { kind: 'cancel'; key: string; document: PiJobDocument };
+export type PiOAuthIntent = { kind: 'login' | 'logout'; key: string; provider?: PiOAuthProvider } | { kind: 'cancel'; key: string; document: PiJobDocument };
 export function piJobEtag(job: PiOAuthJobView) { return `"pi-oauth-job:${job.jobId}:r${job.revision}"`; }
 export function buildPiOAuthRequest(input: { intent: PiOAuthIntent; csrfToken: string }) {
   const key = KeySchema.parse(input.intent.key);
   const headers = { 'Content-Type': 'application/json', 'X-CSRF-Token': input.csrfToken, 'Idempotency-Key': key };
   switch (input.intent.kind) {
-    case 'login': return { path: '/api/v1/integrations/pi/oauth/login', init: { credentials: 'same-origin', method: 'POST', headers, body: '{}' } satisfies RequestInit };
-    case 'logout': return { path: '/api/v1/integrations/pi/oauth', init: { credentials: 'same-origin', method: 'DELETE', headers } satisfies RequestInit };
+    case 'login': return { path: '/api/v1/integrations/pi/oauth/login', init: { credentials: 'same-origin', method: 'POST', headers, body: input.intent.provider === undefined ? '{}' : JSON.stringify({ provider: PiOAuthProviderSchema.parse(input.intent.provider) }) } satisfies RequestInit };
+    case 'logout': return { path: `/api/v1/integrations/pi/oauth${input.intent.provider === undefined ? '' : `?provider=${PiOAuthProviderSchema.parse(input.intent.provider)}`}`, init: { credentials: 'same-origin', method: 'DELETE', headers } satisfies RequestInit };
     case 'cancel': {
       const job = PiOAuthJobViewSchema.parse(input.intent.document.job);
       if (input.intent.document.etag !== piJobEtag(job)) throw new Error('La revisión del trabajo de acceso no coincide.');
@@ -58,6 +58,7 @@ export async function executePiOAuthIntent(input: { intent: PiOAuthIntent; csrfT
   const receipt = await readResponse(response, PiOAuthJobReceiptSchema);
   if (input.intent.kind === 'cancel' && receipt.job.jobId !== input.intent.document.job.jobId) throw new Error('El recibo pertenece a otro trabajo.');
   if (input.intent.kind !== 'cancel' && receipt.job.operation !== input.intent.kind) throw new Error('El recibo pertenece a otra operación.');
+  if (input.intent.kind !== 'cancel' && receipt.job.provider !== (input.intent.provider ?? 'openai-codex')) throw new Error('El recibo pertenece a otro proveedor.');
   return document(receipt.job, response);
 }
 /** Read only local durable metadata; no provider call, device code, or mutation is made. */
@@ -87,9 +88,11 @@ export function createPiAccessClient() {
   // a method on their input object. Keep the native call in this closure.
   const request: typeof fetch = (url, init) => fetch(url, init);
   return Object.freeze({
-    async status(signal: AbortSignal) {
+    async status(signal: AbortSignal, provider: PiOAuthProvider = 'openai-codex') {
       await bootstrapSession();
-      return readResponse(await fetch('/api/v1/integrations/pi/status', { credentials: 'same-origin', signal }), PiIntegrationStatusSchema);
+      const result = await readResponse(await fetch(`/api/v1/integrations/pi/status?provider=${PiOAuthProviderSchema.parse(provider)}`, { credentials: 'same-origin', signal }), PiIntegrationStatusSchema);
+      if (result.provider !== provider) throw new Error('El estado pertenece a otro proveedor.');
+      return result;
     },
     async jobs(signal: AbortSignal) {
       await bootstrapSession();
@@ -104,6 +107,11 @@ export function createPiAccessClient() {
       const job = await readResponse(response, PiOAuthJobViewSchema);
       if (job.jobId !== jobId) throw new Error('El estado pertenece a otro trabajo.');
       return document(job, response);
+    },
+    async respondInteraction(input: { jobId: string; challengeId: string; response: string }, signal: AbortSignal) {
+      const session = await bootstrapSession();
+      const body = PiOAuthInteractionResponseSchema.parse({ challengeId: input.challengeId, response: input.response });
+      return readResponse(await fetch(`/api/v1/integrations/pi/oauth/jobs/${encodeURIComponent(KeySchema.parse(input.jobId))}/interaction`, { credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrfToken }, body: JSON.stringify(body), signal }), z.strictObject({ kind: z.literal('accepted') }));
     },
     async interaction(jobId: string, after: number, signal: AbortSignal) {
       const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).parse(after);

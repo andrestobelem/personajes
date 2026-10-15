@@ -9,7 +9,7 @@ const CredentialMetadataSchema = z.array(z.strictObject({
   providerId: z.string().min(1), type: z.enum(['oauth', 'api_key']),
 }));
 const StatusSchema = z.strictObject({
-  provider: z.literal('openai-codex'),
+  provider: z.enum(['openai-codex','anthropic']),
   configuration: z.enum(['oauth-configured', 'oauth-required']),
   accountAccess: z.literal('not-verified'),
 });
@@ -18,7 +18,8 @@ type Failure = { kind: 'failed'; code: 'OAUTH_BUSY' | 'OAUTH_CANCELLED' | 'OAUTH
 const activeByRuntime = new WeakSet<AuthRuntime>();
 
 /** Administrative host capability. It never returns credentials or verifies model access. */
-export function createPiOAuthPort(input: { modelRuntime: AuthRuntime; loginOptions?: LoginOptions; signal?: AbortSignal }) {
+export function createPiOAuthPort(input: { modelRuntime: AuthRuntime; loginOptions?: LoginOptions; signal?: AbortSignal; provider?:'openai-codex'|'anthropic' }) {
+  const provider=input.provider??'openai-codex';
   function combinedSignal(signal?: AbortSignal): AbortSignal | undefined {
     if (input.signal === undefined) return signal;
     return signal === undefined ? input.signal : AbortSignal.any([input.signal, signal]);
@@ -29,8 +30,8 @@ export function createPiOAuthPort(input: { modelRuntime: AuthRuntime; loginOptio
       // SDK metadata listing is side-effect free and does not refresh tokens or run key commands.
       const credentials = CredentialMetadataSchema.parse(await input.modelRuntime.listCredentials());
       return { kind: 'status', value: StatusSchema.parse({
-        provider: 'openai-codex',
-        configuration: credentials.some((item) => item.providerId === 'openai-codex' && item.type === 'oauth')
+        provider,
+        configuration: credentials.some((item) => item.providerId === provider && item.type === 'oauth')
           ? 'oauth-configured' : 'oauth-required',
         accountAccess: 'not-verified',
       }) };
@@ -52,7 +53,7 @@ export function createPiOAuthPort(input: { modelRuntime: AuthRuntime; loginOptio
       activeByRuntime.add(input.modelRuntime);
       try {
         const callbacks = signal === undefined ? interaction : { ...interaction, signal };
-        const credential = await input.modelRuntime.login('openai-codex', 'oauth', callbacks, input.loginOptions);
+        const credential = await input.modelRuntime.login(provider, 'oauth', callbacks, input.loginOptions);
         if (credential.type !== 'oauth') return { kind: 'failed', code: signal?.aborted ? 'OAUTH_CANCELLED' : 'OAUTH_LOGIN_FAILED' };
         // Reconcile a completed SDK operation from persisted metadata even if
         // cancellation arrived after the credential was committed.
@@ -71,7 +72,7 @@ export function createPiOAuthPort(input: { modelRuntime: AuthRuntime; loginOptio
       if (signal?.aborted) return { kind: 'failed', code: 'OAUTH_CANCELLED' };
       activeByRuntime.add(input.modelRuntime);
       try {
-        await input.modelRuntime.logout('openai-codex', signal === undefined ? options : { ...options, signal });
+        await input.modelRuntime.logout(provider, signal === undefined ? options : { ...options, signal });
         const current = await readStoredStatus();
         if (current.kind === 'failed') return current;
         if (current.value.configuration !== 'oauth-required') return { kind: 'failed', code: 'OAUTH_LOGOUT_FAILED' };

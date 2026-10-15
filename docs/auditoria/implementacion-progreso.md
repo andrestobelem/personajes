@@ -2,6 +2,8 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+Actualización de autenticación: las menciones históricas de este registro a que faltaba conectar Anthropic desde la GUI quedaron superadas por el [corte de OAuth dual](oauth-dual.md), que implementa login OAuth para OpenAI Codex y Anthropic. El login con cuentas reales y su acceso live siguen sin acreditarse.
+
 ## Corte 42: preparación sonora, configuración efectiva y admisión
 
 El editor inicial reemplaza la sección de audio sin controles; el panel de voces ahora edita modo, slots y cuotas, y ofrece conciliación explícita cuando cambia la preparación base. Referencias opacas se conservan sin presumir vigencia y guardar no genera audio. El navegador verificó Ready r1, configuración sonora r1, edición de base r2, conciliación sonora r2 y reapertura/apagado en r3 conservando cuota 2.

@@ -19,7 +19,7 @@ import {
   RunConfigurationDraftMutationReceiptSchema, RunConfigurationValidationReceiptSchema,
   RunConfigurationDraftValidationViewSchema, SessionCreatedSchema, SessionModeSchema,
   SessionViewSchema, TextDocumentResponseSchema, HumanInterventionAcceptedSchema,
-  PiIntegrationStatusSchema, PiOAuthJobViewSchema, PiOAuthJobPageSchema, PiOAuthJobReceiptSchema, PiOAuthInteractionViewSchema,
+  PiOAuthProviderSchema, PiOAuthInteractionResponseSchema, PiIntegrationStatusSchema, PiOAuthJobViewSchema, PiOAuthJobPageSchema, PiOAuthJobReceiptSchema, PiOAuthInteractionViewSchema,
   PiAccessJobViewSchema, PiAccessJobPageSchema, PiAccessJobReceiptSchema, PiAccessCheckRequestSchema, PiAccessStatusMetadataSchema,
   RunPreflightRequestSchema, RunPreflightJobPageSchema, RunPreflightJobDocumentSchema, RunPreflightJobReceiptSchema,
   RunViewSchema, RunControlApplicationResultSchema, RunControlReceiptSchema,
@@ -27,7 +27,7 @@ import {
 } from '../domain/http.ts';
 import type { SelectableInferenceProfile } from '../domain/inference-profile.ts';
 import { RunLifecycleControlRequestSchema, type RunLifecycleControlRequest } from '../domain/run-lifecycle.ts';
-import { DEFAULT_INFERENCE_PROFILE } from '../domain/inference-profile.ts';
+import { DEFAULT_INFERENCE_PROFILE, CLAUDE_INFERENCE_PROFILE } from '../domain/inference-profile.ts';
 import { RunPreflightJobStartResultSchema, RunPreflightJobMutationResultSchema } from '../domain/run-preflight-jobs.ts';
 import { HumanInterventionRequestSchema, HumanInteractionContextSchema } from '../domain/interaction.ts';
 import {
@@ -171,7 +171,8 @@ const IdempotencyKeySchema = z.string().uuid();
 const SlugSchema = z.string().min(1).max(100).regex(/^[a-z0-9-]+$/);
 const RunConfigurationDraftRequestSchema = z.strictObject({ configuration: RunConfigurationDraftSchema });
 const ValidateRunConfigurationDraftRequestSchema = z.strictObject({});
-const PiOAuthLoginRequestSchema = z.strictObject({});
+const PiOAuthLoginRequestSchema = z.strictObject({ provider: PiOAuthProviderSchema.optional() });
+const PiOAuthProviderQuerySchema = z.strictObject({ provider: PiOAuthProviderSchema.optional() });
 const PiOAuthInteractionQuerySchema = z.strictObject({ after: z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number)
   .pipe(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)).optional() });
 const PiOAuthJobStartResultSchema = z.discriminatedUnion('kind', [
@@ -204,7 +205,7 @@ const RunPreflightJobReadResultSchema = z.discriminatedUnion('kind', [
 ]);
 const PiOAuthPortStatusResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('status'), value: z.strictObject({
-    provider: z.literal('openai-codex'),
+    provider: PiOAuthProviderSchema,
     configuration: z.enum(['oauth-configured', 'oauth-required']),
     accountAccess: z.literal('not-verified'),
   }) }),
@@ -291,12 +292,13 @@ export type RunConfigurationDraftApplicationPort = {
 
 /** Administrative OAuth flow. Interaction delivery is ephemeral and session-scoped. */
 export type PiOAuthJobsApplicationPort = {
-  status(): unknown | Promise<unknown>;
-  startLogin(input: { idempotencyKey: string; sessionScope: string }): unknown | Promise<unknown>;
-  startLogout(input: { idempotencyKey: string; sessionScope: string }): unknown | Promise<unknown>;
+  status(input?: { provider?: z.infer<typeof PiOAuthProviderSchema> }): unknown | Promise<unknown>;
+  startLogin(input: { idempotencyKey: string; sessionScope: string; provider?: z.infer<typeof PiOAuthProviderSchema> }): unknown | Promise<unknown>;
+  startLogout(input: { idempotencyKey: string; sessionScope: string; provider?: z.infer<typeof PiOAuthProviderSchema> }): unknown | Promise<unknown>;
   readJob(input: { jobId: string }): unknown | Promise<unknown>;
   listJobs(input: { offset: number; limit: number }): unknown | Promise<unknown>;
   cancelJob(input: { jobId: string; idempotencyKey: string; expectedRevision: number }): unknown | Promise<unknown>;
+  respondInteraction?(input: { jobId: string; challengeId: string; response: string; sessionScope: string }): unknown | Promise<unknown>;
   readInteraction(input: { jobId: string; after: number; sessionScope: string }): unknown | Promise<unknown>;
 };
 
@@ -1894,16 +1896,19 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         if (options.piOAuthJobs === undefined) {
           fail({ status: 503, kind: 'dependency', code: 'PI_OAUTH_UNAVAILABLE', message: 'La integración Pi no está disponible.', safeCode: 'PI_OAUTH_UNAVAILABLE', retryable: true });
         }
-        const result = PiOAuthPortStatusResultSchema.parse(await options.piOAuthJobs.status());
+        const { provider = 'openai-codex' } = parseQuery(url, PiOAuthProviderQuerySchema);
+        const profile = provider === 'anthropic' ? CLAUDE_INFERENCE_PROFILE : DEFAULT_INFERENCE_PROFILE;
+        const result = PiOAuthPortStatusResultSchema.parse(await options.piOAuthJobs.status({ provider }));
+        if (result.kind === 'status' && result.value.provider !== provider) throw new Error('El estado OAuth pertenece a otro proveedor.');
         const authState = result.kind === 'failed' ? 'error'
           : result.value.configuration === 'oauth-configured' ? 'present' : 'missing';
         const access = options.piAccessJobs?.readPiAccessStatus === undefined
           ? PiAccessStatusMetadataSchema.parse({ accessCheck: 'notRun', effectiveProfile: null, safeCode: null })
-          : PiAccessStatusMetadataSchema.parse(await options.piAccessJobs.readPiAccessStatus({ profile: DEFAULT_INFERENCE_PROFILE }));
+          : PiAccessStatusMetadataSchema.parse(await options.piAccessJobs.readPiAccessStatus({ profile }));
         const safeCode = result.kind === 'failed' ? result.code : access.safeCode;
         const status = parseSchema(PiIntegrationStatusSchema, {
-          kind: 'pi-integration-status', provider: 'openai-codex', authState,
-          requiredProfile: { provider: 'openai-codex', model: 'gpt-6.1-sol', thinking: 'low' },
+          kind: 'pi-integration-status', provider, authState,
+          requiredProfile: { provider: profile.provider, model: profile.model, thinking: profile.reasoningEffort },
           effectiveProfile: access.effectiveProfile, accessCheck: access.accessCheck, checkedAt: new Date(now()).toISOString(), safeCode,
         });
         sendJson(res, 200, status);
@@ -1916,10 +1921,10 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           fail({ status: 503, kind: 'dependency', code: 'PI_OAUTH_UNAVAILABLE', message: 'La integración Pi no está disponible.', safeCode: 'PI_OAUTH_UNAVAILABLE', retryable: true });
         }
         requireCsrf(req, session);
-        parseSchema(PiOAuthLoginRequestSchema, await readJsonBody(req));
+        const { provider } = parseSchema(PiOAuthLoginRequestSchema, await readJsonBody(req));
         const idempotencyKey = readIdempotencyKey(req);
         const result = PiOAuthJobStartResultSchema.parse(await options.piOAuthJobs.startLogin({
-          idempotencyKey, sessionScope: oauthInteractionSessionScope(session),
+          idempotencyKey, sessionScope: oauthInteractionSessionScope(session), ...(provider === undefined ? {} : { provider }),
         }));
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra operación OAuth.' });
@@ -1940,8 +1945,9 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         }
         requireCsrf(req, session);
         const idempotencyKey = readIdempotencyKey(req);
+        const { provider } = parseQuery(url, PiOAuthProviderQuerySchema);
         const result = PiOAuthJobStartResultSchema.parse(await options.piOAuthJobs.startLogout({
-          idempotencyKey, sessionScope: oauthInteractionSessionScope(session),
+          idempotencyKey, sessionScope: oauthInteractionSessionScope(session), ...(provider === undefined ? {} : { provider }),
         }));
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra operación OAuth.' });
@@ -2005,6 +2011,20 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           Location: `/api/v1/integrations/pi/oauth/jobs/${receipt.job.jobId}`,
           ETag: piOAuthJobEtag(receipt.job.jobId, receipt.job.revision), 'Retry-After': '1',
         });
+        return;
+      }
+
+      if (route.length === 6 && route[0] === 'integrations' && route[1] === 'pi' && route[2] === 'oauth'
+        && route[3] === 'jobs' && route[5] === 'interaction' && method === 'POST') {
+        if (options.piOAuthJobs?.respondInteraction === undefined) fail({ status: 503, kind: 'dependency', code: 'PI_OAUTH_UNAVAILABLE', message: 'La integración Pi no está disponible.', safeCode: 'PI_OAUTH_UNAVAILABLE', retryable: true });
+        requireCsrf(req, session);
+        const jobId = parseSchema(JobIdSchema, route[4]);
+        const body = parseSchema(PiOAuthInteractionResponseSchema, await readJsonBody(req));
+        const result = z.strictObject({ kind: z.enum(['accepted', 'missing', 'forbidden', 'stale']) }).parse(await options.piOAuthJobs.respondInteraction({ ...body, jobId, sessionScope: oauthInteractionSessionScope(session) }));
+        if (result.kind === 'missing') fail({ status: 404, kind: 'notFound', code: 'NOT_FOUND', message: 'Job OAuth no encontrado.' });
+        if (result.kind === 'forbidden') fail({ status: 403, kind: 'forbidden', code: 'OAUTH_INTERACTION_SESSION_MISMATCH', message: 'El canal OAuth pertenece a otra sesión local.' });
+        if (result.kind === 'stale') fail({ status: 409, kind: 'conflict', code: 'OAUTH_INTERACTION_STALE', message: 'La autorización cambió o venció.' });
+        sendJson(res, 200, { kind: 'accepted' });
         return;
       }
 

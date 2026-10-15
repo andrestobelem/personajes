@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import { JobIdSchema, RevisionSchema } from './values.ts';
 
+export const PiOAuthProviderSchema = z.enum(['openai-codex','anthropic']);
 export const PiOAuthJobStateSchema = z.enum(['queued','running','cancel-requested','succeeded','failed','canceled','interrupted']);
 export const PiOAuthJobSafeCodeSchema = z.enum(['oauth-error','oauth-unavailable','oauth-callback-failed','logout-error','user-canceled','host-interrupted']);
-export const PiOAuthJobViewSchema = z.strictObject({jobId:JobIdSchema,provider:z.literal('openai-codex'),kind:z.enum(['login','logout']),state:PiOAuthJobStateSchema,revision:RevisionSchema,
+export const PiOAuthJobViewSchema = z.strictObject({jobId:JobIdSchema,provider:PiOAuthProviderSchema,kind:z.enum(['login','logout']),state:PiOAuthJobStateSchema,revision:RevisionSchema,
   createdAt:z.string().datetime({offset:true}),updatedAt:z.string().datetime({offset:true}),safeCode:PiOAuthJobSafeCodeSchema.nullable()}).superRefine((job,context)=>{
   const expected=job.state==='canceled'?'user-canceled':job.state==='interrupted'?'host-interrupted':null;
   if((job.state==='failed'&&(job.safeCode===null||job.safeCode==='user-canceled'||job.safeCode==='host-interrupted'))
     ||(job.state!=='failed'&&job.safeCode!==expected))context.addIssue({code:'custom',path:['safeCode'],message:'Diagnóstico OAuth no coincide con estado'});
 });
-export const PiOAuthJobCreateSchema = z.strictObject({principalId:z.string().trim().min(1).max(200),idempotencyKey:z.string().uuid(),kind:z.enum(['login','logout'])});
+export const PiOAuthJobCreateSchema = z.strictObject({principalId:z.string().trim().min(1).max(200),idempotencyKey:z.string().uuid(),kind:z.enum(['login','logout']),provider:PiOAuthProviderSchema.optional()});
 export const PiOAuthJobCreateResultSchema = z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('created'),job:PiOAuthJobViewSchema}),z.strictObject({kind:z.literal('existing'),job:PiOAuthJobViewSchema}),z.strictObject({kind:z.literal('idempotencyConflict')}),
 ]);

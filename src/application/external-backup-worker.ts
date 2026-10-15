@@ -75,13 +75,21 @@ function approvedAppendOnlyTrigger(object: {type:string;name:string;tbl_name:str
     && (object.name === `${object.tbl_name}_no_update` || object.name === `${object.tbl_name}_no_delete`);
 }
 
+// Exact historical host DDL only; never execute uploaded schema statements.
+const legacyOAuthTableSQL = "CREATE TABLE pi_oauth_jobs(job_id TEXT PRIMARY KEY,provider TEXT NOT NULL CHECK(provider='openai-codex'),kind TEXT NOT NULL CHECK(kind IN('login','logout')),\n        principal_id TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('queued','running','cancel-requested','succeeded','failed','canceled','interrupted')),\n        revision INTEGER NOT NULL CHECK(revision>=0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,safe_code TEXT,\n        owner_token TEXT,claim_token TEXT,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,\n        CHECK((owner_token IS NULL)=(claim_token IS NULL)),CHECK(state NOT IN('running','cancel-requested') OR owner_token IS NOT NULL))";
+const legacyOAuthIndexSQL = "CREATE UNIQUE INDEX pi_oauth_one_running ON pi_oauth_jobs(provider) WHERE state IN('running','cancel-requested')";
+function matchesLegacyOAuthSchema(object:z.infer<typeof ApprovedJournalSchemaSchema>[number],expected:z.infer<typeof ApprovedJournalSchemaSchema>[number]) {
+ if(request.manifest.journalVersion!==39)return false;
+ const sql=object.type==='table'&&object.name==='pi_oauth_jobs'?legacyOAuthTableSQL:object.type==='index'&&object.name==='pi_oauth_one_running'?legacyOAuthIndexSQL:undefined;
+ return sql!==undefined&&object.sql===sql&&object.type===expected.type&&object.name===expected.name&&object.tbl_name===expected.tbl_name;
+}
 function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
   const source = readonly(sourcePath); let clean: DatabaseSync | undefined;
   try {
     const actual = schema(source.db); const approved = new Map(request.approvedJournalSchema.map(object => [`${object.type}:${object.name}`, object]));
     for (const object of actual) {
       const expected = approved.get(`${object.type}:${object.name}`);
-      if (expected === undefined || JSON.stringify(object) !== JSON.stringify(expected)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
+      if (expected === undefined || (JSON.stringify(object) !== JSON.stringify(expected)&&!matchesLegacyOAuthSchema(object,expected))) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
       if (object.type === 'view' || (object.type === 'trigger' && !approvedAppendOnlyTrigger(object)) || object.sql?.startsWith('CREATE VIRTUAL TABLE')) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     // Only these append-only triggers may survive the exact trusted DDL check
@@ -96,8 +104,8 @@ function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
       if (!names.has(approved.name) && !/^(?:voice_|exchange_)/.test(approved.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     source.allow([...names]);
-    const version = z.strictObject({ version: z.literal(39) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());
-    if (!version.success || request.manifest.journalVersion !== 39) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
+    const version = z.strictObject({ version: z.union([z.literal(39),z.literal(40)]) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());
+    if (!version.success || request.manifest.journalVersion !== version.data.version) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
     for (const name of names) {
       const columns = z.array(z.object({ hidden: z.number() })).parse(source.db.prepare(`PRAGMA table_xinfo(${quote(name)})`).all());
       if (columns.some(column => column.hidden !== 0)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
@@ -155,7 +163,7 @@ function validate() {
     }
   }
   inventory(request.bundleRoot);
-  if (request.manifest.journalVersion !== 39) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
+  if (![39,40].includes(request.manifest.journalVersion)) reject('EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED');
   const copies = new Map<string, string>(); let index = 0;
   for (const file of request.manifest.files) {
     const sqlite = file.path.endsWith('.sqlite'); const target = sqlite ? join(temporary, `input-${index++}.sqlite`) : undefined;
@@ -194,7 +202,7 @@ function validate() {
       try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
     }
   } finally { hostJournal.close(); }
-  const result = ExternalBackupValidationResultSchema.parse({ journalVersion: 39, sources: outputs });
+  const result = ExternalBackupValidationResultSchema.parse({ journalVersion: request.manifest.journalVersion, sources: outputs });
   const bytes = Buffer.from(JSON.stringify(result)); if (bytes.length > 64 * 1024 * 1024) reject('EXTERNAL_BACKUP_RESULT_LIMIT');
   writeFileSync(join(dirname(requestPath), 'result.json'), bytes, { flag: 'wx', mode: 0o600 });
   process.stdout.write(JSON.stringify({ kind: 'validated', resultHash: digest(bytes) }));
