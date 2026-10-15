@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ExperienceSchema } from './experience.ts';
 import { ForkSourceSchema } from './fork-origin.ts';
+import { DossierSourceSchema, addPreparationDossierSourceIssues } from './dossier-source.ts';
 import {
   CharacterIdSchema, ExperienceIdSchema, FictionalInstantSchema, HashSchema,
   JobIdSchema, OperationIdSchema, RevisionSchema, RunIdSchema, SourceRefIdSchema, WorldSeqSchema,
@@ -286,6 +287,7 @@ export const PreparationDraftSchema = z.strictObject({
   characterId: CharacterIdSchema,
   dossierRevision: RevisionSchema,
   dossierHash: HashSchema,
+  dossierSource: DossierSourceSchema.optional(),
   continuity: ContinuityContextSchema,
   identityVersion: RevisionSchema,
   identity: PreparationSectionDraftSchema(CuratedIdentityValueSchema),
@@ -297,7 +299,7 @@ export const PreparationDraftSchema = z.strictObject({
   inventory: PreparationSectionDraftSchema(CuratedInventoryValueSchema),
   initialExperience: PreparationSectionDraftSchema(CuratedInitialExperienceValueSchema),
   unknownPolicy: PreparationSectionDraftSchema(CuratedUnknownPolicyValueSchema),
-});
+}).superRefine(addPreparationDossierSourceIssues);
 export type PreparationDraft = z.infer<typeof PreparationDraftSchema>;
 
 export const PreparedCharacterForkOriginSchema = z.strictObject({
@@ -315,6 +317,7 @@ const PreparedCharacterObjectSchema = z.strictObject({
   characterId: CharacterIdSchema,
   dossierRevision: RevisionSchema,
   dossierHash: HashSchema,
+  dossierSource: DossierSourceSchema.optional(),
   continuity: ContinuityContextSchema,
   identityVersion: RevisionSchema,
   identity: CuratedIdentityValueSchema,
@@ -362,6 +365,7 @@ function applicabilityMatches(continuity: ContinuityContext, applicability: Ante
 }
 
 function addPreparedCharacterIssues(character: PreparedCharacterObject, context: z.RefinementCtx): void {
+  addPreparationDossierSourceIssues(character, context);
   const expected = {
     dossierRevision: character.dossierRevision,
     dossierHash: character.dossierHash,

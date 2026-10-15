@@ -154,3 +154,7 @@ La transformación pura valida propuesta y consentimiento por hashes y prepara c
 ## Promoción administrativa de identidad — corte 51
 
 El journal v39 implementa promoción de selfReference/selfConcept/values/dispositions/contradictions a futuro en la misma corrida. Requiere propuesta Configurador aceptada, evidencia propia del corte exacto, consentimiento host y frontera sin trabajo pendiente; cambia identityVersion/prepared/configuración y commit/revisión, con secuencia/reloj/mente/experiencias conservados. Epoch/bindings append-only vinculan sesiones y trabajos; siguiente turno usa nueva sesión con memoria de la misma corrida. No concede capacidades ni convierte subjetividad en canon. [Construcción y verificación pendiente](../auditoria/promocion-identidad.md).
+
+## Fuente documental exacta — fundamento del corte 52
+
+La referencia de fuente discrimina catalog-original/saved-adaptation y liga personaje, revisión, contentHash y fullArchiveHash; adaptación añade importId/adaptationId. La fuente resuelta conserva frozenDossier e importedArchiveHash cuando corresponde. El schema opcional de draft/prepared valida consistencia estructural; el hash completo y linaje requieren verificador host. Mismo Markdown no prueba misma metadata. Falta integrar el resolver como autoridad de guardado/selección y gates productivos; no se atribuye esa garantía al schema solo. [Estado y límites](../auditoria/fuentes-de-preparacion.md).

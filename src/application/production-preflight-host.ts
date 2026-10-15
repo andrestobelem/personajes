@@ -9,6 +9,7 @@ import { ICM_VERSION } from '../adapters/icm.ts';
 import { listCharacters, type LoadedCatalog } from '../adapters/catalog.ts';
 import type { openJournal } from '../adapters/journal.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
+import { readPreparedDossierSource } from './dossier-source-repository.ts';
 import { DEFAULT_INFERENCE_PROFILE, resolveReadyInferenceProfile, CLAUDE_INFERENCE_PROFILE, SelectableInferenceProfileSchema, type InferenceProvider } from '../domain/inference-profile.ts';
 import { fingerprintInferenceProfile } from './pi-access-check.ts';
 import { freezeExperience } from './experience-envelope.ts';
@@ -64,6 +65,7 @@ export function createProductionPreflightHost(input: { journal: Journal; catalog
         const configuration = ready(runId);
         const actors = configuration.roster.preparedCharacters.filter((actor) => characterIds.includes(actor.characterId));
         if (actors.length !== characterIds.length) return { kind: 'unavailable', code: 'prepared-context-missing' };
+        for (const actor of actors) readPreparedDossierSource(actor);
         return { kind: 'loaded', runId, actors };
       } catch { return { kind: 'unavailable', code: 'prepared-context-unavailable' }; }
     },

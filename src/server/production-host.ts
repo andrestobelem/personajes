@@ -107,6 +107,7 @@ try {
   voices=createVoiceRuntime({host,...(input.privateAuthRoot===undefined?{}:{privateAuthRoot:input.privateAuthRoot}),onDiagnostic:diagnostic=>diagnosticSink(diagnostic)});
   const configuredExchange=await createExchangeRuntime({host,catalog});
   exchange=configuredExchange;
+  host.journal.setPreparationSourceAdmission(configuredExchange.preparationSourceAdmission);
   const configuredTransfers=openBackupTransferService({privateDataRoot:host.privateDataRoot,ownerToken:host.ownerToken,
     ...(input.directoryOperation===undefined?{}:{directoryOperation:input.directoryOperation}),
     readLocalBackup:id=>configuredExchange.backups.verify(id),

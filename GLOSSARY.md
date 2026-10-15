@@ -158,3 +158,6 @@ _Evitar_: verificar integridad como sinónimo de autenticar al autor o admitir c
 
 **Promoción de identidad**: Consolidación explícita de rasgos de un personaje a partir de su experiencia, que orienta su interpretación futura conservando las versiones anteriores, la memoria vivida y la atribución subjetiva de sus creencias.
 _Evitar_: promoción como cambio retroactivo de acontecimientos o confirmación de canon.
+
+**Fuente de preparación**: Versión concreta de un expediente, original investigado o adaptación declarada, elegida para curar el contexto de un personaje en una representación. Elegirla conserva su procedencia y no convierte todo su contenido en conocimiento del personaje.
+_Evitar_: última versión disponible como sustituto automático de la fuente elegida.

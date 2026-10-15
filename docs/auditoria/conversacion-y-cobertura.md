@@ -164,3 +164,7 @@ El compilador del Configurador ahora enlaza expediente/preparación/configuraci�
 Faltan job/dispatcher Pi durable del Configurador, epochs de sesión, consentimiento gráfico y aplicación transaccional en frontera coherente, además de P22 live. Esta base no se presenta como promoción ejecutada. La aceptación integral y los ocho pasos del objetivo continúan pendientes.
 
 Verificación final C50: TypeScript correcto, **1.042 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.043 totales), con ICM real; build correcto (461 módulos). Revisión independiente de fundamentos: 27/27 focales sin bloqueantes restantes. No se ejecutó una promoción ni inferencia del Configurador.
+
+## Fuentes de preparación — corte 52
+
+El pedido de conservar fichas completas y procedencia avanza con biblioteca privada de adaptaciones, snapshot exacto completo, admisión transaccional al guardado y consumo de fuente congelada en Configurador/preflight. La curación no entrega investigación sin admitir al actor. Faltan selector visual, edición integral y aceptación del recorrido completo; ausencia legacy conserva compatibilidad. [Evidencia y límites](fuentes-de-preparacion.md).

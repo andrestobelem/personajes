@@ -118,3 +118,16 @@ La raíz preparó la transformación pura de identidad y sus pruebas, integró c
 - `restore_custodian`: actualización de especificaciones, ADR y auditoría sin declarar aceptación integral.
 
 Cierre verificado por el integrador: 1.125 pruebas aprobadas, cero fallos, una omitida exclusiva de Linux; build y QA gráfico con reinicio correctos. No se ejecuta inferencia externa para estas pruebas controladas.
+
+## Corte 52 — fuentes documentales de preparación
+
+- `restore_interviewer` y `restore_custodian`: tres rondas de entrevista, distinción de hashes, portabilidad y decisiones documentadas.
+- `actor_cut_inspector`: biblioteca sellada de adaptaciones, paginación y linaje.
+- `actor_cut_journal`: contratos de fuente congelada y exclusión del prompt.
+- `fork_http`: rutas readonly autenticadas y pruebas HTTP.
+- `actor_cut_integrity_review`: revisión independiente de fundamentos.
+- `source_admission_audit`: auditoría del guardado y admisión síncrona dentro de transacción, con pruebas SQLite/exchange reales y replay/CAS.
+- `source_curation_pipeline`: conservación en curación, lectura exacta del Configurador y gate de integridad preflight con SDK controlado.
+- `source_foundation_review`: revisión independiente de las integraciones y límites de compatibilidad.
+
+La raíz construyó el resolver, integró documentación y corrigió textos obsoletos de C51. No se declara selector gráfico, inferencia externa ni aceptación integral.

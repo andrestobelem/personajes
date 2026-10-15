@@ -87,3 +87,13 @@ Implementados Configurador Pi independiente con propuesta durable y cuotas, revi
 Verificación global: **1.125 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.126 totales), TypeScript y build correctos. La revisión independiente aprobó 43 pruebas focales. El roundtrip con SDK e ICM reales acredita próxima sesión, conservación histórica e invalidación de preflight; los resultados del proveedor son controlados, sin inferencia externa. La comprobación gráfica solicitó una propuesta, revisó evidencia propia y aplicó v1→v2 sin avanzar secuencia ni reloj. Tras reiniciar el host y recargar, el historial y recibo siguieron disponibles sin nueva inferencia.
 
 Persisten P22 live, export portable público y aceptación integral de los 77 requisitos. Los ocho pasos del objetivo permanecen activos. [Evidencia y límites](promocion-identidad.md).
+
+## Corte 52 — fuentes documentales exactas de preparación
+
+Construidas biblioteca de adaptaciones por operador con paginación estable y lectura sellada, referencia exacta por hash del archivo completo y snapshot documental autocontenido. Se distingue el archivo recibido de la adaptación materializada; metadatos distintos con igual Markdown ya no se consideran la misma fuente. La curación conserva el snapshot, pero el prompt del actor sigue recibiendo sólo el contexto admitido.
+
+Create/update admiten fuentes nuevas o cambiadas dentro de la transacción después de replay y CAS, contra catálogo o adaptación del operador. Las fuentes ya admitidas e idénticas permanecen autocontenidas; no se resuelven identificadores de bibliotecas extranjeras. Configurador usa la fuente congelada y preflight verifica su integridad. Ausencia legacy conserva compatibilidad; no se declara migración de toda curación nueva ni selector gráfico operativo.
+
+Faltan selector visual, edición integral del expediente, verificación de portabilidad de estas fuentes en fork/backup y aceptación integral. El objetivo completo y los 77 requisitos permanecen pendientes de aceptación. [Evidencia, contratos y límites](fuentes-de-preparacion.md).
+
+Verificación C52: TypeScript y build aprobados; **1.146 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.147 totales), con ICM real. La revisión independiente comprobó 40 pruebas distintas de fuentes, admisión, Configurador y preflight sin bloqueantes. No se ejecutó inferencia externa ni QA gráfico del selector, todavía pendiente.

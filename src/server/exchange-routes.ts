@@ -5,7 +5,8 @@ import { BackupSourcesSchema } from '../domain/backup-http.ts';
 import { RestorePreviewSchema,RestoreSelectionSchema } from '../domain/backup.ts';
 import { ForkJobViewSchema,forkJobEtag } from '../domain/fork-http.ts';
 import { HostRecoveryJobSchema,hostRecoveryEtag } from '../domain/host-recovery.ts';
-import { HashSchema } from '../domain/values.ts';
+import { CharacterIdSchema,HashSchema } from '../domain/values.ts';
+import {DossierAdaptationReadSchema,DossierAdaptationPageSchema} from '../domain/dossier-exchange.ts';
 import { exchangeIntegrity } from '../adapters/exchange-integrity.ts';
 import type { openBackupService } from '../application/backup-service.ts';
 import type { openDossierExchange } from '../application/dossier-exchange.ts';
@@ -48,6 +49,22 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
  const backupEtag=(id:string,revision:number)=>`"backup:${id}:r${revision}"`;
  async function dispatch(request:OperatorRequest){
   const [resource,id,action]=request.path;
+  if(resource==='dossier-adaptations'&&request.kind==='read'){
+   const entries=new Map<string,string>();
+   for(const [key,value] of request.query){if(entries.has(key)||['__proto__','constructor','prototype'].includes(key))throw new Error('ADAPTATION_QUERY_INVALID');entries.set(key,value);}
+   const query=Object.fromEntries(entries);
+   if(request.path.length===1){
+    const selection=z.strictObject({characterId:CharacterIdSchema,limit:z.string().regex(/^[1-9][0-9]{0,2}$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional(),cursor:z.string().min(1).max(4000).regex(/^[A-Za-z0-9_-]+$/).optional()}).parse(query);
+    const page=DossierAdaptationPageSchema.parse(input.dossiers.listAdaptations({principalId:request.principalId,characterId:selection.characterId,limit:selection.limit??25,...(selection.cursor===undefined?{}:{cursor:selection.cursor})}));
+    if(page.adaptations.some(adaptation=>adaptation.characterId!==selection.characterId))throw new Error('ADAPTATION_SCOPE_INVALID');
+    return operatorJson(page);
+   }
+   if(request.path.length===2){
+    z.strictObject({}).parse(query);const adaptationId=z.uuid().parse(id);
+    const adaptation=DossierAdaptationReadSchema.parse(input.dossiers.readAdaptation({principalId:request.principalId,adaptationId}));if(adaptation.adaptationId!==adaptationId)throw new Error('ADAPTATION_SCOPE_INVALID');
+    return operatorJson(adaptation,200,{ETag:`"dossier-adaptation:${adaptation.adaptationId}:${adaptation.archiveHash}"`});
+   }
+  }
   if(resource==='imports'){
    if(request.path.length===1&&request.kind==='write'&&request.method==='POST'){
     const result=input.dossiers.quarantine(request.principalId,request.idempotencyKey,request.body);
@@ -111,7 +128,7 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
   db.exec('BEGIN IMMEDIATE');try{const result=work();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}
  }
  const pending=new Map<string,Promise<z.infer<typeof OperatorResponseSchema>>>();
- return {name:'exchange',maxBodyBytes:22*1024*1024,close(){if(pending.size>0)throw new Error('EXCHANGE_OPERATIONS_ACTIVE');db.close();},matches:({path})=>['imports','exports','backups'].includes(path[0]??''),async handle(request){
+ return {name:'exchange',maxBodyBytes:22*1024*1024,close(){if(pending.size>0)throw new Error('EXCHANGE_OPERATIONS_ACTIVE');db.close();},matches:({path,method})=>['imports','exports','backups'].includes(path[0]??'')||(method==='GET'&&path[0]==='dossier-adaptations'),async handle(request){
   try {
    if(request.kind==='read')return await dispatch(request);
    const requestHash=digest(canonical({method:request.method,path:request.path,body:request.body}));const kind=operationKind(request);
@@ -154,9 +171,11 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
    pending.set(identity,work);
    try{return await work;}finally{if(pending.get(identity)===work)pending.delete(identity);}
   }catch(error){
-   const code=error instanceof Error&&/^[A-Z][A-Z0-9_]{1,79}$/.test(error.message)?error.message:'EXCHANGE_VALIDATION_FAILED';
+   const adaptationRead=request.path[0]==='dossier-adaptations'&&request.kind==='read';
+   const invalid=adaptationRead&&(error instanceof z.ZodError||(error instanceof Error&&['ADAPTATION_QUERY_INVALID','ADAPTATION_CURSOR_INVALID','ADAPTATION_CURSOR_SCOPE'].includes(error.message)));
+   const code=invalid?'ADAPTATION_REQUEST_INVALID':error instanceof Error&&/^[A-Z][A-Z0-9_]{1,79}$/.test(error.message)?error.message:'EXCHANGE_VALIDATION_FAILED';
    const missing=code.endsWith('NOT_FOUND');const precondition=code.includes('IF_MATCH')||code.includes('IF_NONE_MATCH');const dependency=code.includes('UNAVAILABLE')||code==='RESTORE_BLOCKED';
-   return OperatorResponseSchema.parse({kind:'problem',status:missing?404:precondition?412:dependency?503:409,error:{kind:missing?'notFound':precondition?'precondition':dependency?'dependency':'conflict',code,message:'La operación requiere revisión o una dependencia disponible.',...(dependency?{safeCode:code,retryable:false}:{})}});
+   return OperatorResponseSchema.parse({kind:'problem',status:invalid?422:missing?404:precondition?412:dependency?503:409,error:{kind:invalid?'validation':missing?'notFound':precondition?'precondition':dependency?'dependency':'conflict',code,message:'La operación requiere revisión o una dependencia disponible.',...(invalid?{issues:[]}:{}),...(dependency?{safeCode:code,retryable:false}:{})}});
   }
  }};
 }

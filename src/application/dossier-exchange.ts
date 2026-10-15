@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { exportDossier, importDossier } from '../adapters/catalog.ts';
 import { DossierAdaptationImportSchema, DossierArchiveSchema, DossierSchema, type Dossier } from '../domain/catalog.ts';
 import { CharacterIdSchema } from '../domain/values.ts';
-import { DossierImportViewSchema as ImportViewSchema,DossierImportPreviewMetadataSchema as PreviewSchema,DossierImportApplyRequestSchema } from '../domain/dossier-exchange.ts';
+import { DossierImportViewSchema as ImportViewSchema,DossierImportPreviewMetadataSchema as PreviewSchema,DossierImportApplyRequestSchema,DossierAdaptationReadSchema,DossierAdaptationSummarySchema,DossierAdaptationPageSchema } from '../domain/dossier-exchange.ts';
 import { exchangeIntegrity } from '../adapters/exchange-integrity.ts';
 
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -89,6 +89,54 @@ export function openDossierExchange(input:{journalPath:string;getDossier(charact
       db.exec('COMMIT');return adaptation;
     }catch(error){db.exec('ROLLBACK');throw error;}
   }
+  const PrincipalSchema=z.string().min(1).max(200);
+  const CursorSchema=z.strictObject({principalId:PrincipalSchema,characterId:CharacterIdSchema,highWatermark:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),afterImportId:IdSchema});
+  function readApplied(principalId:string,importId:string){
+    integrity.verify('exchange_dossier_adaptations','import_id=? AND principal_id=?',[importId,principalId]);
+    const row=db.prepare('SELECT adaptation_json FROM exchange_dossier_adaptations WHERE import_id=? AND principal_id=?').get(importId,principalId);
+    if(row===undefined)throw new Error('ADAPTATION_NOT_FOUND');
+    const adaptation=DossierAdaptationImportSchema.parse(JSON.parse(z.strictObject({adaptation_json:z.string()}).parse(row).adaptation_json));
+    const view=get(principalId,importId);
+    if(view.state!=='applied'||view.characterId!==adaptation.characterId||adaptation.importedDossier.characterId!==adaptation.characterId||view.sourceHash!==adaptation.baseHash||adaptation.baseHash!==adaptation.importedDossier.contentHash||adaptation.importedDossier.revision!==adaptation.baseRevision+1)throw new Error('ADAPTATION_RECORD_INVALID');
+    // exportDossier also validates the complete imported dossier's Markdown and sections.
+    const archiveHash=hash(exportDossier(adaptation.importedDossier));
+    const importedArchive=z.strictObject({archive_json:z.string()}).parse(db.prepare('SELECT archive_json FROM exchange_dossier_imports WHERE import_id=? AND principal_id=?').get(importId,principalId));
+    const importedArchiveHash=hash(importedArchive.archive_json);
+    const source=DossierArchiveSchema.parse(JSON.parse(importedArchive.archive_json)).dossier;
+    const ownEntry=adaptation.importedDossier.adaptations.at(-1);
+    if(source.characterId!==adaptation.characterId||source.revision!==adaptation.baseRevision||source.contentHash!==adaptation.baseHash||adaptation.importedDossier.adaptations.length!==source.adaptations.length+1||ownEntry?.adaptationId!==adaptation.adaptationId||ownEntry.basedOnHash!==adaptation.baseHash||ownEntry.createdAt!==adaptation.createdAt||exportDossier({...adaptation.importedDossier,revision:source.revision,adaptations:adaptation.importedDossier.adaptations.slice(0,-1)})!==importedArchive.archive_json)throw new Error('ADAPTATION_LINEAGE_INVALID');
+    return DossierAdaptationReadSchema.parse({adaptationId:adaptation.adaptationId,importId,characterId:adaptation.characterId,createdAt:adaptation.createdAt,revision:adaptation.importedDossier.revision,contentHash:adaptation.importedDossier.contentHash,archiveHash,importedArchiveHash,fileName:view.fileName,adaptation});
+  }
+  function readSavedAdaptation(raw:unknown){const request=z.strictObject({principalId:PrincipalSchema,importId:IdSchema}).parse(raw);return readApplied(request.principalId,request.importId);}
+  function readAdaptation(raw:unknown){
+    const request=z.strictObject({principalId:PrincipalSchema,adaptationId:IdSchema}).parse(raw);
+    // Verify operator-owned records before inspecting payload IDs; foreign rows never enter this scan.
+    for(const row of db.prepare('SELECT import_id FROM exchange_dossier_adaptations WHERE principal_id=? ORDER BY import_id COLLATE BINARY').all(request.principalId)){
+      const {import_id:importId}=z.strictObject({import_id:IdSchema}).parse(row);const result=readApplied(request.principalId,importId);
+      if(result.adaptationId===request.adaptationId)return result;
+    }
+    throw new Error('ADAPTATION_NOT_FOUND');
+  }
+  function listAdaptations(raw:unknown){
+    const request=z.strictObject({principalId:PrincipalSchema,characterId:CharacterIdSchema,limit:z.number().int().min(1).max(100),cursor:z.string().min(1).max(4000).optional()}).parse(raw);
+    let highWatermark:number;let afterImportId='';
+    if(request.cursor!==undefined){
+      let cursor:z.infer<typeof CursorSchema>;try{cursor=CursorSchema.parse(JSON.parse(Buffer.from(request.cursor,'base64url').toString('utf8')));}catch{throw new Error('ADAPTATION_CURSOR_INVALID');}
+      if(cursor.principalId!==request.principalId||cursor.characterId!==request.characterId)throw new Error('ADAPTATION_CURSOR_SCOPE');
+      highWatermark=cursor.highWatermark;afterImportId=cursor.afterImportId;
+    }else{
+      highWatermark=z.strictObject({watermark:z.number().int().nonnegative()}).parse(db.prepare('SELECT coalesce(max(rowid),0) watermark FROM exchange_dossier_adaptations WHERE principal_id=?').get(request.principalId)).watermark;
+    }
+    const adaptations:z.infer<typeof DossierAdaptationSummarySchema>[]=[];let lastImportId='';let hasMore=false;
+    for(const row of db.prepare('SELECT import_id FROM exchange_dossier_adaptations WHERE principal_id=? AND rowid<=? AND import_id>? COLLATE BINARY ORDER BY import_id COLLATE BINARY').all(request.principalId,highWatermark,afterImportId)){
+      const {import_id:importId}=z.strictObject({import_id:IdSchema}).parse(row);const {adaptation:_adaptation,...summary}=readApplied(request.principalId,importId);void _adaptation;
+      if(summary.characterId!==request.characterId)continue;
+      if(adaptations.length===request.limit){hasMore=true;break;}
+      adaptations.push(DossierAdaptationSummarySchema.parse(summary));lastImportId=importId;
+    }
+    const nextCursor=hasMore?Buffer.from(JSON.stringify(CursorSchema.parse({principalId:request.principalId,characterId:request.characterId,highWatermark,afterImportId:lastImportId}))).toString('base64url'):null;
+    return DossierAdaptationPageSchema.parse({adaptations,nextCursor});
+  }
   function exportArchive(principalId:string,operationId:string,raw:unknown){
     const characterId=CharacterIdSchema.parse(raw);IdSchema.parse(operationId);
     const prior=db.prepare('SELECT export_id,character_id,archive_json FROM exchange_dossier_exports WHERE principal_id=? AND operation_id=?').get(principalId,operationId);
@@ -101,5 +149,5 @@ export function openDossierExchange(input:{journalPath:string;getDossier(charact
     if(!row)throw new Error('EXPORT_NOT_FOUND');const archive=z.strictObject({archive_json:z.string()}).parse(row).archive_json;
     return {bytes:Buffer.from(archive),sha256:hash(archive),filename:'personajes-dossier.json'};
   }
-  return Object.freeze({quarantine,get,preview,apply,exportArchive,download,close:()=>db.close()});
+  return Object.freeze({quarantine,get,preview,apply,listAdaptations,readAdaptation,readSavedAdaptation,exportArchive,download,close:()=>db.close()});
 }

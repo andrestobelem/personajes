@@ -11,6 +11,7 @@ import {IdentityPromotionResultSchema,IdentityPromotionReceiptSchema} from '../d
 import {RunIdSchema} from '../domain/values.ts';
 import type {IdentityPromotionApplicationPort,IdentityPromotionAuthority} from '../server/identity-promotion-routes.ts';
 import {configuratorValueHash} from './configurator-context.ts';
+import {readPreparedDossierSource} from './dossier-source-repository.ts';
 import {createConfiguratorPiWorker} from './configurator-pi-worker.ts';
 import type {openLocalHost} from './local-host.ts';
 import {ReadyRunConfigurationSchema} from './production-preflight.ts';
@@ -114,7 +115,11 @@ export function createIdentityPromotionApplication(input:{host:ReturnType<typeof
     const current=head(request.runId);const expected=IdentityPromotionHeadSchema.parse({runId:request.runId,lifecycle:current.lifecycle,lifecycleRevision:current.lifecycleRevision,commitIndex:current.source.commitIndex,worldRevision:current.source.worldRevision,worldSeq:current.source.worldSeq,configurationRevision:current.source.configurationRevision});
     if(identityPromotionContextEtag(expected)!==request.ifMatch||request.body.expectedLifecycleRevision!==expected.lifecycleRevision||request.body.expectedCommitIndex!==expected.commitIndex||request.body.expectedWorldRevision!==expected.worldRevision||request.body.expectedWorldSeq!==expected.worldSeq||request.body.expectedConfigurationRevision!==expected.configurationRevision)throw new Error('IDENTITY_PROMOTION_SOURCE_DIVERGED');
     if(!['ready','paused','stopped'].includes(current.lifecycle))throw new Error('IDENTITY_PROMOTION_LIFECYCLE_INVALID');assertIdle(request.runId);
-    const originalDossier=await readDossier({catalog:input.catalog,characterId:request.body.actorId});
+    const configuration=ReadyRunConfigurationSchema.parse(journal.readWorldConfiguration({runId:request.runId}));
+    const prepared=configuration.roster.preparedCharacters.find(actor=>actor.characterId===request.body.actorId);
+    if(prepared===undefined)throw new Error('IDENTITY_PROMOTION_ACTOR_NOT_FOUND');
+    const source=readPreparedDossierSource(prepared);
+    const originalDossier=source.kind==='found'?source.source.frozenDossier:await readDossier({catalog:input.catalog,characterId:request.body.actorId});
     const after=head(request.runId);if(configuratorValueHash(after)!==configuratorValueHash(current))throw new Error('IDENTITY_PROMOTION_SOURCE_DIVERGED');assertIdle(request.runId);
     const begun=ledger.begin({principalId:request.authority.principalId,idempotencyKey:request.idempotencyKey,runId:request.runId,actorId:request.body.actorId,expectedCommitIndex:request.body.expectedCommitIndex,expectedWorldRevision:request.body.expectedWorldRevision,expectedConfigurationRevision:request.body.expectedConfigurationRevision,originalDossier});
     const view=publicJob(begun.job);if(begun.kind==='created')enqueue(begun.job);return view;

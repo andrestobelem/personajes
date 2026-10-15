@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DossierSchema } from '../domain/catalog.ts';
+import { DossierSourceSchema } from '../domain/dossier-source.ts';
 import { ExperienceSchema } from '../domain/experience.ts';
 import { ActorDirectionContextSchema } from '../domain/direction-indications.ts';
 import { ActorWorldProjectionSchema } from './actor-world-projection.ts';
@@ -22,6 +23,7 @@ const EmptyPreparationDraftRequestSchema = z.strictObject({
   characterId: CharacterIdSchema,
   dossierRevision: RevisionSchema,
   dossierHash: HashSchema,
+  dossierSource: DossierSourceSchema.optional(),
   continuity: ContinuityContextSchema,
   identityVersion: RevisionSchema,
 });
@@ -64,6 +66,7 @@ export function createEmptyPreparationDraft(input: unknown): PreparationDraft {
     characterId: request.characterId,
     dossierRevision: request.dossierRevision,
     dossierHash: request.dossierHash,
+    ...(request.dossierSource === undefined ? {} : { dossierSource: request.dossierSource }),
     continuity: request.continuity,
     identityVersion: request.identityVersion,
     identity: { kind: 'empty' },
@@ -171,6 +174,22 @@ export function prepareCharacter(input: unknown): PreparationResult {
     });
   }
 
+  // Structural equality of the full parsed snapshot is browser-safe. This does
+  // not authenticate its provenance or replace host archive/hash verification.
+  const snapshotText = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => {
+    if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+      return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)));
+    }
+    return item;
+  });
+  if (draft.dossierSource !== undefined
+    && snapshotText(draft.dossierSource.frozenDossier) !== snapshotText(dossier)) {
+    addIssue(issues, {
+      code: 'dossier-snapshot-mismatch', field: 'dossier',
+      detail: 'El expediente completo no coincide con la fuente fijada; se debe revisar la curación.',
+    });
+  }
+
   const dossierSourceRefs = new Set(dossier.sourceRefs.map((sourceRef) => sourceRef.id));
   const validateSection = <T extends CuratedField>(field: PreparationIssue['field'], section: { kind: 'empty' } | { kind: 'declared'; value: T }) => {
     if (section.kind === 'declared') {
@@ -238,6 +257,7 @@ export function prepareCharacter(input: unknown): PreparationResult {
     characterId: draft.characterId,
     dossierRevision: draft.dossierRevision,
     dossierHash: draft.dossierHash,
+    ...(draft.dossierSource === undefined ? {} : { dossierSource: draft.dossierSource }),
     continuity: draft.continuity,
     identityVersion: draft.identityVersion,
     identity: draft.identity.value,

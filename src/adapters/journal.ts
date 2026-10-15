@@ -1,3 +1,4 @@
+import type { PreparationSourceAdmission } from '../application/preparation-source-admission.ts';
 import { CONFIGURATOR_JOB_SCHEMA_SQL } from './configurator-job-ledger.ts';
 import { IdentityPromotionRequestSchema, IdentityPromotionAuthorityRequestSchema, AcceptedConfiguratorProposalSchema, IdentityPromotionReceiptSchema, IdentityPromotionResultSchema, ActorIdentityEpochSchema, type IdentityPromotionPorts } from '../domain/identity-promotion.ts';
 import { prepareIdentityPromotion, PreparedIdentityPromotionSchema } from '../application/prepare-identity-promotion.ts';
@@ -512,6 +513,13 @@ function hashJson(value: unknown): { json: string; hash: z.infer<typeof HashSche
 
 /** Internal adapter. Its path is chosen by the host, never by actor input. */
 export function openJournal(input: { path: string }) {
+  let preparationSourceAdmission: PreparationSourceAdmission | undefined;
+  function admitPreparationSources(principalId: string, previous: z.infer<typeof RunConfigurationDraftSchema>, candidate: z.infer<typeof RunConfigurationDraftSchema>) {
+    const hasSource = [previous, candidate].some(draft => draft.roster.kind !== 'empty' && draft.roster.value.preparedCharacters.some(actor => actor.dossierSource !== undefined));
+    if (!hasSource) return;
+    if (preparationSourceAdmission === undefined) throw new Error('DOSSIER_SOURCE_ADMISSION_UNAVAILABLE');
+    preparationSourceAdmission({ principalId, previous, candidate });
+  }
   const journalPrivateDataRoot=dirname(input.path);
   if (input.path === ':memory:') throw new Error('El journal requiere archivo durable');
   mkdirSync(dirname(input.path), { recursive: true, mode: 0o700 });
@@ -5131,6 +5139,10 @@ export function openJournal(input: { path: string }) {
   }
 
   return {
+    setPreparationSourceAdmission(admission: PreparationSourceAdmission) {
+      if (preparationSourceAdmission !== undefined) throw new Error('DOSSIER_SOURCE_ADMISSION_ALREADY_CONFIGURED');
+      preparationSourceAdmission = admission;
+    },
     readDramaticStructure(input:unknown) {
       const request=z.strictObject({runId:RunIdSchema}).parse(input);
       const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
@@ -6998,7 +7010,9 @@ export function openJournal(input: { path: string }) {
       return transact(()=>{
         const replay=replayRunDraftOperation(operation);if(replay!==undefined)return RunDraftMutationResultSchema.parse(replay);
         const recordedAt=new Date().toISOString();const runId=RunIdSchema.parse(randomUUID());const revision=RevisionSchema.parse(0);
-        const draft=applyRunDraftPatch(createEmptyRunConfigurationDraft({runId,revision}),request.patch,request.principalId,recordedAt,revision);
+        const empty=createEmptyRunConfigurationDraft({runId,revision});
+        const draft=applyRunDraftPatch(empty,request.patch,request.principalId,recordedAt,revision);
+        admitPreparationSources(request.principalId,empty,draft);
         database.prepare('INSERT INTO run_configuration_drafts VALUES(?,?,?,?)').run(runId,revision,recordedAt,recordedAt);
         appendRunDraftHistory({draft,principalId:request.principalId,recordedAt});
         return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'created',draft})});
@@ -7019,6 +7033,7 @@ export function openJournal(input: { path: string }) {
           if(lifecycle!=='draft'&&lifecycle!=='ready')return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'invalidLifecycle',lifecycle})});}
         if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
         const revision=RevisionSchema.parse(request.expectedRevision+1);const draft=applyRunDraftPatch(entry.draft,request.patch,request.principalId,recordedAt,revision);
+        admitPreparationSources(request.principalId,entry.draft,draft);
         const changed=database.prepare('UPDATE run_configuration_drafts SET revision=?,updated_at=? WHERE run_id=? AND revision=?').run(revision,recordedAt,request.runId,request.expectedRevision);
         if(changed.changes!==1)throw new Error('CAS de borrador cambió durante la transacción');
         if(world!==undefined){

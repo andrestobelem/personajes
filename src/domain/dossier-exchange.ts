@@ -9,3 +9,21 @@ export const DossierImportApplyRequestSchema=z.strictObject({previewToken:z.uuid
 export const DossierImportAdaptationSchema=DossierAdaptationImportSchema;
 export const DossierExportReceiptSchema=z.strictObject({exportId:z.uuid(),sha256:HashSchema});
 export const DossierExportViewSchema=DossierExportReceiptSchema.extend({state:z.literal('succeeded'),bytes:z.number().int().nonnegative(),filename:z.literal('personajes-dossier.json')});
+
+/** Exact operator-owned adaptation reference; Markdown hash alone does not identify metadata. */
+export const DossierAdaptationSummarySchema=z.strictObject({
+ adaptationId:DossierAdaptationImportSchema.shape.adaptationId,
+ importId:DossierImportViewSchema.shape.importId,
+ characterId:CharacterIdSchema,
+ createdAt:DossierAdaptationImportSchema.shape.createdAt,
+ revision:DossierSchema.shape.revision,
+ contentHash:HashSchema,
+ archiveHash:HashSchema,
+ importedArchiveHash:HashSchema,
+ fileName:DossierImportViewSchema.shape.fileName,
+});
+export const DossierAdaptationReadSchema=DossierAdaptationSummarySchema.extend({adaptation:DossierAdaptationImportSchema});
+export const DossierAdaptationPageSchema=z.strictObject({adaptations:z.array(DossierAdaptationSummarySchema).max(100),nextCursor:z.string().max(4000).nullable()});
+export type DossierAdaptationSummary=z.infer<typeof DossierAdaptationSummarySchema>;
+export type DossierAdaptationRead=z.infer<typeof DossierAdaptationReadSchema>;
+export type DossierAdaptationPage=z.infer<typeof DossierAdaptationPageSchema>;
