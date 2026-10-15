@@ -18,7 +18,7 @@ type Saving = { kind: 'idle' } | { kind: 'saving'; intent: DraftSaveIntent }
   | { kind: 'conflict'; local: RunConfigurationDraft; remote: DraftDocument; keepLocal: DraftSection[]; message: string };
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'No pudimos completar esta operación.'; }
 
-export function RunDraftWorkspace(props: { catalog: CatalogPage['items'] }) {
+export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRequest?: {runId:string} }) {
   const [voiceOpened, setVoiceOpened] = React.useState(false);
   const [runView, setRunView] = React.useState<'preparation' | 'stage' | 'voice'>('preparation');
   const [currentRun, setCurrentRun] = React.useState<RunDocument | undefined>();
@@ -49,6 +49,7 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items'] }) {
     const summary = RunConfigurationDraftSummarySchema.parse({ kind: 'run-configuration-draft-summary', runId: configuration.runId, revision: configuration.revision, name: configuration.name.kind === 'empty' ? null : configuration.name.value, lifecycle: document.view.state.lifecycle, configurationRevision: document.view.state.configurationRevision, worldRevision: document.view.state.worldRevision, validation: { kind: document.view.validation.kind, promotion: document.view.validation.promotion, issueCount: document.view.validation.kind === 'valid' ? 0 : document.view.validation.issues.length } });
     setPage((current) => ({ ...current, items: [summary, ...current.items.filter((item) => item.runId !== configuration.runId)] }));
   }
+  React.useEffect(() => { if (props.openRequest !== undefined) void open(props.openRequest.runId); }, [props.openRequest]);
   async function open(id: string | 'new') {
     if (saving.kind !== 'idle') return;
     if (dirty) { setReplacePrompt(id); return; }

@@ -7,3 +7,5 @@ La estructura editorial del corte se importa como una base con episodios, actos 
 La [entrevista real](../auditoria/dialogo-publicacion-fork.md) y sus [respuestas](../auditoria/publicacion-fork-respuestas.md) distinguen requisitos de estas decisiones técnicas delegadas. [Implementación, pruebas y brechas](../auditoria/publicacion-de-bifurcaciones.md).
 
 El [corte 46](../auditoria/operacion-de-bifurcaciones.md) agrega operación HTTP y gráfica, retry idempotente durable y suspensión previa al backup. El inventario registrado conserva bytes y WAL de SQLite incompletos para no cambiar artefactos congelados ni IDs de recuerdos. Las operaciones públicas de restauración y edición derivada siguen separadas y pendientes.
+
+[ADR 0012](0012-fuente-de-restauracion-y-confirmacion-durable.md) extiende esa autoridad a fuentes respaldadas congeladas. El corte 47 conecta restauración pública como bifurcación desde un backup local registrado; recuperar el host completo offline conserva un contrato pendiente distinto.

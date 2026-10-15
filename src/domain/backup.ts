@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HashSchema, RunIdSchema } from './values.ts';
+import { HashSchema, OperationIdSchema, RunIdSchema } from './values.ts';
 
 export const BackupIdSchema = z.uuid().brand<'BackupId'>();
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -22,7 +22,19 @@ export const BackupManifestSchema = z.strictObject({
 export type BackupManifest = z.infer<typeof BackupManifestSchema>;
 export const BackupJobSchema = z.strictObject({ backupId: BackupIdSchema, revision: count,
   state: z.enum(['running', 'succeeded', 'failed', 'interrupted']), safeCode: z.string().nullable(), manifestHash: HashSchema.nullable() });
+export const RestoreSelectionSchema=z.discriminatedUnion('mode',[
+  z.strictObject({mode:z.literal('recover')}),
+  z.strictObject({mode:z.literal('fork'),sourceRunId:RunIdSchema,name:z.string().trim().min(1).max(120),reason:z.string().trim().min(1).max(4000)}),
+]);
+export const RestoreIntentSchema=z.strictObject({operationId:OperationIdSchema,principalId:z.string().trim().min(1).max(200),selection:RestoreSelectionSchema,idempotencyKey:z.uuid()});
+export const RestorePreviewRequestSchema=z.discriminatedUnion('mode',[
+ z.strictObject({backupId:BackupIdSchema,principalId:RestoreIntentSchema.shape.principalId,idempotencyKey:z.uuid().optional(),...RestoreSelectionSchema.options[0].shape}),
+ z.strictObject({backupId:BackupIdSchema,principalId:RestoreIntentSchema.shape.principalId,idempotencyKey:z.uuid().optional(),...RestoreSelectionSchema.options[1].shape}),
+]);
+export const RestoreApplyRequestSchema=z.strictObject({previewToken:z.uuid(),confirmDiffHash:HashSchema,principalId:RestoreIntentSchema.shape.principalId,backupId:BackupIdSchema.optional()});
+
 export const RestorePreviewSchema = z.strictObject({ backupId: BackupIdSchema, previewToken: z.uuid(), expiresAt: count,
   manifestHash: HashSchema, diffHash: HashSchema, mode: z.enum(['recover','fork']),
   differences: z.array(z.string()).max(500), blockers: z.array(z.string()).max(500),
+  operationId:OperationIdSchema.optional(),sourceRunId:RunIdSchema.optional(),name:z.string().trim().min(1).max(120).optional(),reason:z.string().trim().min(1).max(4000).optional(),
 });

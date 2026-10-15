@@ -94,7 +94,7 @@ async function createSession(origin: string) {
   assert.equal(response.status, 200, await response.clone().text());
   const created = await response.json() as { csrfToken: string };
   const cookie = response.headers.get('set-cookie')?.split(';', 1)[0];
-  assert.ok(cookie && cookie.startsWith('personajes_session='));
+  assert.ok(cookie && cookie.startsWith(`personajes_session_${new URL(origin).port}=`));
   return { cookie, csrfToken: created.csrfToken, sameOrigin };
 }
 

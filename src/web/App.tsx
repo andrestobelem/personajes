@@ -28,6 +28,7 @@ export function App() {
   const [tab, setTab] = React.useState<Tab>('characters');
   const [openedTabs, setOpenedTabs] = React.useState<ReadonlySet<Tab>>(() => new Set(['characters']));
   const [query, setQuery] = React.useState('');
+  const [openRunRequest, setOpenRunRequest] = React.useState<{runId:string} | undefined>();
   const [characterSearch, setCharacterSearch] = React.useState<CharacterSearch>({ kind: 'idle' });
   const [selection, setSelection] = React.useState<Selection>({ kind: 'none' });
   const selectionEpoch = React.useRef(0);
@@ -138,9 +139,9 @@ export function App() {
       </nav><div className="nav-label">CONFIGURACIÓN</div><nav aria-label="Acceso"><button aria-current={tab === 'access' ? 'page' : undefined} onClick={() => changeTab('access')}>◎ Acceso a Pi</button></nav><div className="sidebar-note">Identidad · Historia · Memoria<br />Deseo · Acción · Consecuencia</div>
     </aside>
     <main><header className="topbar"><span>{tab === 'runs' ? 'Representaciones / Preparación' : tab === 'access' ? 'Configuración / Acceso a Pi' : tab === 'exchange' ? 'Biblioteca / Importar y exportar' : <>Biblioteca / {tab === 'characters' ? 'Reparto' : tab === 'research' ? 'Investigaciones' : 'Fuentes'}</>}</span>{reading && <button className="back-button" onClick={() => { ++selectionEpoch.current; setSelection({ kind: 'none' }); requestAnimationFrame(() => catalogHeading.current?.focus()); }}>← Volver al catálogo</button>}<span className="status-chip">{tab === 'access' ? 'Administración del host' : tab === 'runs' ? 'Estado consultado desde el host' : 'Biblioteca de preparación'}</span></header>
-      {state.kind === 'ready' && openedTabs.has('runs') && <React.Suspense fallback={<p role="status">Abriendo la preparación…</p>}><div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} /></div></React.Suspense>}
+      {state.kind === 'ready' && openedTabs.has('runs') && <React.Suspense fallback={<p role="status">Abriendo la preparación…</p>}><div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} {...(openRunRequest===undefined?{}:{openRequest:openRunRequest})} /></div></React.Suspense>}
       {openedTabs.has('access') && <React.Suspense fallback={<p role="status">Abriendo el acceso…</p>}><div hidden={tab !== 'access'}><PiAccessPanel /><PiAccessCheckPanel /></div></React.Suspense>}
-      {state.kind==='ready'&&openedTabs.has('exchange')&&<React.Suspense fallback={<p role="status">Abriendo el intercambio…</p>}><div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items}/></div></React.Suspense>}
+      {state.kind==='ready'&&openedTabs.has('exchange')&&<React.Suspense fallback={<p role="status">Abriendo el intercambio…</p>}><div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items} onOpenRun={(runId)=>{setOpenRunRequest({runId});changeTab('runs');}}/></div></React.Suspense>}
       <div hidden={tab === 'runs' || tab === 'access' || tab === 'exchange'}><div className="workspace" data-reading={reading}><section className="catalog-panel" aria-label="Catálogo">
         <span className="eyebrow">EL MUNDO EMPIEZA CON SUS PERSONAJES</span><h1 tabIndex={-1} ref={catalogHeading}>{tab === 'characters' ? 'El reparto' : tab === 'research' ? 'Ideas para la obra' : 'Las fuentes'}</h1>
         <p className="intro">{tab === 'characters' ? 'Cada ficha conserva una voz, una historia y un punto de vista.' : 'Investigación, evidencia y propuestas de interpretación.'}</p>

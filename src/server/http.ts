@@ -133,7 +133,13 @@ export type RunDirectionsApplicationPort={
   readOperation(input:unknown):unknown|Promise<unknown>;
 };
 
-const SESSION_COOKIE = 'personajes_session';
+const SESSION_COOKIE_PREFIX = 'personajes_session_';
+
+/** Browsers share hostname cookies across ports; each loopback host owns its own session. */
+function sessionCookieName(req:IncomingMessage):string {
+  const port=z.number().int().min(1).max(65535).parse(req.socket.localPort);
+  return `${SESSION_COOKIE_PREFIX}${port}`;
+}
 const SESSION_IDLE_TTL_MS = 30 * 60 * 1_000;
 const BOOTSTRAP_TTL_MS = 60 * 1_000;
 const MAX_JSON_BODY_BYTES = 1_048_576;
@@ -955,9 +961,10 @@ function constantTimeTokenMatch(received: string, expected: string): boolean {
 function parseSessionCookie(req: IncomingMessage): string | undefined {
   const cookieHeader = req.headers.cookie;
   if (typeof cookieHeader !== 'string') return undefined;
-  const matches = cookieHeader.split(';').map((part) => part.trim()).filter((part) => part.startsWith(SESSION_COOKIE + '='));
+  const cookieName=sessionCookieName(req);
+  const matches = cookieHeader.split(';').map((part) => part.trim()).filter((part) => part.startsWith(cookieName + '='));
   if (matches.length !== 1) return undefined;
-  const token = matches[0]?.slice(SESSION_COOKIE.length + 1);
+  const token = matches[0]?.slice(cookieName.length + 1);
   if (token === undefined || !/^[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
   return token;
 }
@@ -1332,7 +1339,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
       };
       sessions.set(token, session);
       const created = parseSchema(SessionCreatedSchema, { csrfToken, expiresAt: new Date(expiresAtMs).toISOString() });
-      res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/api/v1; HttpOnly; SameSite=Strict`);
+      res.setHeader('Set-Cookie', `${sessionCookieName(req)}=${token}; Path=/api/v1; HttpOnly; SameSite=Strict`);
       sendJson(res, 200, created, { ETag: sessionEtag(session) });
       return;
     }
@@ -2014,7 +2021,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         for(const client of refreshClients)if(client.session===session)closeRefresh(client);
         session.observerViews.clear();
         session.operations.clear();
-        res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/api/v1; HttpOnly; SameSite=Strict; Max-Age=0`);
+        res.setHeader('Set-Cookie', `${sessionCookieName(req)}=; Path=/api/v1; HttpOnly; SameSite=Strict; Max-Age=0`);
         res.writeHead(204);
         res.end();
         return;

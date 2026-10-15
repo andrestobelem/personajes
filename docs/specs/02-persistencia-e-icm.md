@@ -22,7 +22,7 @@ Un solo host escritor controla cada `privateData`. Antes de abrir workers se adq
 
 ## Schema de journal
 
-El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v36; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El núcleo durable de fork está implementado en v35; su operación integral sigue pendiente.
+El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v37; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El núcleo durable de fork está implementado en v35; su operación integral sigue pendiente.
 
 Migraciones numeradas con `schema_version`; JSON versionado validado en lectura/escritura. Tablas requeridas:
 
@@ -66,7 +66,7 @@ La migración v30 añade `direction_revision` a `world_runs`, `direction_events`
 
 ### Contrato requerido para forks y continuidad (evolución posterior a v29)
 
-El corte 45 implementa el núcleo host de fork por corte con job durable staging/ready/failed y fuente inmutable. Su composición y API/GUI se conectaron en el corte 46; restauración pública por corte sigue pendiente; el contrato integral se define a continuación. El contrato de episodios y escenas ya está implementado en v29: snapshots/commits históricos conservan sus hashes y las escenas preexistentes permanecen sin episodio asignado. v29 no incluye un comando para asociar una escena heredada a un episodio; si el producto lo requiere, esa operación debe diseñarse y probarse de forma explícita.
+El corte 45 implementa el núcleo host de fork por corte con job durable staging/ready/failed y fuente inmutable. Su composición y API/GUI se conectaron en el corte 46, y restaurar como bifurcación desde un backup local en el corte 47; recuperación offline completa sigue pendiente; el contrato integral se define a continuación. El contrato de episodios y escenas ya está implementado en v29: snapshots/commits históricos conservan sus hashes y las escenas preexistentes permanecen sin episodio asignado. v29 no incluye un comando para asociar una escena heredada a un episodio; si el producto lo requiere, esa operación debe diseñarse y probarse de forma explícita.
 
 Cada apertura/cierre estructural se escribe en la misma transacción SQLite que el nuevo snapshot y su fila `world_commits`: incrementa `world_revision` y `commit_index`, pero no `worldSeq`, el reloj ficticio, `world_events`, percepciones, outbox ni memoria ICM. `structure_events` conserva el comando idempotente, actor administrativo, tipo y corte. `readDramaticStructureAtCut` valida el snapshot/hash y reproduce sólo eventos estructurales hasta el commit que corresponde al par confirmado `worldRevision` + `worldSeq`; el estado actual nunca se usa como sustituto del pasado. El historial de eventos acepta el mismo límite de commit y no convierte estructura editorial en conocimiento de un personaje. Sin escena activa, acción actoral e intervención humana fallan con causa explícita; no se crean convocatorias ni avance de rutinas. Abrir una escena/episodio permite continuar y conserva la continuidad corriente.
 
@@ -201,3 +201,7 @@ La implementación agrega fork_jobs, fork_job_history, fork_projection_receipts 
 ## Integración de bifurcaciones — corte 46
 
 Launcher, API autenticada y panel de bifurcación ya están conectados. El retry tiene recibo durable en journal v36; la suspensión de fork precede al inventario de backup e incluye archivos de operaciones incompletas sin cambiar IDs de memoria. La interfaz conserva el corte/intento ante navegación y recarga, consulta sin reejecutar y protege la preparación heredada. La procedencia editorial y los controles Ready derivados son explícitos. [Contrato ejecutado, recorrido de navegador y límites](../auditoria/operacion-de-bifurcaciones.md). Las notas de cortes anteriores conservan su alcance histórico; restauración pública y aceptación integral siguen pendientes.
+
+## Restauración desde backup — corte 47
+
+Restaurar como bifurcación desde un backup local registrado ya está conectado al launcher, API y GUI. La revisión/confirmación tiene operación estable y principal privado; la recuperación retoma sólo intenciones confirmadas. Journal v37 conserva la fuente respaldada y la publicación no consulta al padre vivo. Validación y migraciones actúan sobre copias privadas para mantener el bundle intacto. [Contrato, pruebas y recorrido gráfico](../auditoria/restauracion-como-bifurcacion.md). Recuperación offline del host completo, admisión de otra lineage y aceptación integral siguen pendientes.

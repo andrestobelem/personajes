@@ -1,4 +1,5 @@
 import React from 'react';
+import { BackupRestorePanel } from './BackupRestorePanel.tsx';
 import type { z } from 'zod';
 import type { CatalogPage } from '../domain/http.ts';
 import type { DossierAdaptationImport } from '../domain/catalog.ts';
@@ -10,7 +11,7 @@ type Pending={kind:'import'|'preview'|'apply'|'export';intent:ExchangeIntent};
 function fields(dossier: z.infer<typeof DossierImportPreviewSchema>['before']) {
   const {markdown:_,...normalized}=dossier;return JSON.stringify(normalized,null,2);
 }
-export function DossierExchangePanel({catalog}:{catalog:CatalogPage['items']}) {
+export function DossierExchangePanel({catalog,onOpenRun}:{catalog:CatalogPage['items'];onOpenRun?:(runId:string)=>void}) {
   const [character,setCharacter]=React.useState(catalog[0]?.characterId??'');
   const [imported,setImported]=React.useState<z.infer<typeof ImportViewSchema>>();
   const [preview,setPreview]=React.useState<z.infer<typeof DossierImportPreviewSchema>>();
@@ -43,7 +44,7 @@ export function DossierExchangePanel({catalog}:{catalog:CatalogPage['items']}) {
     await execute({kind:'import',intent:exchangeIntent('/api/v1/imports',body)});
   }
   const blocked=busy||pending!==undefined;
-  return <section className="dossier-exchange" aria-label="Intercambio de expedientes">
+  return <><BackupRestorePanel {...(onOpenRun === undefined ? {} : {onOpenRun})} /><section className="dossier-exchange" aria-label="Intercambio de expedientes">
     <h1>Importar y exportar expedientes</h1>
     <p>Conservá una copia portable o revisá un expediente importado antes de crear una adaptación. El original investigado se conserva.</p>
     <fieldset disabled={blocked}><legend>Exportar</legend><label>Personaje <select value={character} onChange={event=>setCharacter(event.target.value)}>{catalog.map(item=><option key={item.characterId} value={item.characterId}>{item.displayName}</option>)}</select></label>
@@ -60,5 +61,5 @@ export function DossierExchangePanel({catalog}:{catalog:CatalogPage['items']}) {
     {error&&<p role="alert">{error}</p>}
     {pending&&!busy&&<button type="button" onClick={()=>void execute(pending)}>Reintentar la misma operación</button>}
     {busy&&<p role="status">Esperando confirmación del host…</p>}
-  </section>;
+  </section></>;
 }

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { BackupSourcesSchema } from '../domain/backup-http.ts';
+import { RestorePreviewSchema,RestoreSelectionSchema } from '../domain/backup.ts';
+import { ForkJobViewSchema,forkJobEtag } from '../domain/fork-http.ts';
+import { HashSchema } from '../domain/values.ts';
 import { exchangeIntegrity } from '../adapters/exchange-integrity.ts';
 import type { openBackupService } from '../application/backup-service.ts';
 import type { openDossierExchange } from '../application/dossier-exchange.ts';
@@ -62,14 +66,20 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
    if(request.path.length===2&&request.kind==='read'){
     const result=input.backups.get(id);return operatorJson(result,200,{ETag:backupEtag(id,result.revision)});
    }
+   if(request.path.length===3&&request.kind==='read'&&action==='sources'){
+    z.strictObject({}).parse(Object.fromEntries(request.query));
+    const verified=input.backups.verify(id);
+    return operatorJson(BackupSourcesSchema.parse({kind:'backup-sources',backupId:verified.manifest.backupId,sources:verified.manifest.fences.map(fence=>({runId:fence.runId,commitIndex:fence.commitIndex,worldRevision:fence.worldRevision,worldSeq:fence.lastSeq,snapshotHash:fence.snapshotHash}))}));
+   }
    if(request.path.length===3&&request.kind==='write'&&request.method==='POST'){
     if(action==='restore-preview'){
-     const body=z.strictObject({mode:z.enum(['recover','fork'])}).parse(request.body);return operatorJson(input.backups.preview({backupId:id,...body}));
+     const body=RestoreSelectionSchema.parse(request.body);return operatorJson(RestorePreviewSchema.parse(input.backups.preview({backupId:id,principalId:request.principalId,idempotencyKey:request.idempotencyKey,...body})));
     }
     if(action==='restore'){
      const current=input.backups.get(id);if(request.ifMatch!==backupEtag(id,current.revision))throw new Error('EXCHANGE_IF_MATCH_REQUIRED');
-     const body=z.strictObject({previewToken:z.uuid(),confirmDiffHash:z.string()}).parse(request.body);
-     return operatorJson(await input.backups.restore({...body,backupId:id}),202);
+     const body=z.strictObject({previewToken:z.uuid(),confirmDiffHash:HashSchema}).parse(request.body);
+     const job=ForkJobViewSchema.parse(await input.backups.restore({...body,backupId:id,principalId:request.principalId}));
+     return operatorJson(job,202,{ETag:forkJobEtag(job),Location:`/api/v1/forks/${job.operationId}`});
     }
    }
   }
@@ -80,9 +90,19 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
    if(request.kind==='read')return await dispatch(request);
    const requestHash=digest(canonical({method:request.method,path:request.path,body:request.body}));
    const previous=db.prepare('SELECT request_hash,response_json FROM exchange_http_operations WHERE principal_id=? AND operation_id=?').get(request.principalId,request.idempotencyKey);
-   if(previous){integrity.verify('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);const old=z.strictObject({request_hash:z.string(),response_json:z.string().nullable()}).parse(previous);if(old.request_hash!==requestHash)throw new Error('EXCHANGE_IDEMPOTENCY_REUSE');if(old.response_json===null)throw new Error('EXCHANGE_OPERATION_INTERRUPTED');return OperatorResponseSchema.parse(JSON.parse(old.response_json));}
-   db.prepare('INSERT INTO exchange_http_operations(principal_id,operation_id,request_hash,response_json) VALUES(?,?,?,NULL)').run(request.principalId,request.idempotencyKey,requestHash);
-   integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+   if(previous){
+    integrity.verify('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+    const old=z.strictObject({request_hash:z.string(),response_json:z.string().nullable()}).parse(previous);
+    if(old.request_hash!==requestHash)throw new Error('EXCHANGE_IDEMPOTENCY_REUSE');
+    if(old.response_json!==null)return OperatorResponseSchema.parse(JSON.parse(old.response_json));
+    // Only restore operations have a sealed service intent/idempotent preview.
+    // Other interrupted mutations retain their conservative explicit failure.
+    const recoverable=request.method==='POST'&&request.path.length===3&&request.path[0]==='backups'&&['restore','restore-preview'].includes(request.path[2]??'');
+    if(!recoverable)throw new Error('EXCHANGE_OPERATION_INTERRUPTED');
+   }else{
+    db.prepare('INSERT INTO exchange_http_operations(principal_id,operation_id,request_hash,response_json) VALUES(?,?,?,NULL)').run(request.principalId,request.idempotencyKey,requestHash);
+    integrity.seal('exchange_http_operations','principal_id=? AND operation_id=?',[request.principalId,request.idempotencyKey]);
+   }
    let result;
    try {result=await dispatch(request);}catch(error){
     db.prepare('DELETE FROM exchange_http_operations WHERE principal_id=? AND operation_id=? AND response_json IS NULL').run(request.principalId,request.idempotencyKey);throw error;

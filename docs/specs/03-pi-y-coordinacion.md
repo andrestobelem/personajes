@@ -114,3 +114,7 @@ El fork mecánico no abre sesiones Pi ni llama modelos. No transporta historial 
 ## Integración de bifurcaciones — corte 46
 
 Launcher, API autenticada y panel de bifurcación ya están conectados. El retry tiene recibo durable en journal v36; la suspensión de fork precede al inventario de backup e incluye archivos de operaciones incompletas sin cambiar IDs de memoria. La interfaz conserva el corte/intento ante navegación y recarga, consulta sin reejecutar y protege la preparación heredada. La procedencia editorial y los controles Ready derivados son explícitos. [Contrato ejecutado, recorrido de navegador y límites](../auditoria/operacion-de-bifurcaciones.md). Las notas de cortes anteriores conservan su alcance histórico; restauración pública y aceptación integral siguen pendientes.
+
+## Restauración desde backup — corte 47
+
+Restaurar como bifurcación desde un backup local registrado ya está conectado al launcher, API y GUI. La revisión/confirmación tiene operación estable y principal privado; la recuperación retoma sólo intenciones confirmadas. Journal v37 conserva la fuente respaldada y la publicación no consulta al padre vivo. Validación y migraciones actúan sobre copias privadas para mantener el bundle intacto. [Contrato, pruebas y recorrido gráfico](../auditoria/restauracion-como-bifurcacion.md). Recuperación offline del host completo, admisión de otra lineage y aceptación integral siguen pendientes.

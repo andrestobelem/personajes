@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -42,8 +42,8 @@ test('backup Online Backup includes WAL journal/ICM and registered sessions, exc
     try {assert.equal(journalCopy.prepare('SELECT state FROM pending_delivery').get()?.state,'pending');assert.equal(memoryCopy.prepare('SELECT content FROM memories').get()?.content,'No escuché que hubiera salido.');}
     finally {journalCopy.close();memoryCopy.close();}
     assert.equal(readFileSync(join(bundle.bundleRoot,f.sessionPath),'utf8'),'{"type":"session","id":"s1"}\n');
-    const p=service.preview({backupId,mode:'recover'});assert.ok(p.blockers.includes('RESTORE_SESSION_PATH_RECONCILIATION_REQUIRED'));
-    await assert.rejects(service.restore({previewToken:p.previewToken,confirmDiffHash:p.diffHash}),/RESTORE_BLOCKED/);
+    const p=service.preview({backupId,mode:'recover',principalId:'backup-test'});assert.ok(p.blockers.includes('RESTORE_SESSION_PATH_RECONCILIATION_REQUIRED'));
+    await assert.rejects(service.restore({principalId:'backup-test',previewToken:p.previewToken,confirmDiffHash:p.diffHash}),/RESTORE_BLOCKED/);
     writeFileSync(join(bundle.bundleRoot,f.sessionPath),'tampered');assert.throws(()=>service.verify(backupId),/BACKUP_FILE_TAMPERED/);
   } finally {service.close();f.cleanup();}
 });
@@ -75,17 +75,23 @@ test('restart marks abandoned backup interrupted and never replaces original job
 });
 
 test('restore preview binds diff, expiration and mutable target; confirmed result replay is durable',async()=>{
-  const f=fixture();let fingerprint='before',time=1000,applied=0;
+  const f=fixture();let fingerprint='before',time=1000,applied=0;const results=new Map<string,{kind:string;newRunId:string}>();
   const service=openBackupService({privateDataRoot:f.root,now:()=>time,
     quiesce:{async acquire(){return {artifacts:[],release(){}};}},
-    restore:{preview(){return {differences:['no overwrite; offline owned destination'],blockers:[],targetFingerprint:fingerprint};},async apply(){applied++;return {kind:'restored',newRunId:randomUUID()};}}});
+    restore:{preview(){return {differences:['no overwrite; offline owned destination'],blockers:[],targetFingerprint:fingerprint};},async apply(input){const prior=results.get(input.operationId);if(prior)return prior;applied++;const result={kind:'restored',newRunId:randomUUID()};results.set(input.operationId,result);return result;}}});
   try {
     const backupId=randomUUID();await service.create({backupId,scope:{kind:'all'}});
-    const p=service.preview({backupId,mode:'fork'});
-    await assert.rejects(service.restore({previewToken:p.previewToken,confirmDiffHash:'0'.repeat(64)}),/DIFF_CONFIRMATION/);
-    fingerprint='diverged';await assert.rejects(service.restore({previewToken:p.previewToken,confirmDiffHash:p.diffHash}),/TARGET_DIVERGED/);assert.equal(applied,0);
-    fingerprint='before';time=400000;await assert.rejects(service.restore({previewToken:p.previewToken,confirmDiffHash:p.diffHash}),/EXPIRED/);
-    const fresh=service.preview({backupId,mode:'fork'});const result=await service.restore({previewToken:fresh.previewToken,confirmDiffHash:fresh.diffHash});
-    assert.deepEqual(await service.restore({previewToken:fresh.previewToken,confirmDiffHash:fresh.diffHash}),result);assert.equal(applied,1);
+    const p=service.preview({backupId,mode:'fork',principalId:'backup-test',sourceRunId:runId,name:'Destino sintético',reason:'Prueba de restauración'});
+    await assert.rejects(service.restore({principalId:'backup-test',previewToken:p.previewToken,confirmDiffHash:'0'.repeat(64)}),/DIFF_CONFIRMATION/);
+    fingerprint='diverged';await assert.rejects(service.restore({principalId:'backup-test',previewToken:p.previewToken,confirmDiffHash:p.diffHash}),/TARGET_DIVERGED/);assert.equal(applied,0);
+    fingerprint='before';time=400000;await assert.rejects(service.restore({principalId:'backup-test',previewToken:p.previewToken,confirmDiffHash:p.diffHash}),/EXPIRED/);
+    const fresh=service.preview({backupId,mode:'fork',principalId:'backup-test',sourceRunId:runId,name:'Destino sintético',reason:'Prueba de restauración'});const result=await service.restore({principalId:'backup-test',previewToken:fresh.previewToken,confirmDiffHash:fresh.diffHash});
+    assert.deepEqual(await service.restore({principalId:'backup-test',previewToken:fresh.previewToken,confirmDiffHash:fresh.diffHash}),result);assert.equal(applied,1);
   } finally {service.close();f.cleanup();}
+});
+
+test('verify checks WAL from a private copy without creating SHM or modifying bundle files',async()=>{
+ const f=fixture();const service=openBackupService({privateDataRoot:f.root,quiesce:{async acquire(){return {artifacts:[{path:f.memoryPath,kind:'fork-memory'},{path:f.memoryPath+'-wal',kind:'fork-memory'}],release(){}};}}});
+ try{const backupId=randomUUID();const job=await service.create({backupId,scope:{kind:'all'}});assert.equal(job.state,'succeeded');const root=join(f.root,'backups',backupId);const before=readdirSync(root,{recursive:true}).map(String).sort();assert.equal(before.some(path=>path.endsWith('-shm')),false);const bytes=new Map(before.filter(path=>statSync(join(root,path)).isFile()).map(path=>[path,readFileSync(join(root,path))]));for(let i=0;i<2;i++)service.verify(backupId);assert.deepEqual(readdirSync(root,{recursive:true}).map(String).sort(),before);for(const [path,content] of bytes)assert.deepEqual(readFileSync(join(root,path)),content);
+ }finally{service.close();f.cleanup();}
 });

@@ -147,7 +147,7 @@ async function createSession(origin: string): Promise<{ cookie: string; csrfToke
   const cookieHeader = response.headers.get('set-cookie');
   assert.ok(cookieHeader);
   const cookie = cookieHeader.split(';', 1)[0];
-  if (cookie === undefined || !cookie.startsWith('personajes_session=')) throw new Error('session cookie omitted');
+  if (cookie === undefined || !cookie.startsWith(`personajes_session_${new URL(origin).port}=`)) throw new Error('session cookie omitted');
   assert.match(cookieHeader, /HttpOnly/);
   assert.match(cookieHeader, /SameSite=Strict/);
   assert.match(cookieHeader, /Path=\/api\/v1/);
@@ -875,4 +875,24 @@ test('HTTP rechaza editar o validar una preparación de fork publicada con confl
     assert.equal(response.status, 409, await response.clone().text());
     assert.equal(problemCode(await response.json()), 'FORK_PREPARATION_READ_ONLY');
   }
+});
+
+test('HTTP sessions remain independent across loopback ports in a shared hostname cookie jar',async(t)=>{
+ const first=await startServer(t);const second=await startServer(t);
+ const firstSession=await createSession(first.origin);const secondSession=await createSession(second.origin);
+ const jar=new Map<string,string>();
+ function absorb(pair:string){const separator=pair.indexOf('=');assert.ok(separator>0);jar.set(pair.slice(0,separator),pair.slice(separator+1));}
+ absorb(firstSession.cookie);absorb(secondSession.cookie);assert.equal(jar.size,2,'starting another local host must not replace the first cookie');
+ const cookie=()=>[...jar].map(([name,value])=>`${name}=${value}`).join('; ');
+ const read=(origin:string,provided=cookie())=>fetch(origin+'/api/v1/session',{headers:securePrivateHeaders(origin,provided)});
+ assert.equal((await read(first.origin)).status,200);assert.equal((await read(second.origin)).status,200);
+ assert.equal((await read(first.origin,secondSession.cookie)).status,401,'another port cookie cannot authorize this host');
+ assert.equal((await read(second.origin,firstSession.cookie)).status,401);
+ const firstValue=firstSession.cookie.slice(firstSession.cookie.indexOf('=')+1);
+ assert.equal((await read(first.origin,`personajes_session=${firstValue}`)).status,401,'legacy cookies never grant authority');
+ const wrongCsrf=await fetch(first.origin+'/api/v1/session',{method:'DELETE',headers:{...securePrivateHeaders(first.origin,cookie()),'X-CSRF-Token':secondSession.csrfToken}});assert.equal(wrongCsrf.status,403,'shared jar selects the correct host session');
+ const logout=await fetch(first.origin+'/api/v1/session',{method:'DELETE',headers:{...securePrivateHeaders(first.origin,cookie()),'X-CSRF-Token':firstSession.csrfToken}});assert.equal(logout.status,204);
+ const cleared=logout.headers.get('set-cookie');assert.ok(cleared);assert.ok(cleared.startsWith(`personajes_session_${new URL(first.origin).port}=;`));assert.match(cleared,/Max-Age=0/);
+ const clearedName=cleared.slice(0,cleared.indexOf('='));jar.delete(clearedName);
+ assert.equal((await read(first.origin)).status,401);assert.equal((await read(second.origin)).status,200,'logging out one port preserves the other session');
 });

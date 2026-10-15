@@ -12,11 +12,13 @@ import { prepareForkState } from './prepare-fork-state.ts';
 import { prepareForkDramaticSeed } from './fork-dramatic-seed.ts';
 import { prepareForkConfiguration } from './fork-configuration.ts';
 import { ForkPublicationPackageSchema } from './fork-package.ts';
+import { BackupForkSourceSchema, ForkSourceDataSchema } from './fork-source.ts';
 import type { openLocalHost } from './local-host.ts';
 
 const BeginSchema=z.strictObject({runId:RunIdSchema,commitIndex:RevisionSchema,worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,
  operationId:OperationIdSchema,principalId:z.string().trim().min(1).max(200),idempotencyKey:z.string().uuid(),
  name:z.string().trim().min(1).max(120),reason:z.string().trim().min(1).max(4000)});
+const BeginBackupSchema=BeginSchema.omit({runId:true,commitIndex:true,worldRevision:true,worldSeq:true}).extend({source:BackupForkSourceSchema});
 export type ForkProgress={operationId:string}&({kind:'memory';completed:number;total:number}|{kind:'artifacts'}|{kind:'ready'});
 function directory(path:string){
  if(!existsSync(path)){mkdirSync(path,{mode:0o700});syncDirectory(dirname(path));}
@@ -49,6 +51,13 @@ function sqliteArtifact(path:string){
   const db=new DatabaseSync(path,{readOnly:true});try{const rows=db.prepare('PRAGMA quick_check').all();if(rows.length!==1||z.strictObject({quick_check:z.string()}).parse(rows[0]).quick_check!=='ok')throw new Error('FORK_SQLITE_INVALID');}finally{db.close();}
   return {sha256:hash.digest('hex'),byteLength:stat.size};
  }finally{closeSync(fd);}
+}
+
+function publicationPackage(input:{source:z.infer<typeof ForkSourceDataSchema>;name:string;principalId:string;operationId:string}){
+ const state=prepareForkState({snapshot:input.source.snapshot,configuration:input.source.configuration,cuts:input.source.cuts,targetRunId:randomUUID()});
+ const drama=prepareForkDramaticSeed({structure:input.source.structure,state});
+ const prepared=prepareForkConfiguration({sourceConfiguration:input.source.configuration,state:drama.state,name:input.name,principalId:input.principalId,recordedAt:new Date().toISOString(),operationId:input.operationId});
+ return ForkPublicationPackageSchema.parse({kind:'fork-publication-package',state:drama.state,configuration:prepared.configuration,continuityFence:prepared.continuityFence,dramaticSeed:drama.seed});
 }
 
 /** Mechanical host operation only. No Pi, provider, source ICM read or actor scheduling. */
@@ -120,17 +129,28 @@ export function createForkRuntime(input:{host:ReturnType<typeof openLocalHost>;b
    if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');const request=BeginSchema.parse(raw);
    const existing=journal.findForkJob({principalId:request.principalId,idempotencyKey:request.idempotencyKey});
    if(existing!==undefined){
-    if(existing.operationId!==request.operationId||existing.source.runId!==request.runId||existing.source.commitIndex!==request.commitIndex
+    if(existing.backupOrigin!==undefined||existing.operationId!==request.operationId||existing.source.runId!==request.runId||existing.source.commitIndex!==request.commitIndex
      ||existing.source.worldRevision!==request.worldRevision||existing.source.worldSeq!==request.worldSeq||existing.name!==request.name||existing.reason!==request.reason)return {kind:'idempotencyConflict'} as const;
     schedule(existing);return {kind:'existing',job:existing} as const;
    }
    const source=journal.readForkSource({runId:request.runId,commitIndex:request.commitIndex,worldRevision:request.worldRevision,worldSeq:request.worldSeq});
    if(source.kind!=='found')return source;
-   const state=prepareForkState({snapshot:source.snapshot,configuration:source.configuration,cuts:source.cuts,targetRunId:randomUUID()});
-   const drama=prepareForkDramaticSeed({structure:source.structure,state});
-   const prepared=prepareForkConfiguration({sourceConfiguration:source.configuration,state:drama.state,name:request.name,principalId:request.principalId,recordedAt:new Date().toISOString(),operationId:request.operationId});
-   const packet=ForkPublicationPackageSchema.parse({kind:'fork-publication-package',state:drama.state,configuration:prepared.configuration,continuityFence:prepared.continuityFence,dramaticSeed:drama.seed});
+   const packet=publicationPackage({source,name:request.name,principalId:request.principalId,operationId:request.operationId});
    const result=journal.beginForkJob({operationId:request.operationId,principalId:request.principalId,idempotencyKey:request.idempotencyKey,name:request.name,reason:request.reason,package:packet});
+   if(result.kind==='created'||result.kind==='existing')schedule(result.job);return result;
+  },
+  beginFromBackup(raw:unknown){
+   if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');
+   const request=BeginBackupSchema.parse(raw);
+   const existing=journal.findForkJob({principalId:request.principalId,idempotencyKey:request.idempotencyKey});
+   if(existing!==undefined){
+    const source=request.source.cuts[0]?.source;
+    if(existing.operationId!==request.operationId||existing.backupOrigin===undefined||hashContinuistaValue(existing.backupOrigin)!==hashContinuistaValue(request.source.backup)
+     ||hashContinuistaValue(existing.source)!==hashContinuistaValue(source)||existing.name!==request.name||existing.reason!==request.reason)return {kind:'idempotencyConflict'} as const;
+    schedule(existing);return {kind:'existing',job:existing} as const;
+   }
+   const packet=publicationPackage({source:request.source,name:request.name,principalId:request.principalId,operationId:request.operationId});
+   const result=journal.beginForkJobFromBackup({operationId:request.operationId,principalId:request.principalId,idempotencyKey:request.idempotencyKey,name:request.name,reason:request.reason,package:packet,source:request.source});
    if(result.kind==='created'||result.kind==='existing')schedule(result.job);return result;
   },
   read(request:{operationId:string;principalId:string}){return journal.readForkJob({operationId:request.operationId,principalId:request.principalId});},
@@ -148,6 +168,7 @@ export function createForkRuntime(input:{host:ReturnType<typeof openLocalHost>;b
    }
    return result;
   },
+  recoverOperation(request:{operationId:string;principalId:string}){if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');const job=journal.readForkJob({operationId:request.operationId,principalId:request.principalId});if(job!==undefined)schedule(job);return job;},
   recover(){if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');for(const job of journal.listStagingForkJobs())schedule(job);},
   async suspendAdmissions():Promise<()=>void>{
    if(closed||admissionSuspended)throw new Error('BACKUP_FORK_BUSY');admissionSuspended=true;

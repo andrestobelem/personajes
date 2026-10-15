@@ -1,3 +1,4 @@
+import { createBackupForkRestorePort } from '../application/backup-fork-restore.ts';
 import { createForkRuntime } from '../application/fork-runtime.ts';
 import { createForkApplication } from '../application/fork-application.ts';
 import {createCircumstanceApplication} from '../application/direction-circumstances.ts';
@@ -66,6 +67,7 @@ const oauthController = new AbortController();
 let voices: ReturnType<typeof createVoiceRuntime> | undefined;
 let exchange: Awaited<ReturnType<typeof createExchangeRuntime>> | undefined;
 let forks: ReturnType<typeof createForkRuntime> | undefined;
+let restoreRecovery: Promise<unknown> | undefined;
 try {
   voices=createVoiceRuntime({host,...(process.env.PERSONAJES_PRIVATE_AUTH_ROOT===undefined?{}:{privateAuthRoot:process.env.PERSONAJES_PRIVATE_AUTH_ROOT}),onDiagnostic:diagnostic=>process.stderr.write(JSON.stringify(diagnostic)+'\n')});
   exchange=await createExchangeRuntime({host,catalog});
@@ -95,6 +97,7 @@ try {
       onNarrationPublished: event => voices?.onNarrationPublished(event),
     });
   }
+  exchange.backups.setRestorePort(createBackupForkRestorePort({host,...(forks===undefined?{}:{runtime:forks})}));
 } catch (error) {
   oauthController.abort();
   await forks?.close();
@@ -129,6 +132,8 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   });
 async function closeWorkersAndHost() {
   oauthController.abort();
+  await restoreRecovery?.catch(() => undefined);
+  await exchange?.backups.waitForRestores();
   await forks?.close();
   await voices?.close();
   exchange?.close();
@@ -225,6 +230,8 @@ process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 // Recovery can await memory processes or Pi. Shutdown handlers must exist first.
 try {
+  restoreRecovery=exchange?.backups.recoverRestores();
+  await restoreRecovery;
   forks?.recover();
   if (representation !== undefined) await representation.recover();
   else worldDeliveries?.recover();
