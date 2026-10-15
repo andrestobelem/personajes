@@ -131,3 +131,12 @@ Cierre verificado por el integrador: 1.125 pruebas aprobadas, cero fallos, una o
 - `source_foundation_review`: revisión independiente de las integraciones y límites de compatibilidad.
 
 La raíz construyó el resolver, integró documentación y corrigió textos obsoletos de C51. No se declara selector gráfico, inferencia externa ni aceptación integral.
+
+## Corte 53 — selector de fuentes
+
+- `source_selector_backend`: rutas autenticadas de catálogo/adaptación, composición y pruebas HTTP.
+- `source_selector_ui`: selector, paginación, procedencia, preservación y descarte, cancelación de respuestas tardías y pruebas de cliente/curación.
+- `source_portability_review`: prueba real de fork histórico y backup extranjero restaurado con ICM, fuente íntegra y aislamiento documental.
+- `source_selector_review`: revisión independiente sin bloqueantes y seis pruebas focales con ICM real.
+
+La raíz integró, comprobó el recorrido gráfico con reinicio, corrigió el desborde visual, verificó la suite completa y actualizó documentos. No acredita inferencia externa, audio ni aceptación integral.

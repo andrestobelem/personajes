@@ -155,3 +155,6 @@
 .host-recovery-workspace>p{max-width:80ch;line-height:1.65;color:#52675b}
 .host-recovery-workspace button{padding:10px 14px;border:1px solid #a5b6a1;border-radius:7px;background:#edf2e7}
 .host-recovery-workspace button:disabled{opacity:.55;cursor:default}
+
+/* Documentary hashes and adaptation labels must fit the preparation panel. */
+#draft-character-preparation{min-width:0} .preparation-source{min-width:0;overflow-wrap:anywhere}.preparation-source select{max-width:100%;min-width:0}

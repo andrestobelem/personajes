@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DossierSourceSchema, type DossierSource } from '../domain/dossier-source.ts';
 import { DossierSchema, type Dossier } from '../domain/catalog.ts';
 import { PreparedCharacterSchema, type PreparedCharacter, type ContinuityContext, GoalSchema, CapabilitySchema, InventoryItemSchema, RelationshipSchema, AdmittedAntecedentSchema, PreparationProvenanceSchema } from '../domain/preparation.ts';
 import { changeDraftField } from './draft-form.ts';
@@ -27,8 +28,11 @@ export function characterCurationForm(character?: PreparedCharacter): CharacterC
     unknownTopics: character.unknownPolicy.value.fields.filter((field) => field.kind === 'source-not-established').map((field) => field.topic).join('\n'),
     noInitialExperiences: character.initialExperience.value.kind === 'none' };
 }
-export function curateCharacter(input: { form: CharacterCurationForm; dossier: Dossier; continuity: ContinuityContext; existing?: PreparedCharacter; uuid: () => string; recordedAt: string }): PreparedCharacter {
+export function curateCharacter(input: { form: CharacterCurationForm; dossier: Dossier; continuity: ContinuityContext; existing?: PreparedCharacter; dossierSource?: DossierSource; uuid: () => string; recordedAt: string }): PreparedCharacter {
   const form = CharacterCurationFormSchema.parse(input.form); const dossier = DossierSchema.parse(input.dossier);
+  const suppliedSource = input.dossierSource ?? input.existing?.dossierSource;
+  const dossierSource = suppliedSource === undefined ? undefined : DossierSourceSchema.parse(suppliedSource);
+  if (dossierSource && JSON.stringify(dossierSource.frozenDossier) !== JSON.stringify(dossier)) throw new Error('La fuente completa no coincide con el expediente seleccionado.');
   if (form.provenanceKind === 'unselected') throw new Error('Elegí la procedencia de esta versión antes de aplicarla.');
   const known = new Set(dossier.sourceRefs.map((ref) => ref.id));
   if (form.sourceRefs.some((ref) => !known.has(ref))) throw new Error('Una referencia no pertenece al expediente seleccionado.');
@@ -41,7 +45,7 @@ export function curateCharacter(input: { form: CharacterCurationForm; dossier: D
   const initialExperience = form.noInitialExperiences ? curated({ kind: 'none' }) : input.existing?.initialExperience;
   const preservedExceptions = input.existing?.unknownPolicy.value.fields.filter((field) => field.kind === 'character-knowledge-adaptation') ?? [];
   if (preservedExceptions.length > 0) throw new Error('Esta preparación contiene excepciones enlazadas a adaptaciones. Conservá la versión; su edición específica aún no está disponible.');
-  return PreparedCharacterSchema.parse({ kind: 'prepared-character', schemaVersion: 1, characterId: dossier.characterId, dossierRevision: dossier.revision, dossierHash: dossier.contentHash, continuity: input.continuity, identityVersion: (input.existing?.identityVersion ?? 0) + 1,
+  return PreparedCharacterSchema.parse({ kind: 'prepared-character', schemaVersion: 1, characterId: dossier.characterId, ...(dossierSource ? { dossierSource } : {}), dossierRevision: dossier.revision, dossierHash: dossier.contentHash, continuity: input.continuity, identityVersion: (input.existing?.identityVersion ?? 0) + 1,
     identity: curated({ selfReference: form.selfReference, selfConcept: form.selfConcept, values: lines(form.values), dispositions: lines(form.dispositions), contradictions: lines(form.contradictions) }),
     voice: curated(form.voiceKind === 'spoken' ? { kind: 'spoken', recipe: form.voice } : { kind: 'nonverbal', description: form.voice }),
     antecedents: curated(form.antecedents.map((entry) => ({ ...entry, provenance }))), goals: curated(form.goals), relationships: curated(form.relationships), capabilities: curated(form.capabilities), inventory: curated(form.inventory), initialExperience,
@@ -52,4 +56,9 @@ export function applyCuratedCharacter(input: { draft: RunConfigurationDraft; cha
   if (input.draft.continuity.kind === 'empty' || JSON.stringify(input.draft.continuity.value) !== JSON.stringify(character.continuity)) throw new Error('La continuidad cambió. Revisá la preparación antes de aplicarla.');
   const roster = input.draft.roster.kind === 'empty' ? { eligibleCharacterIds: [character.characterId], activeCharacterIds: [character.characterId], preparedCharacters: [] } : input.draft.roster.value;
   return changeDraftField({ draft: input.draft, field: 'roster', value: { ...roster, eligibleCharacterIds: [...new Set([...roster.eligibleCharacterIds, character.characterId])], preparedCharacters: [...roster.preparedCharacters.filter((item) => item.characterId !== character.characterId), character] } });
+}
+
+/** Source changes preserve authored text while requiring a fresh provenance admission. */
+export function recuratingCharacterSource(form: CharacterCurationForm): CharacterCurationForm {
+  return { ...form, provenanceKind: 'unselected', sourceRefs: [], reason: '' };
 }

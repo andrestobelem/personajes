@@ -97,3 +97,9 @@ Create/update admiten fuentes nuevas o cambiadas dentro de la transacción despu
 Faltan selector visual, edición integral del expediente, verificación de portabilidad de estas fuentes en fork/backup y aceptación integral. El objetivo completo y los 77 requisitos permanecen pendientes de aceptación. [Evidencia, contratos y límites](fuentes-de-preparacion.md).
 
 Verificación C52: TypeScript y build aprobados; **1.146 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.147 totales), con ICM real. La revisión independiente comprobó 40 pruebas distintas de fuentes, admisión, Configurador y preflight sin bloqueantes. No se ejecutó inferencia externa ni QA gráfico del selector, todavía pendiente.
+
+## Corte 53 — selección gráfica y portabilidad de fuentes
+
+Conectados selector explícito de catálogo/adaptación, biblioteca paginada, recuración con procedencia nueva, guardado autenticado y reapertura del snapshot congelado. El navegador comprobó guardado en revisión 1, reinicio, identidad/fuente preservadas, bloqueo de edición y descarte que restaura la adaptación anterior. Se corrigió desborde visual del panel en ventana estrecha.
+
+La prueba con ICM real publica un corte histórico, exporta backup `.pba`, elimina el host original, transfiere a otro host, reinicia y restaura como fork conservando fuente completa sin importId local, sin investigación en prompt ni recuerdos documentales. TypeScript/build correctos; **1.152 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.153 totales). Revisión independiente sin bloqueantes. Faltan edición integral del expediente y aceptación completa del producto; los ocho pasos y los 77 requisitos continúan activos. [Evidencia y límites](seleccion-de-fuentes.md).

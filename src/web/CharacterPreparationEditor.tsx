@@ -4,12 +4,19 @@ import type { CatalogPage, DossierResponse } from '../domain/http.ts';
 import type { RunConfigurationDraft } from '../domain/production.ts';
 import { AntecedentIdSchema, CapabilityIdSchema, GoalIdSchema, InventoryItemIdSchema, type PreparedCharacter, type Capability } from '../domain/preparation.ts';
 import { CharacterIdSchema } from '../domain/values.ts';
-import { readDossier } from './client.ts';
-import { applyCuratedCharacter, characterCurationForm, curateCharacter, type CharacterCurationForm } from './character-preparation.ts';
+import type { DossierSource } from '../domain/dossier-source.ts';
+import type { DossierAdaptationSummary } from '../domain/dossier-exchange.ts';
+import { readCatalogPreparationSource, readAdaptationPreparationSource, readPreparationAdaptations, samePreparationSource } from './source-selection-client.ts';
+import { applyCuratedCharacter, characterCurationForm, curateCharacter, recuratingCharacterSource, type CharacterCurationForm } from './character-preparation.ts';
 
 export function CharacterPreparationEditor(props: { draft: RunConfigurationDraft; catalog: CatalogPage['items']; onChange: (draft: RunConfigurationDraft) => void; onPendingChange: (pending: boolean) => void; readOnly?: boolean }) {
   const [selected, setSelected] = React.useState('');
-  const [dossier, setDossier] = React.useState<DossierResponse>();
+  const [source, setSource] = React.useState<DossierSource>();
+  const dossier: DossierResponse | undefined = source?.frozenDossier;
+  const [adaptations, setAdaptations] = React.useState<DossierAdaptationSummary[]>([]);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [libraryLoading, setLibraryLoading] = React.useState(false);
+  const selectionGeneration = React.useRef(0);
   const [form, setForm] = React.useState(characterCurationForm());
   const [error, setError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -19,30 +26,64 @@ export function CharacterPreparationEditor(props: { draft: RunConfigurationDraft
   pendingCallback.current = props.onPendingChange;
   React.useEffect(() => { pendingCallback.current(dirty || loading); }, [dirty, loading]);
   React.useEffect(() => {
-    let active = true;
-    if (!selected) { setDossier(undefined); return; }
-    setLoading(true); setDossier(undefined); setError('');
-    void readDossier({ id: selected }).then((data) => { if (active) { setDossier(data); setForm(characterCurationForm(existing)); } }).catch(() => { if (active) setError('No se pudo abrir el expediente. Tu contexto guardado se conserva.'); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-    // Existing contexts are reopened only on character selection, never over unsaved edits.
+    selectionGeneration.current += 1;
+    setSource(existing?.dossierSource); setForm(characterCurationForm(existing));
+    setAdaptations([]); setNextCursor(null); setError(''); setLoading(false); setLibraryLoading(false);
+    // Reopening uses the stored snapshot only. Never replace an edited form asynchronously.
+    return () => { selectionGeneration.current += 1; };
   }, [selected]);
+  async function chooseSource(choice: string) {
+    if (!choice || dirty || props.readOnly) return;
+    const generation = ++selectionGeneration.current;
+    setLoading(true); setError('');
+    try {
+      const next = choice === 'catalog' ? await readCatalogPreparationSource(selected) : await readAdaptationPreparationSource(choice);
+      if (generation !== selectionGeneration.current) return;
+      if (next.characterId !== selected) throw new Error('La fuente no pertenece al personaje seleccionado.');
+      if (source && samePreparationSource(source, next)) return;
+      setSource(next); setForm((current) => recuratingCharacterSource(current)); setDirty(true);
+    } catch (failure) { if (generation === selectionGeneration.current) setError(failure instanceof Error ? failure.message : 'No se pudo abrir la fuente.'); }
+    finally { if (generation === selectionGeneration.current) setLoading(false); }
+  }
+  async function loadAdaptations(cursor?: string) {
+    const generation = selectionGeneration.current;
+    setLibraryLoading(true); setError('');
+    try {
+      const page = await readPreparationAdaptations({ characterId: selected, ...(cursor ? { cursor } : {}) });
+      if (generation !== selectionGeneration.current) return;
+      if (page.adaptations.some((entry) => entry.characterId !== selected)) throw new Error('La biblioteca devolvió otro personaje.');
+      setAdaptations((current) => cursor ? [...current, ...page.adaptations.filter((entry) => !current.some((old) => old.adaptationId === entry.adaptationId))] : page.adaptations);
+      setNextCursor(page.nextCursor);
+    } catch (failure) { if (generation === selectionGeneration.current) setError(failure instanceof Error ? failure.message : 'No se pudo abrir la biblioteca.'); }
+    finally { if (generation === selectionGeneration.current) setLibraryLoading(false); }
+  }
   function edit(next: CharacterCurationForm) { setForm(next); setDirty(true); setError(''); }
   function text(field: 'selfReference' | 'selfConcept' | 'values' | 'dispositions' | 'contradictions' | 'voice' | 'unknownTopics' | 'reason', label: string, maxLength: number) {
     return <label>{label}<textarea maxLength={maxLength} value={form[field]} onChange={(event) => edit({ ...form, [field]: event.target.value })} /></label>;
   }
   function apply() {
     try {
-      if (!dossier || props.draft.continuity.kind !== 'configured') throw new Error('Confirmá la continuidad y abrí el expediente antes de preparar el actor.');
-      const character = curateCharacter({ form, dossier, continuity: props.draft.continuity.value, ...(existing ? { existing } : {}), uuid: () => crypto.randomUUID(), recordedAt: new Date().toISOString() });
+      if (!dossier || !source || props.draft.continuity.kind !== 'configured') throw new Error('Confirmá la continuidad y abrí el expediente antes de preparar el actor.');
+      const character = curateCharacter({ form, dossier, dossierSource: source, continuity: props.draft.continuity.value, ...(existing ? { existing } : {}), uuid: () => crypto.randomUUID(), recordedAt: new Date().toISOString() });
       props.onChange(applyCuratedCharacter({ draft: props.draft, character })); setDirty(false); setError('');
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Revisá los campos de preparación.'); }
   }
   const owner = selected ? CharacterIdSchema.parse(selected) : undefined;
   return <section className="draft-section" id="draft-character-preparation"><div className="section-heading"><h3>Preparar a cada actor</h3><span className="field-state">{existing ? `Identidad v${existing.identityVersion}` : 'Sin contexto aplicado'}</span></div><p className="field-help">El expediente pertenece a la investigación. Sólo se entregan al actor los datos que admitas aquí para su continuidad, con procedencia explícita. No se importa automáticamente el dossier.</p>
-    <label>Personaje<select value={selected} disabled={dirty || loading} onChange={(event) => setSelected(event.target.value)}><option value="">Elegí un personaje</option>{props.catalog.map((entry) => <option key={entry.characterId} value={entry.characterId}>{entry.displayName}</option>)}</select></label>
+    <label>Personaje<select value={selected} disabled={dirty || loading || libraryLoading || props.readOnly} onChange={(event) => setSelected(event.target.value)}><option value="">Elegí un personaje</option>{props.catalog.map((entry) => <option key={entry.characterId} value={entry.characterId}>{entry.displayName}</option>)}</select></label>
+    {selected && <div className="edit-notice preparation-source">
+      {existing && !existing.dossierSource && <p>Preparación heredada sin fuente completa fijada. Su contexto guardado se conserva; elegí explícitamente una fuente para volver a curarlo.</p>}
+      <label>Fuente de preparación<select value="" disabled={dirty || loading || libraryLoading || props.readOnly} onChange={(event) => { void chooseSource(event.target.value); }}><option value="">Elegir fuente explícitamente</option><option value="catalog">Original del catálogo actual</option>{adaptations.map((entry) => <option key={entry.adaptationId} value={entry.adaptationId}>Adaptación · revisión {entry.revision} · {entry.fileName} · {entry.createdAt} · {entry.archiveHash.slice(0, 12)}</option>)}</select></label>
+      <button disabled={dirty || loading || libraryLoading || props.readOnly} onClick={() => { void loadAdaptations(); }}>Consultar adaptaciones guardadas</button>
+      {nextCursor && <button disabled={dirty || loading || libraryLoading || props.readOnly} onClick={() => { void loadAdaptations(nextCursor); }}>Cargar más adaptaciones</button>}
+      {libraryLoading && <p role="status">Consultando adaptaciones…</p>}
+      {source && <><p>Fuente fijada: {source.kind === 'catalog-original' ? 'original del catálogo' : 'adaptación guardada'} · revisión {source.revision}</p><details><summary>Identidad y procedencia completa de la fuente</summary><p>Archivo SHA-256: {source.fullArchiveHash}</p><p>Markdown SHA-256: {source.contentHash}</p>{source.kind === 'saved-adaptation' && <><p>Adaptación: {source.adaptationId} · importación: {source.importId}</p><p>Archivo recibido SHA-256: {source.importedArchiveHash}</p></>}<p>Intérpretes: {source.frozenDossier.performers.join(', ')}</p>{source.frozenDossier.adaptations.map((entry) => <p key={entry.adaptationId}>{entry.createdAt} · {entry.reason}</p>)}</details></>}
+      {dirty && <p>Hay cambios sin aplicar. Aplicá el contexto o descartá la edición antes de cambiar de fuente.</p>}
+      {!dossier && dirty && <button disabled={props.readOnly} onClick={() => { setForm(characterCurationForm(existing)); setSource(existing?.dossierSource); setDirty(false); }}>Descartar edición de contexto</button>}
+    </div>}
     {loading && <p role="status">Abriendo expediente…</p>}{error && <p className="error" role="alert">{error}</p>}
     {dossier && owner && <><details><summary>Consultar expediente y fuentes · revisión {dossier.revision}</summary><ReactMarkdown>{dossier.markdown}</ReactMarkdown></details>
-      <fieldset disabled={props.readOnly}><legend>Contexto de actuación situado</legend>
+      <fieldset disabled={props.readOnly || loading}><legend>Contexto de actuación situado</legend>
         {props.draft.continuity.kind !== 'configured' && <p className="edit-notice">Primero confirmá un corte de continuidad. El texto en edición no es aún un contexto preparado.</p>}
         <h4>Identidad</h4>{text('selfReference', 'Cómo se reconoce a sí mismo', 500)}{text('selfConcept', 'Concepto de sí · identidad extensa', 8_000)}{text('values', 'Valores · uno por línea', 20_000)}{text('dispositions', 'Disposiciones · una por línea', 20_000)}{text('contradictions', 'Contradicciones · una por línea', 20_000)}
         <h4>Habla y silencio</h4><label>Expresión<select value={form.voiceKind} onChange={(event) => edit({ ...form, voiceKind: event.target.value === 'nonverbal' ? 'nonverbal' : 'spoken' })}><option value="spoken">Habla</option><option value="nonverbal">No verbal</option></select></label>{text('voice', 'Receta de voz: registro, vocabulario, ritmo, relación con interlocutores y silencios', 20_000)}
@@ -57,7 +98,7 @@ export function CharacterPreparationEditor(props: { draft: RunConfigurationDraft
         {form.inventory.map((row, index) => <div className="edit-notice" key={row.itemId}><label>Objeto<input value={row.name} onChange={(event) => edit({ ...form, inventory: form.inventory.map((item, at) => at === index ? { ...item, name: event.target.value } : item) })} /></label><label>Descripción<textarea value={row.description} onChange={(event) => edit({ ...form, inventory: form.inventory.map((item, at) => at === index ? { ...item, description: event.target.value } : item) })} /></label><label>Cantidad<input type="number" min="1" value={row.quantity} onChange={(event) => edit({ ...form, inventory: form.inventory.map((item, at) => at === index ? { ...item, quantity: Number(event.target.value) } : item) })} /></label><label>Estado<select value={row.condition} onChange={(event) => edit({ ...form, inventory: form.inventory.map((item, at) => at === index ? { ...item, condition: event.target.value === 'usable' ? 'usable' : event.target.value === 'damaged' ? 'damaged' : 'unknown' } : item) })}><option value="unknown">Desconocido</option><option value="usable">Utilizable</option><option value="damaged">Dañado</option></select></label><button onClick={() => edit({ ...form, inventory: form.inventory.filter((_, at) => at !== index) })}>Quitar objeto</button></div>)}<button onClick={() => edit({ ...form, inventory: [...form.inventory, { itemId: InventoryItemIdSchema.parse(`objeto-${crypto.randomUUID()}`), name: '', description: '', quantity: 1, condition: 'unknown' }] })}>Agregar objeto</button>
         <h4>Memoria inicial y lagunas</h4><label><input type="checkbox" checked={form.noInitialExperiences} onChange={(event) => edit({ ...form, noInitialExperiences: event.target.checked })} />Declaro que no se importan experiencias de otra corrida</label>{existing?.initialExperience.value.kind === 'run-cut' && <p>Existe un corte previo: {existing.initialExperience.value.experiences.length} experiencias. Desmarcar conserva su procedencia y contenido exactos; marcar lo sustituye por ausencia declarada.</p>}{text('unknownTopics', 'Datos no establecidos · uno por línea', 20_000)}<p className="field-help">No inferir ni afirmar datos ausentes. El vacío del investigador no obliga al personaje a fingir amnesia.</p>
         <h4>Procedencia de esta versión</h4><p className="field-help">Aplicar reatribuye las secciones y antecedentes editables a la procedencia elegida. Las experiencias importadas conservan su recibo propio. Esta declaración es del operador, no prueba automática de canon.</p><label>Fundamento<select value={form.provenanceKind} onChange={(event) => { const kind = event.target.value; if (kind === 'unselected' || kind === 'dossier-evidence' || kind === 'explicit-adaptation' || kind === 'curator-declaration') edit({ ...form, provenanceKind: kind }); }}><option value="unselected">Sin elegir</option><option value="dossier-evidence">Evidencia del expediente</option><option value="explicit-adaptation">Adaptación explícita</option><option value="curator-declaration">Declaración del curador</option></select></label>{form.provenanceKind !== 'dossier-evidence' && text('reason', 'Motivo y límites de lo declarado', 4_000)}<div>{dossier.sourceRefs.map((source) => <label key={source.id}><input type="checkbox" checked={form.sourceRefs.includes(source.id)} onChange={(event) => edit({ ...form, sourceRefs: event.target.checked ? [...form.sourceRefs, source.id] : form.sourceRefs.filter((id) => id !== source.id) })} />{source.reference}<small>{source.kind} · {source.scope} · {source.uncertainty}</small></label>)}</div>
-        <button className="primary-button" disabled={!dirty || props.draft.continuity.kind !== 'configured'} onClick={apply}>Aplicar contexto preparado</button><button disabled={!dirty} onClick={() => { setForm(characterCurationForm(existing)); setDirty(false); setError(''); }}>Descartar edición de contexto</button>
+        <button className="primary-button" disabled={!dirty || props.draft.continuity.kind !== 'configured'} onClick={apply}>Aplicar contexto preparado</button><button disabled={!dirty} onClick={() => { setForm(characterCurationForm(existing)); setSource(existing?.dossierSource); setDirty(false); setError(''); }}>Descartar edición de contexto</button>
       </fieldset></>}
   </section>;
 }

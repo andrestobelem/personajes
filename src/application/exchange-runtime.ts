@@ -29,7 +29,7 @@ export async function createExchangeRuntime(input:{host:ReturnType<typeof openLo
   try{backups=openBackupService({privateDataRoot:input.host.privateDataRoot,quiesce:{async acquire(){if(!quiesce)throw new Error('BACKUP_QUIESCE_UNAVAILABLE');return await quiesce.acquire();}}});}
   catch(error){dossiers.close();throw error;}
   let routes:ReturnType<typeof createExchangeRoutes>;
-  try{routes=createExchangeRoutes({journalPath,dossiers,backups});}catch(error){backups.close();dossiers.close();throw error;}
+  try{routes=createExchangeRoutes({journalPath,dossiers,backups,readCatalogDossier(characterId){const dossier=dossiersById.get(CharacterIdSchema.parse(characterId));if(dossier===undefined)throw new Error('DOSSIER_NOT_FOUND');return dossier;}});}catch(error){backups.close();dossiers.close();throw error;}
   let closed=false;
   return Object.freeze({routes,dossiers,backups,preparationSourceAdmission,setBackupQuiesce(port:BackupQuiescePort){if(closed||quiesce)throw new Error('BACKUP_QUIESCE_ALREADY_CONFIGURED');quiesce=port;},close(){if(closed)return;closed=true;routes.close();backups.close();dossiers.close();}});
 }

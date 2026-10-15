@@ -168,3 +168,9 @@ Verificación final C50: TypeScript correcto, **1.042 pruebas aprobadas, cero fa
 ## Fuentes de preparación — corte 52
 
 El pedido de conservar fichas completas y procedencia avanza con biblioteca privada de adaptaciones, snapshot exacto completo, admisión transaccional al guardado y consumo de fuente congelada en Configurador/preflight. La curación no entrega investigación sin admitir al actor. Faltan selector visual, edición integral y aceptación del recorrido completo; ausencia legacy conserva compatibilidad. [Evidencia y límites](fuentes-de-preparacion.md).
+
+## Corte 53 — selección gráfica y portabilidad de fuentes
+
+Conectados selector explícito de catálogo/adaptación, biblioteca paginada, recuración con procedencia nueva, guardado autenticado y reapertura del snapshot congelado. El navegador comprobó guardado en revisión 1, reinicio, identidad/fuente preservadas, bloqueo de edición y descarte que restaura la adaptación anterior. Se corrigió desborde visual del panel en ventana estrecha.
+
+La prueba con ICM real publica un corte histórico, exporta backup `.pba`, elimina el host original, transfiere a otro host, reinicia y restaura como fork conservando fuente completa sin importId local, sin investigación en prompt ni recuerdos documentales. TypeScript/build correctos; **1.152 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux** (1.153 totales). Revisión independiente sin bloqueantes. Faltan edición integral del expediente y aceptación completa del producto; los ocho pasos y los 77 requisitos continúan activos. [Evidencia y límites](seleccion-de-fuentes.md).
