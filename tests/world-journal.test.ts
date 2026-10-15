@@ -815,7 +815,7 @@ test('jobs actorales coalescen intenciones, serializan claims y recuperan identi
     journal.close();
     const beforeV9 = new DatabaseSync(path);
     try {
-      beforeV9.exec('DROP TABLE actor_turn_job_inputs; DROP TABLE actor_turn_jobs; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31)');
+      beforeV9.exec('DROP TABLE actor_turn_job_inputs; DROP TABLE actor_turn_jobs; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32)');
     } finally { beforeV9.close(); }
     journal = openJournal({ path });
     assert.deepEqual(journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId), perceptions,
@@ -1271,7 +1271,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
       });
       assert.deepEqual(expectedSnapshots.map((row) => row.commit_index), [1, 2, 3]);
       assert.equal(beforeMigration.prepare('SELECT COUNT(*) AS n FROM world_commits').get()?.n, 3);
-      beforeMigration.exec('DROP TABLE world_commits; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31)');
+      beforeMigration.exec('DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE world_commits; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32)');
       assert.equal(beforeMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 5);
     } finally { beforeMigration.close(); }
 
@@ -1291,7 +1291,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
         SELECT run_id,origin_kind,origin_id,payload_json,payload_hash,commit_index,world_revision,last_seq,created_at
         FROM world_resolutions ORDER BY commit_index
       `).all(), legacyRows, 'world_resolutions actorAttempt permanece idéntico');
-      assert.equal(afterMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 31);
+      assert.equal(afterMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 32);
       assert.equal(afterMigration.prepare('SELECT COUNT(*) AS count FROM episodes').get()?.count, 0,
         'v29 no backfillea episodios para corridas heredadas');
       assert.equal(afterMigration.prepare('SELECT structure_revision FROM world_runs WHERE run_id=?').get(runId)?.structure_revision, 0);
@@ -1303,7 +1303,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
 
     journal.close();
     const removeVersionMarker = new DatabaseSync(path);
-    try { removeVersionMarker.exec('DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31)'); }
+    try { removeVersionMarker.exec('DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32)'); }
     finally { removeVersionMarker.close(); }
     journal = openJournal({ path });
     const idempotent = new DatabaseSync(path);
@@ -1890,7 +1890,7 @@ test('bloqueo durable libera asignaciones sin consumo y retry explícito conserv
           FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation));
         INSERT INTO actor_inputs_v12 SELECT * FROM actor_turn_job_inputs;
         DROP TABLE actor_turn_job_inputs; ALTER TABLE actor_inputs_v12 RENAME TO actor_turn_job_inputs;
-        DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31); COMMIT;`);
+        DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32); COMMIT;`);
     } finally { legacy.close(); }
     journal = openJournal({ path });
     assert.deepEqual(journal.scheduleActorTurnJob({ runId, actorId: maxId, pulseId }).kind, 'blocked', 'un job legado sin época demostrable se bloquea');
@@ -1999,6 +1999,75 @@ function coordinatorConfigurationFixture(active = [maxId, agentId], world = worl
     snapshotFence: { runId, revision: world.revision, seq: world.seq, fictionalAt: world.clock.instant }, preparedActorFences: [], participantAvailability: [] });
 }
 
+function routineConfigurationFixture(policy:unknown,windows:[number,number][]= [[1_000,1_500]]) {
+  const source=worldFixture();
+  const world=WorldSnapshotSchema.parse({...source,entities:source.entities.map((entity)=>entity.kind==='character'
+    ?{...entity,routine:entity.characterId===maxId?{kind:'windows',defaultState:'unavailable',windows:windows.map(([from,to])=>({from,to,state:'available'}))}:{kind:'always'}}:entity)});
+  return ReadyRunConfigurationSchema.parse({...coordinatorConfigurationFixture([maxId,agentId],world),circadianPolicy:policy});
+}
+
+test('v32 avanza sólo con política activa, acota el salto, reintenta por receipt y convoca al cruzar rutina',()=>{
+  const policy={kind:'advance-while-running',maxAdvanceMs:1_000};
+  withJournal((journal)=>{
+    registerRun(journal,routineConfigurationFixture({kind:'manual-only'}));
+    const manual=journal.advanceRoutineClock({runId,operationId:uuid(39_000)});
+    assert.equal(manual.kind,'notApplicable');if(manual.kind==='notApplicable')assert.equal(manual.reason,'policy');
+    assert.equal(journal.loadWorld({runId})?.clock.instant,0);
+  });
+  withJournal((journal)=>{
+    registerRun(journal,routineConfigurationFixture({kind:'advance-while-running',maxAdvanceMs:999}));
+    const capped=journal.advanceRoutineClock({runId,operationId:uuid(39_001)});
+    assert.equal(capped.kind,'notApplicable');if(capped.kind==='notApplicable')assert.equal(capped.reason,'boundary-too-far');
+    assert.equal(journal.loadWorld({runId})?.clock.instant,0);
+  });
+  withJournal((journal)=>{
+    registerRun(journal,routineConfigurationFixture(policy));
+    const before=journal.readWorldLifecycle({runId});assert.ok(before);
+    assert.equal(journal.setWorldLifecycle({runId,expectedWorldRevision:before.worldRevision,expectedConfigRevision:before.configRevision,target:'paused'}),'updated');
+    const paused=journal.advanceRoutineClock({runId,operationId:uuid(39_002)});
+    assert.equal(paused.kind,'notApplicable');if(paused.kind==='notApplicable')assert.equal(paused.reason,'inactive');
+    assert.equal(journal.loadWorld({runId})?.clock.instant,0);
+  });
+  withJournal((journal,path)=>{
+    registerRun(journal,routineConfigurationFixture(policy));
+    const operationId=uuid(39_003);
+    const advanced=journal.advanceRoutineClock({runId,operationId});
+    assert.equal(advanced.kind,'advanced');if(advanced.kind!=='advanced')assert.fail('No se avanzó hasta la siguiente frontera');
+    assert.equal(advanced.worldSeq,1);assert.equal(advanced.worldRevision,1);assert.equal(advanced.activationIds.length,1);
+    assert.equal(journal.loadWorld({runId})?.clock.instant,1_000);
+    journal.close();
+    const reopened=openJournal({path});
+    try{
+      const replay=reopened.advanceRoutineClock({runId,operationId});assert.equal(replay.kind,'existing');
+      assert.equal(reopened.loadWorld({runId})?.clock.instant,1_000);
+      const begun=reopened.beginCoordinatorPulse({runId});assert.equal(begun.kind,'started');
+      if(begun.kind!=='started')assert.fail('No se consumió la convocatoria durable');
+      assert.deepEqual(begun.pulse.cause,{kind:'actorActivation',id:advanced.activationIds[0],trigger:{kind:'routine-boundary',boundaryAt:1_000}});
+      assert.equal(begun.jobs.length,1);assert.deepEqual(begun.jobs[0]?.perceptionIds,[]);
+      assert.deepEqual(begun.jobs[0]?.activation?.trigger,{kind:'routine-boundary',boundaryAt:1_000});
+      const observations=reopened.readObservationEvents({runId,fromWorldSeq:1,toWorldSeq:1,afterWorldSeq:null,limit:10,communicationsOnly:false});
+      assert.equal(observations?.[0]?.event.kind,'clockAdvanced');
+      const inspect=new DatabaseSync(path);
+      try{
+        assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_perceptions WHERE run_id=?').get(runId)?.n,0);
+        assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_commits WHERE run_id=?').get(runId)?.n,1);
+        assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_events WHERE run_id=?').get(runId)?.n,1);
+      }finally{inspect.close();}
+    }finally{reopened.close();}
+  });
+  withJournal((journal)=>{
+    registerRun(journal,routineConfigurationFixture({kind:'manual-only'},[[0,50],[100,300]]));
+    registerAttempt(journal,proposalId,1,waitAttempt(39_004,maxId,0));
+    const committed=journal.commitWorldAttempt({runId,proposalId,version:1,ids:idSource(39_100)});
+    assert.equal(committed.resolution.kind,'applied');assert.equal(committed.resolution.newSnapshot.clock.instant,100);
+    const begun=journal.beginCoordinatorPulse({runId});assert.equal(begun.kind,'started');
+    if(begun.kind!=='started')assert.fail('El cruce producido por acción no convocó la ventana nueva');
+    assert.equal(begun.pulse.cause.kind,'actorActivation');
+    if(begun.pulse.cause.kind==='actorActivation')assert.deepEqual(begun.pulse.cause.trigger,{kind:'routine-boundary',boundaryAt:100});
+    assert.equal(begun.jobs.length,1);assert.deepEqual(begun.jobs[0]?.perceptionIds,[]);
+  });
+});
+
 test('coordinador conserva causa y cuota compartida, asigna destinatarios tardíos y migra v13 poblado', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-coordinator-'));
   const path = join(directory, 'world.sqlite'); let journal = openJournal({ path });
@@ -2015,7 +2084,7 @@ test('coordinador conserva causa y cuota compartida, asigna destinatarios tardí
     await createDeliverWorldWorker({ journal, runId, actorId: maxId }).drain();
     journal.close();
     const legacy = new DatabaseSync(path);
-    try { legacy.exec('DROP TABLE actor_activation_invitation_jobs; DROP TABLE actor_activation_invitations; DROP TABLE actor_activation_causes; DROP TABLE coordinator_pulses; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31);'); } finally { legacy.close(); }
+    try { legacy.exec('DROP TABLE actor_activation_invitation_jobs; DROP TABLE actor_activation_invitations; DROP TABLE actor_activation_causes; DROP TABLE routine_clock_advances; DROP TABLE coordinator_pulses; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32);'); } finally { legacy.close(); }
     journal = openJournal({ path });
     const begun = journal.beginCoordinatorPulse({ runId });
     if (begun.kind !== 'started') assert.fail('No se creó pulso');
@@ -2055,7 +2124,7 @@ test('coordinador conserva causa y cuota compartida, asigna destinatarios tardí
     assert.equal(journal.readCoordinatorPulse({runId,pulseId:begun.pulse.pulseId})?.state,'running');
     assert.equal(journal.readCoordinatorPulse({runId,pulseId:begun.pulse.pulseId})?.consumed,1);
     assert.equal(journal.beginCoordinatorPulse({runId}).kind,'existing');
-  } finally { journal.close(); rmSync(directory, {recursive:true,force:true}); }
+  } finally { try { journal.close(); } catch { /* openJournal cierra el handle si la migración falla. */ } rmSync(directory, {recursive:true,force:true}); }
 });
 
 
@@ -2160,7 +2229,7 @@ test('ledger Continuista v15 exige terminal completo, comparte cuota y acepta re
   try{
     // Restore an actual populated v14 database before introducing administrative tables.
     const legacy=new DatabaseSync(join(fixture.directory,'journal.sqlite'));
-    try{legacy.exec(`DROP TABLE continuista_receipts;DROP TABLE continuista_candidates;DROP TABLE continuista_checkpoints;DROP TABLE continuista_request_leases;DROP TABLE continuista_sessions;DROP TABLE continuista_jobs;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31);`);}finally{legacy.close();}
+    try{legacy.exec(`DROP TABLE continuista_receipts;DROP TABLE continuista_candidates;DROP TABLE continuista_checkpoints;DROP TABLE continuista_request_leases;DROP TABLE continuista_sessions;DROP TABLE continuista_jobs;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32);`);}finally{legacy.close();}
     const migrated=openJournal({path:join(fixture.directory,'journal.sqlite')});migrated.close();
     const actor=continuistaActorFactory(fixture);let reviewed=false;
     const worker=createActorTurnWorker({journal:fixture.journal,runtime:fixture.runtime,ids:fixture.ids,sessionFactory:actor.factory,
@@ -2280,7 +2349,7 @@ test('v16 reconcilia terminal y admin aceptado de v15 con nuevo claim sin reescr
     const path=join(fixture.directory,'journal.sqlite');const before=new DatabaseSync(path);
     let candidates:unknown[];let checkpoints:unknown[];
     try{candidates=before.prepare('SELECT canonical_payload,payload_hash FROM actor_pi_candidates ORDER BY candidate_id').all();checkpoints=before.prepare('SELECT payload_json,checkpoint_hash FROM actor_job_checkpoints ORDER BY checkpoint_hash').all();
-      before.exec('DROP TABLE actor_turn_reconciliations;DROP TABLE actor_terminal_proposals;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31);');}finally{before.close();}
+      before.exec('DROP TABLE actor_turn_reconciliations;DROP TABLE actor_terminal_proposals;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DELETE FROM schema_version WHERE version IN(16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32);');}finally{before.close();}
     reopened=openJournal({path});const recoveredJournal=reopened;const newLease={ownerToken:uuid(42_002),claimToken:uuid(42_003)};
     assert.equal(reopened.recoverAbandonedActorTurnJobClaims({ownerToken:newLease.ownerToken}),1);
     const claim=reopened.claimActorTurnJob({runId:originalExecution.runId,actorId:originalExecution.actorId,jobId:originalExecution.jobId,generation:originalExecution.generation,...newLease});if(claim.kind!=='claimed')assert.fail('Sin nuevo claim');

@@ -2,6 +2,12 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 36: reloj ficticio durable y convocatorias por ventana (v32)
+
+El journal v32 registra avances del reloj como eventos `clockAdvanced` y commits del Escenario, en una transacción con su recibo durable. `advance-while-running` sólo avanza una corrida habilitada y en ejecución hasta un límite explícito alcanzable dentro de `maxAdvanceMs`; `manual-only`, una corrida pausada y la recuperación no hacen avanzar el tiempo. La migración amplía el ledger de convocatorias con causas e invitaciones `routine-boundary`, agrupadas e idempotentes por límite ficticio. Los commits de acciones que cruzan una ventana admiten la misma causa. La invitación llega al actor como metadato administrativo, con inbox vacío y revalidación de disponibilidad, identidad, presencia, preparación y escena abierta. La convocatoria por metas iniciales de v31 se conserva.
+
+La suite completa con ICM local pasó con **565 pruebas: 564 aprobadas, cero fallidas y una omitida** por requerir Linux. `npm run typecheck`, `npm run build` y `git diff --check` pasaron. Las pruebas cubren límites, pausa, cruce por acción, replay tras reabrir SQLite y migraciones hasta v32. No se contactó a proveedores reales. Este corte no implementa recurrencia de ventanas, calendario día/noche ni una prueba de la cadena rutinaria hasta conversación; tampoco calibra el ritmo audiovisual de Get Smart. El objetivo y los 77 requisitos continúan abiertos.
+
 ## Corte 35: convocatoria inicial durable por metas
 
 El journal v31 registra una causa técnica y sus invitaciones a actores con metas activas al iniciar, reanudar o solicitar un paso. Cada invitación se vincula a un job actoral con inbox vacío; no crea percepciones, eventos ni commits ficticios. El coordinador revalida identidad, meta, disponibilidad y pertenencia a escena antes del pulso y del claim; conserva el corte de admisión como procedencia y congela el corte confirmado vigente al reclamar. `start`/`resume`/`step` admiten la causa de forma idempotente, y el ledger permite recuperar el mismo pulso tras reiniciar SQLite. Pausa y stop preservan el trabajo reanudable; cerrar la corrida terminaliza las invitaciones técnicas abiertas.

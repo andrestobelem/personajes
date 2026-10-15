@@ -268,6 +268,7 @@ const ActorPromptRequestSchema = z.strictObject({
   directionContext: ActorDirectionContextSchema.default(() => ({ directionRevision: RevisionSchema.parse(0), indications: [] })),
   activationContext: z.discriminatedUnion('kind', [
     z.strictObject({kind:z.literal('initial-goal')}),
+    z.strictObject({kind:z.literal('routine-boundary'),boundaryAt:FictionalInstantSchema}),
   ]).nullable().default(null),
 });
 
@@ -460,9 +461,12 @@ export async function compilePrivateActorPrompt(input: {
     'Pueden orientar tu interpretación, pero no reescriben tu identidad, biografía, objetivos, creencias, conocimientos, límites ni capacidades. No conviertas su texto en algo que otro personaje te haya dicho. Interprétalas desde tu punto de vista; puedes resistirte, dudar o no actuar si hacerlo contradice tu situación. No reveles este canal como diálogo.',
     JSON.stringify(request.directionContext.indications.map((indication)=>({scope:indication.scope,text:indication.text})),null,2),
   ].join('\n');
-  const activationText=request.activationContext===null?'':[
-    'CONVOCATORIA TÉCNICA DE INICIO (metadato administrativo; no es percepción, testimonio, recuerdo, parlamento ni hecho del Escenario):',
+  const activationText=request.activationContext===null?'':request.activationContext.kind==='initial-goal'?[
+    'CONVOCATORIA TÉCNICA POR META ACTIVA (metadato administrativo; no es percepción, testimonio, recuerdo, parlamento ni hecho del Escenario):',
     'El coordinador te invita a considerar tus objetivos activos desde la situación y la vista actuales. Esta convocatoria no te obliga a actuar ni prueba que haya ocurrido algo. Puedes proponer una acción, esperar, callar o no producir cambios si eso resulta coherente.',
+  ].join('\n'):[
+    'CONVOCATORIA TÉCNICA POR VENTANA DE RUTINA (metadato administrativo; no es percepción, testimonio, recuerdo, parlamento ni hecho del Escenario):',
+    `La ventana de rutina disponible comenzó en el instante ficticio ${request.activationContext.boundaryAt}. El reloj del Escenario y tu vista actual son la referencia; esta convocatoria no afirma que hayas percibido el cambio ni te obliga a actuar. Puedes actuar, esperar o callar según tu situación.`,
   ].join('\n');
   const prompt = [
     `Eres el actor agéntico que interpreta a ${JSON.stringify(request.prepared.identity.value.selfReference)}.`,

@@ -94,6 +94,8 @@ import {
   CoordinatorPulseLookupSchema,
   CoordinatorPulseViewSchema,
   CoordinatorPulseBeginResultSchema,
+  RoutineClockAdvanceRequestSchema,
+  RoutineClockAdvanceResultSchema,
   ActorTurnJobRetryResultSchema,
   ContinuistaJobExecutionSchema,
   ContinuistaJobViewSchema,
@@ -177,7 +179,7 @@ import {
 } from '../domain/model-time-budget.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { ContinuityReferenceSchema } from '../domain/preparation.ts';
-import { planActorActivationInvitations } from '../domain/actor-activation.ts';
+import { nextRoutineAdvance, planActorActivationInvitations } from '../domain/actor-activation.ts';
 import {
   ActorActivationIdSchema, ActorActivationInvitationIdSchema, CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
   EventIdSchema, FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
@@ -508,7 +510,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1710,6 +1712,74 @@ export function openJournal(input: { path: string }) {
     }
   }
 
+  if (initialVersion === undefined || initialVersion < 32) {
+    try {
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE actor_activation_causes_v32(
+          activation_id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          trigger_kind TEXT NOT NULL CHECK(trigger_kind IN('initial-goal','routine-boundary')),
+          boundary_at INTEGER CHECK(boundary_at IS NULL OR boundary_at>=0),activation_key TEXT NOT NULL,
+          configuration_hash TEXT NOT NULL,lifecycle_revision INTEGER NOT NULL CHECK(lifecycle_revision>=0),
+          world_revision INTEGER NOT NULL CHECK(world_revision>=0),world_seq INTEGER NOT NULL CHECK(world_seq>=0),fictional_at INTEGER NOT NULL CHECK(fictional_at>=0),
+          state TEXT NOT NULL CHECK(state IN('pending','running','completed','blocked')),
+          failure_reason TEXT,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(run_id,activation_key),UNIQUE(run_id,activation_id),
+          CHECK((trigger_kind='initial-goal' AND boundary_at IS NULL AND activation_key='initial-goal') OR
+            (trigger_kind='routine-boundary' AND boundary_at IS NOT NULL AND activation_key='routine:'||boundary_at)),
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        INSERT INTO actor_activation_causes_v32 SELECT activation_id,run_id,trigger_kind,NULL,'initial-goal',configuration_hash,
+          lifecycle_revision,world_revision,world_seq,fictional_at,state,failure_reason,created_at,updated_at FROM actor_activation_causes;
+        CREATE TABLE actor_activation_invitations_v32(
+          invitation_id TEXT PRIMARY KEY,activation_id TEXT NOT NULL,run_id TEXT NOT NULL,actor_id TEXT NOT NULL,
+          identity_version INTEGER NOT NULL CHECK(identity_version>=0),trigger_kind TEXT NOT NULL CHECK(trigger_kind IN('initial-goal','routine-boundary')),
+          boundary_at INTEGER CHECK(boundary_at IS NULL OR boundary_at>=0),
+          state TEXT NOT NULL CHECK(state IN('pending','assigned','consumed','blocked')),
+          failure_reason TEXT,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(activation_id,actor_id),UNIQUE(run_id,invitation_id),
+          FOREIGN KEY(run_id,activation_id) REFERENCES actor_activation_causes_v32(run_id,activation_id) ON DELETE RESTRICT,
+          CHECK((trigger_kind='initial-goal' AND boundary_at IS NULL) OR (trigger_kind='routine-boundary' AND boundary_at IS NOT NULL)),
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        INSERT INTO actor_activation_invitations_v32 SELECT invitation_id,activation_id,run_id,actor_id,identity_version,
+          trigger_kind,NULL,state,failure_reason,created_at,updated_at FROM actor_activation_invitations;
+        CREATE TABLE actor_activation_invitation_jobs_v32(
+          run_id TEXT NOT NULL,invitation_id TEXT NOT NULL,actor_id TEXT NOT NULL,job_id TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK(generation>=0),assigned_at INTEGER NOT NULL CHECK(assigned_at>=0),
+          PRIMARY KEY(run_id,invitation_id),UNIQUE(run_id,actor_id,job_id,generation),
+          FOREIGN KEY(run_id,invitation_id) REFERENCES actor_activation_invitations_v32(run_id,invitation_id) ON DELETE RESTRICT,
+          FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation) ON DELETE RESTRICT
+        );
+        INSERT INTO actor_activation_invitation_jobs_v32 SELECT run_id,invitation_id,actor_id,job_id,generation,assigned_at
+          FROM actor_activation_invitation_jobs;
+        DROP TABLE actor_activation_invitation_jobs;
+        DROP TABLE actor_activation_invitations;
+        DROP TABLE actor_activation_causes;
+        ALTER TABLE actor_activation_causes_v32 RENAME TO actor_activation_causes;
+        ALTER TABLE actor_activation_invitations_v32 RENAME TO actor_activation_invitations;
+        ALTER TABLE actor_activation_invitation_jobs_v32 RENAME TO actor_activation_invitation_jobs;
+        CREATE INDEX actor_activation_causes_pending ON actor_activation_causes(run_id,state,created_at);
+        CREATE INDEX actor_activation_invitations_pending ON actor_activation_invitations(activation_id,state,actor_id);
+        CREATE TABLE routine_clock_advances(
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,operation_id TEXT NOT NULL,
+          request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,
+          from_revision INTEGER NOT NULL CHECK(from_revision>=0),to_revision INTEGER NOT NULL CHECK(to_revision>from_revision),
+          from_at INTEGER NOT NULL CHECK(from_at>=0),to_at INTEGER NOT NULL CHECK(to_at>from_at),
+          event_id TEXT NOT NULL UNIQUE,commit_index INTEGER NOT NULL CHECK(commit_index>0),created_at INTEGER NOT NULL CHECK(created_at>=0),
+          PRIMARY KEY(run_id,operation_id),UNIQUE(run_id,from_revision,to_revision),UNIQUE(run_id,commit_index),
+          FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT
+        );
+        INSERT OR IGNORE INTO schema_version VALUES(32);
+      `);
+      const foreignKeyViolations = database.prepare('PRAGMA foreign_key_check').all();
+      if (foreignKeyViolations.length !== 0) throw new Error(`Migración v32 produjo referencias inválidas: ${JSON.stringify(foreignKeyViolations)}`);
+      database.exec('COMMIT; PRAGMA foreign_keys=ON;');
+    } catch (error) {
+      try { database.exec('ROLLBACK; PRAGMA foreign_keys=ON;'); } catch { /* Migration is atomic. */ }
+      database.close(); throw error;
+    }
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -2033,8 +2103,8 @@ export function openJournal(input: { path: string }) {
       }
       return input.perception_id;
     });
-    const activationValue = database.prepare(`SELECT i.activation_id,i.invitation_id,i.identity_version,i.trigger_kind,i.state,
-        c.state AS cause_state
+    const activationValue = database.prepare(`SELECT i.activation_id,i.invitation_id,i.identity_version,i.trigger_kind,i.boundary_at,i.state,
+        c.state AS cause_state,c.trigger_kind AS cause_trigger_kind,c.boundary_at AS cause_boundary_at
       FROM actor_activation_invitation_jobs j
       JOIN actor_activation_invitations i ON i.run_id=j.run_id AND i.invitation_id=j.invitation_id
       JOIN actor_activation_causes c ON c.run_id=i.run_id AND c.activation_id=i.activation_id
@@ -2042,11 +2112,14 @@ export function openJournal(input: { path: string }) {
       .get(row.run_id,row.actor_id,row.job_id,row.generation);
     const activation = activationValue === undefined ? null : z.strictObject({
       activation_id:ActorActivationIdSchema,invitation_id:ActorActivationInvitationIdSchema,identity_version:counter,
-      trigger_kind:z.literal('initial-goal'),state:z.enum(['pending','assigned','consumed','blocked']),
+      trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:counter.nullable(),
+      cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:counter.nullable(),
+      state:z.enum(['pending','assigned','consumed','blocked']),
       cause_state:z.enum(['pending','running','completed','blocked']),
     }).parse(activationValue);
     if (activation !== null) {
-      if (inputs.length !== 0 || activation.trigger_kind !== 'initial-goal'
+      if (inputs.length !== 0 || activation.trigger_kind !== activation.cause_trigger_kind
+        || activation.boundary_at !== activation.cause_boundary_at
         || (row.state === 'queued' && activation.state !== 'assigned')
         || (row.state === 'running' && activation.state !== 'assigned')
         || (row.state === 'accepted' && !['assigned','consumed'].includes(activation.state))
@@ -2060,7 +2133,8 @@ export function openJournal(input: { path: string }) {
       failureCode: row.failure_code, perceptionIds: inputs, frozenPerceptionIds, frozenWorldCut,
       frozenDirectionRevision: row.frozen_direction_revision,
       activation:activation === null?null:{activationId:activation.activation_id,invitationId:activation.invitation_id,
-        identityVersion:activation.identity_version,trigger:{kind:'initial-goal'}},
+        identityVersion:activation.identity_version,trigger:activation.trigger_kind==='initial-goal'
+          ?{kind:'initial-goal'}:{kind:'routine-boundary',boundaryAt:FictionalInstantSchema.parse(activation.boundary_at)}},
     });
   }
 
@@ -2108,11 +2182,14 @@ export function openJournal(input: { path: string }) {
       ? (() => {
         if (row.commit_index !== null) throw new Error('Pulso técnico de activación contiene commit index');
         const activationId=ActorActivationIdSchema.parse(row.origin_id);
-        const activationValue=database.prepare('SELECT state FROM actor_activation_causes WHERE run_id=? AND activation_id=?')
+        const activationValue=database.prepare('SELECT state,trigger_kind,boundary_at FROM actor_activation_causes WHERE run_id=? AND activation_id=?')
           .get(row.run_id,activationId);
         if(activationValue===undefined)throw new Error('Pulso técnico sin causa de activación durable');
-        z.strictObject({state:z.enum(['pending','running','completed','blocked'])}).parse(activationValue);
-        return {kind:'actorActivation' as const,id:activationId,trigger:{kind:'initial-goal' as const}};
+        const activation=z.strictObject({state:z.enum(['pending','running','completed','blocked']),
+          trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:counter.nullable()}).parse(activationValue);
+        const trigger=activation.trigger_kind==='initial-goal'?{kind:'initial-goal' as const}
+          :{kind:'routine-boundary' as const,boundaryAt:FictionalInstantSchema.parse(activation.boundary_at)};
+        return {kind:'actorActivation' as const,id:activationId,trigger};
       })()
       : (() => {
         if (row.commit_index === null) throw new Error('Pulso causado por evento sin commit index');
@@ -3958,37 +4035,78 @@ export function openJournal(input: { path: string }) {
     if(invitations.length===0)return;
     const activationId=ActorActivationIdSchema.parse(randomUUID());
     database.prepare(`INSERT INTO actor_activation_causes(activation_id,run_id,trigger_kind,configuration_hash,lifecycle_revision,
-      world_revision,world_seq,fictional_at,state,failure_reason,created_at,updated_at)
-      VALUES(?,?,'initial-goal',?,?,?,?,?,'pending',NULL,?,?)`)
+      world_revision,world_seq,fictional_at,state,failure_reason,created_at,updated_at,boundary_at,activation_key)
+      VALUES(?,?,'initial-goal',?,?,?,?,?,'pending',NULL,?, ?,NULL,'initial-goal')`)
       .run(activationId,run.row.run_id,run.row.configuration_hash,run.row.lifecycle_revision,run.row.world_revision,run.row.last_seq,
         run.snapshot.clock.instant,recordedAt,recordedAt);
     for(const invitation of invitations){
       const invitationId=ActorActivationInvitationIdSchema.parse(randomUUID());
       database.prepare(`INSERT INTO actor_activation_invitations(invitation_id,activation_id,run_id,actor_id,identity_version,
-        trigger_kind,state,failure_reason,created_at,updated_at)
-        VALUES(?,?,?, ?,?,'initial-goal','pending',NULL,?,?)`)
+        trigger_kind,boundary_at,state,failure_reason,created_at,updated_at)
+        VALUES(?,?,?, ?,?,'initial-goal',NULL,'pending',NULL,?,?)`)
         .run(invitationId,activationId,run.row.run_id,invitation.actorId,invitation.identityVersion,recordedAt,recordedAt);
     }
   }
 
+  function admitRoutineBoundaryActivations(run:ReturnType<typeof parseWorldRun>,configuration:z.infer<typeof ReadyRunConfigurationSchema>,previousInstant:number,recordedAt:number) {
+    if(run.row.lifecycle!=='running'||run.snapshot.clock.instant<=previousInstant)return [] as string[];
+    const invitations=planActorActivationInvitations({snapshot:run.snapshot,activeCharacterIds:configuration.roster.activeCharacterIds,previousInstant})
+      .filter((invitation)=>invitation.trigger.kind==='routine-boundary');
+    const grouped=new Map<number,typeof invitations>();
+    for(const invitation of invitations){
+      if(invitation.trigger.kind!=='routine-boundary')continue;
+      const group=grouped.get(invitation.trigger.boundaryAt)??[];
+      group.push(invitation);grouped.set(invitation.trigger.boundaryAt,group);
+    }
+    const admitted:string[]=[];
+    for(const [boundaryAt,actors] of grouped){
+      const activationKey=`routine:${boundaryAt}`;
+      const existing=database.prepare('SELECT activation_id FROM actor_activation_causes WHERE run_id=? AND activation_key=?')
+        .get(run.row.run_id,activationKey);
+      if(existing!==undefined)continue;
+      const activationId=ActorActivationIdSchema.parse(randomUUID());
+      database.prepare(`INSERT INTO actor_activation_causes(activation_id,run_id,trigger_kind,boundary_at,activation_key,
+        configuration_hash,lifecycle_revision,world_revision,world_seq,fictional_at,state,failure_reason,created_at,updated_at)
+        VALUES(?,?,'routine-boundary',?,?, ?,?,?,?,?, 'pending',NULL,?,?)`)
+        .run(activationId,run.row.run_id,boundaryAt,activationKey,run.row.configuration_hash,run.row.lifecycle_revision,
+          run.row.world_revision,run.row.last_seq,run.snapshot.clock.instant,recordedAt,recordedAt);
+      for(const invitation of actors){
+        if(invitation.trigger.kind!=='routine-boundary')continue;
+        const invitationId=ActorActivationInvitationIdSchema.parse(randomUUID());
+        database.prepare(`INSERT INTO actor_activation_invitations(invitation_id,activation_id,run_id,actor_id,identity_version,
+          trigger_kind,boundary_at,state,failure_reason,created_at,updated_at)
+          VALUES(?,?,?,?,?,'routine-boundary',?,'pending',NULL,?,?)`)
+          .run(invitationId,activationId,run.row.run_id,invitation.actorId,invitation.identityVersion,boundaryAt,recordedAt,recordedAt);
+      }
+      admitted.push(activationId);
+    }
+    return admitted;
+  }
+
   function activationInvitationIneligibility(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;invitationId:string}):string|undefined {
-    const value=database.prepare(`SELECT i.activation_id,i.actor_id,i.identity_version,i.state,c.state AS cause_state,
-        c.configuration_hash
+    const value=database.prepare(`SELECT i.activation_id,i.actor_id,i.identity_version,i.trigger_kind,i.boundary_at,i.state,c.state AS cause_state,
+        c.configuration_hash,c.trigger_kind AS cause_trigger_kind,c.boundary_at AS cause_boundary_at
       FROM actor_activation_invitations i JOIN actor_activation_causes c ON c.run_id=i.run_id AND c.activation_id=i.activation_id
       WHERE i.run_id=? AND i.invitation_id=?`).get(input.run.row.run_id,input.invitationId);
     if(value===undefined)return 'invitation_missing';
     const row=z.strictObject({activation_id:ActorActivationIdSchema,actor_id:CharacterIdSchema,identity_version:counter,
+      trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:counter.nullable(),
       state:z.enum(['pending','assigned','consumed','blocked']),cause_state:z.enum(['pending','running','completed','blocked']),
-      configuration_hash:HashSchema}).parse(value);
+      configuration_hash:HashSchema,cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:counter.nullable()}).parse(value);
     if(row.state!=='pending'&&row.state!=='assigned')return 'invitation_not_pending';
     if(row.cause_state!=='pending'&&row.cause_state!=='running')return 'activation_not_pending';
     if(row.configuration_hash!==input.run.row.configuration_hash)return 'configuration_changed';
     const actor=input.run.snapshot.entities.find((entity)=>entity.kind==='character'&&entity.characterId===row.actor_id);
     const scene=input.run.snapshot.scenes.find((item)=>item.id===input.run.snapshot.activeSceneId);
-    if(!input.configuration.roster.activeCharacterIds.includes(row.actor_id)
+    const routineWindow=row.trigger_kind==='routine-boundary'&&row.boundary_at!==null&&actor?.kind==='character'&&actor.routine.kind==='windows'
+      ?actor.routine.windows.find((window)=>window.from===row.boundary_at):undefined;
+    const triggerMatches=row.trigger_kind===row.cause_trigger_kind&&row.boundary_at===row.cause_boundary_at
+      &&(row.trigger_kind==='initial-goal'?row.boundary_at===null:row.boundary_at!==null&&routineWindow?.state==='available'
+        &&input.run.snapshot.clock.instant>=row.boundary_at&&input.run.snapshot.clock.instant<routineWindow.to);
+    if(!triggerMatches||!input.configuration.roster.activeCharacterIds.includes(row.actor_id)
       ||!input.configuration.roster.preparedCharacters.some((item)=>item.characterId===row.actor_id&&item.identityVersion===row.identity_version)
       ||actor?.kind!=='character'||actor.preparation.kind!=='prepared'||actor.preparation.identityVersion!==row.identity_version
-      ||!actor.mind.goals.some((goal)=>goal.state==='active')||scene?.lifecycle.kind!=='open'||!scene.participantIds.includes(row.actor_id)
+      ||(row.trigger_kind==='initial-goal'&&!actor.mind.goals.some((goal)=>goal.state==='active'))||scene?.lifecycle.kind!=='open'||!scene.participantIds.includes(row.actor_id)
       ||actor.presence.kind!=='present'||actor.presence.sceneId!==scene.id
       ||!characterCanReceiveAt({snapshot:input.run.snapshot,characterId:row.actor_id}))return 'actor_ineligible';
     return undefined;
@@ -4977,6 +5095,9 @@ export function openJournal(input: { path: string }) {
             snapshotPayload.json, snapshotPayload.hash, committedAt, request.runId,
             run.row.world_revision, run.row.commit_index);
           if (updated.changes !== 1) throw new Error('CAS de world revision falló al guardar intervención');
+          const committedRun=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
+          const readyConfiguration=ReadyRunConfigurationSchema.safeParse(committedRun.configuration);
+          if(readyConfiguration.success)admitRoutineBoundaryActivations(committedRun,readyConfiguration.data,run.snapshot.clock.instant,committedAt);
         }
 
         const resolutionPayload = hashJson(resolution);
@@ -5195,6 +5316,9 @@ export function openJournal(input: { path: string }) {
           snapshotPayload.json, snapshotPayload.hash, committedAt, request.runId,
           run.row.world_revision, run.row.commit_index);
         if (updated.changes !== 1) throw new Error('CAS de world revision falló');
+        const committedRun=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
+        const readyConfiguration=ReadyRunConfigurationSchema.safeParse(committedRun.configuration);
+        if(readyConfiguration.success)admitRoutineBoundaryActivations(committedRun,readyConfiguration.data,run.snapshot.clock.instant,committedAt);
         database.prepare(`UPDATE world_proposals SET status='resolved' WHERE run_id=? AND proposal_id=? AND version=? AND status='pending'`)
           .run(request.runId, request.proposalId, request.version);
         return { kind: 'committed' as const, commitIndex, resolution };
@@ -6472,6 +6596,74 @@ export function openJournal(input: { path: string }) {
           JOIN actor_turn_jobs a ON a.run_id=w.run_id AND a.job_id=w.job_id AND a.generation=w.generation
           WHERE a.run_id=? AND a.pulse_id=? AND d.state<>'delivered' LIMIT 1`).get(request.runId,job.pulseId);
         return finishStepJob(request.runId,request.failed || pulse.state === 'blocked' || undelivered !== undefined ? 'failed' : 'succeeded');
+      });
+    },
+
+    advanceRoutineClock(input: unknown) {
+      const request=RoutineClockAdvanceRequestSchema.parse(input);
+      return transact(()=>{
+        const requestHash=hashJson({runId:request.runId}).hash;
+        const prior=database.prepare('SELECT request_hash,result_json,result_hash FROM routine_clock_advances WHERE run_id=? AND operation_id=?')
+          .get(request.runId,request.operationId);
+        if(prior!==undefined){
+          const row=z.strictObject({request_hash:HashSchema,result_json:z.string(),result_hash:HashSchema}).parse(prior);
+          if(row.request_hash!==requestHash)throw new Error('El ID de avance de reloj ya identifica otra solicitud');
+          if(sha256(row.result_json)!==row.result_hash)throw new Error('Hash de recibo de avance ficticio no coincide');
+          const result=RoutineClockAdvanceResultSchema.parse(parseStoredJson(row.result_json));
+          if(canonicalJson(result)!==row.result_json||result.kind!=='advanced')throw new Error('Recibo de avance ficticio no canónico');
+          return RoutineClockAdvanceResultSchema.parse({...result,kind:'existing'});
+        }
+        const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+        if(value===undefined)return RoutineClockAdvanceResultSchema.parse({kind:'notApplicable',reason:'inactive',worldRevision:null,lifecycleRevision:null});
+        const run=parseWorldRun(value);
+        const notApplicable=(reason:'inactive'|'policy'|'no-boundary'|'boundary-too-far'|'step-bound')=>
+          RoutineClockAdvanceResultSchema.parse({kind:'notApplicable',reason,worldRevision:run.row.world_revision,lifecycleRevision:run.row.lifecycle_revision});
+        if(run.row.lifecycle!=='running')return notApplicable('inactive');
+        const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+        if(configuration.circadianPolicy.kind!=='advance-while-running')return notApplicable('policy');
+        const step=activeStepJob(request.runId);
+        if(step?.pulseId!==undefined&&step.pulseId!==null)return notApplicable('step-bound');
+        const boundaryAt=nextRoutineAdvance({snapshot:run.snapshot,policy:configuration.circadianPolicy,lifecycle:run.row.lifecycle});
+        if(boundaryAt===undefined){
+          const hasFutureBoundary=run.snapshot.entities.some((actor)=>actor.kind==='character'&&actor.routine.kind==='windows'
+            &&actor.routine.windows.some((window)=>window.from>run.snapshot.clock.instant||window.to>run.snapshot.clock.instant));
+          return notApplicable(hasFutureBoundary?'boundary-too-far':'no-boundary');
+        }
+        const fromAt=run.snapshot.clock.instant;
+        const toAt=FictionalInstantSchema.parse(boundaryAt);
+        const durationMs=toAt-fromAt;
+        const timestamp=Date.now();
+        const operationId=request.operationId;
+        const event=WorldEventSchema.parse({id:EventIdSchema.parse(randomUUID()),runId:request.runId,
+          seq:WorldSeqSchema.parse(run.snapshot.seq+1),fictitiousAt:fromAt,durationMs,
+          origin:{kind:'system',causeClockAdvanceId:operationId},kind:'clockAdvanced',fromAt,toAt});
+        const newSnapshot=WorldSnapshotSchema.parse({...run.snapshot,revision:RevisionSchema.parse(run.snapshot.revision+1),
+          seq:WorldSeqSchema.parse(run.snapshot.seq+1),clock:{...run.snapshot.clock,instant:toAt}});
+        const commitIndex=RevisionSchema.parse(run.row.commit_index+1);
+        const snapshotPayload=hashJson(newSnapshot);
+        const updated=database.prepare(`UPDATE world_runs SET world_revision=?,last_seq=?,commit_index=?,snapshot_json=?,snapshot_hash=?,updated_at=?
+          WHERE run_id=? AND world_revision=? AND lifecycle_revision=? AND config_revision=? AND commit_index=?`)
+          .run(newSnapshot.revision,newSnapshot.seq,commitIndex,snapshotPayload.json,snapshotPayload.hash,timestamp,request.runId,
+            run.row.world_revision,run.row.lifecycle_revision,run.row.config_revision,run.row.commit_index);
+        if(updated.changes!==1)return RoutineClockAdvanceResultSchema.parse({kind:'stale',worldRevision:run.row.world_revision,
+          lifecycleRevision:run.row.lifecycle_revision});
+        database.prepare(`INSERT INTO world_commits(run_id,origin_kind,origin_id,commit_index,world_revision,last_seq,snapshot_json,snapshot_hash,created_at)
+          VALUES(?,'clockAdvance',?,?,?,?,?,?,?)`).run(request.runId,operationId,commitIndex,newSnapshot.revision,newSnapshot.seq,
+            snapshotPayload.json,snapshotPayload.hash,timestamp);
+        const eventPayload=hashJson(event);
+        database.prepare('INSERT INTO world_events(event_id,run_id,world_seq,origin_id,payload_json,payload_hash) VALUES(?,?,?,?,?,?)')
+          .run(event.id,request.runId,event.seq,operationId,eventPayload.json,eventPayload.hash);
+        const committedRun=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
+        const activationIds=admitRoutineBoundaryActivations(committedRun,configuration,fromAt,timestamp)
+          .map((activationId)=>ActorActivationIdSchema.parse(activationId));
+        const result=RoutineClockAdvanceResultSchema.parse({kind:'advanced',operationId,eventId:event.id,commitIndex,
+          worldRevision:newSnapshot.revision,worldSeq:newSnapshot.seq,activationIds});
+        const resultPayload=hashJson(result);
+        database.prepare(`INSERT INTO routine_clock_advances(run_id,operation_id,request_hash,result_json,result_hash,from_revision,to_revision,
+          from_at,to_at,event_id,commit_index,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(request.runId,operationId,requestHash,resultPayload.json,resultPayload.hash,run.row.world_revision,newSnapshot.revision,
+            fromAt,toAt,event.id,commitIndex,timestamp);
+        return result;
       });
     },
 

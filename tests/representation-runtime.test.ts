@@ -511,6 +511,32 @@ test('step admite una convocatoria inicial durable por meta, con inbox vacío y 
   }finally{host.close();rmSync(fixture.directory,{recursive:true,force:true});}
 });
 
+test('step sin actores elegibles se completa como no-op sin dejar un job abierto ni crear un pulso',async()=>{
+  const fixture=await setup();const host=hostFromFixture(fixture);const runId=registerAdditionalRun(fixture,host,false,false);
+  let runtime:Awaited<ReturnType<typeof createRepresentationRuntime>>|undefined;
+  try{
+    const running=host.journal.readWorldLifecycle({runId});assert.ok(running);
+    assert.equal(host.journal.setWorldLifecycle({runId,expectedWorldRevision:running.worldRevision,
+      expectedConfigRevision:running.configRevision,target:'paused'}),'updated');
+    const authorization=await authorizeSyntheticStep(host,runId);
+    const accepted=host.journal.applyRunLifecycleCommand({principalId:authorization.principalId,idempotencyKey:randomUUID(),runId,
+      expectedLifecycleRevision:authorization.state.lifecycleRevision,expectedConfigRevision:authorization.state.configRevision,
+      expectedWorldRevision:authorization.state.worldRevision,expectedStructureRevision:host.journal.readDramaticStructure({runId})?.structureRevision,
+      command:{kind:'step'},preflightJobId:authorization.preflightJobId});
+    assert.equal(accepted.kind,'accepted');if(accepted.kind!=='accepted')assert.fail('El step no fue admitido');
+    runtime=await createRepresentationRuntime({host,icmBinaryPath:'/host/not-needed/icm'});
+    assert.equal(await runtime.scheduleRun({runId}),true);
+    await runtime.waitForIdle();
+    const step=host.journal.readRunStepJob({runId,jobId:accepted.job.jobId});
+    assert.equal(step?.pulseId,null);assert.equal(step?.state,'succeeded');
+    assert.equal(host.journal.readWorldLifecycle({runId})?.lifecycle,'paused');
+    assert.equal(host.journal.listCoordinatorPulseTargets().some((target)=>target.runId===runId),false);
+  }finally{
+    if(runtime!==undefined)await runtime.close();else host.close();
+    rmSync(fixture.directory,{recursive:true,force:true});
+  }
+});
+
 test('cerrar una corrida terminaliza convocatorias iniciales pendientes y en curso',async()=>{
   const fixture=await setup();const host=hostFromFixture(fixture);
   try{

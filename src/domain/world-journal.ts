@@ -397,7 +397,10 @@ export const ActorTurnJobViewSchema = z.strictObject({
     activationId: ActorActivationIdSchema,
     invitationId: ActorActivationInvitationIdSchema,
     identityVersion: RevisionSchema,
-    trigger: z.strictObject({ kind: z.literal('initial-goal') }),
+    trigger: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('initial-goal') }),
+      z.strictObject({ kind: z.literal('routine-boundary'), boundaryAt: FictionalInstantSchema }),
+    ]),
   }).nullable().default(null),
 });
 
@@ -408,7 +411,10 @@ export const CoordinatorPulseViewSchema = z.strictObject({
   lifecycleRevision: RevisionSchema.nullable(),
   cause: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.enum(['humanIntervention', 'actorAttempt']), id: z.string().min(1).max(200), commitIndex: z.number().int().positive() }),
-    z.strictObject({ kind: z.literal('actorActivation'), id: ActorActivationIdSchema, trigger: z.strictObject({kind:z.literal('initial-goal')}) }),
+    z.strictObject({ kind: z.literal('actorActivation'), id: ActorActivationIdSchema, trigger: z.discriminatedUnion('kind', [
+      z.strictObject({kind:z.literal('initial-goal')}),
+      z.strictObject({kind:z.literal('routine-boundary'),boundaryAt:FictionalInstantSchema}),
+    ]) }),
   ]),
   state: z.enum(['running', 'completed', 'blocked']), maxCalls: z.number().int().nonnegative(), consumed: z.number().int().nonnegative(),
   jobs: z.array(ActorTurnJobViewSchema).min(1).max(1_000),
@@ -417,6 +423,18 @@ export const CoordinatorPulseBeginResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('inactive') }), z.strictObject({ kind: z.literal('idle') }),
   z.strictObject({ kind: z.literal('started'), pulse: CoordinatorPulseViewSchema, jobs: z.array(ActorTurnJobViewSchema) }),
   z.strictObject({ kind: z.literal('existing'), pulse: CoordinatorPulseViewSchema, jobs: z.array(ActorTurnJobViewSchema) }),
+]);
+
+/** One CAS-protected, replayable fictional-clock transition selected by the journal. */
+export const RoutineClockAdvanceRequestSchema = z.strictObject({ runId: RunIdSchema, operationId: z.string().uuid() });
+export const RoutineClockAdvanceResultSchema = z.discriminatedUnion('kind', [
+  z.strictObject({kind:z.literal('advanced'),operationId:z.string().uuid(),eventId:z.string().uuid(),commitIndex:RevisionSchema,
+    worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,activationIds:z.array(ActorActivationIdSchema).max(10_000)}),
+  z.strictObject({kind:z.literal('existing'),operationId:z.string().uuid(),eventId:z.string().uuid(),commitIndex:RevisionSchema,
+    worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,activationIds:z.array(ActorActivationIdSchema).max(10_000)}),
+  z.strictObject({kind:z.literal('notApplicable'),reason:z.enum(['inactive','policy','no-boundary','boundary-too-far','step-bound']),
+    worldRevision:RevisionSchema.nullable(),lifecycleRevision:RevisionSchema.nullable()}),
+  z.strictObject({kind:z.literal('stale'),worldRevision:RevisionSchema,lifecycleRevision:RevisionSchema}),
 ]);
 
 export const ActorTurnJobFailureResultSchema = z.discriminatedUnion('kind', [

@@ -126,7 +126,7 @@ export function createActorTurnWorker(input: {
               ? {directionRevision:0,indications:[]}
               : input.journal.readActorMetaIndications({runId:execution.runId,actorId:execution.actorId,
                 directionRevision:claimed.job.frozenDirectionRevision,activeSceneId:cut.activeSceneId??null}),
-            activationContext:claimed.job.activation===null?null:{kind:'initial-goal'},
+            activationContext:claimed.job.activation?.trigger??null,
             actorJob: { jobId: execution.jobId, generation: execution.generation, ...execution.lease },
             actorWorldProjectionPort: {
               async projectForActor(request) {

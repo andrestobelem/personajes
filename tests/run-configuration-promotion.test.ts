@@ -30,8 +30,8 @@ test('v18 migra draft/operaciones v17, promueve Ready exacto y conserva receipt 
         request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(principal_id,idempotency_key));
       INSERT INTO operations_v17 SELECT * FROM run_draft_operations;DROP TABLE run_draft_operations;ALTER TABLE operations_v17 RENAME TO run_draft_operations;
       DROP TABLE model_time_spans; DROP TABLE model_time_run_state;
-      DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes;
-      DELETE FROM schema_version WHERE version IN(18,19,20,21,22,23,24,25,26,27,28,29,30,31);COMMIT;`);}finally{legacy.close();}
+      DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances;
+      DELETE FROM schema_version WHERE version IN(18,19,20,21,22,23,24,25,26,27,28,29,30,31,32);COMMIT;`);}finally{legacy.close();}
     journal=openJournal({path});assert.equal(journal.createRunConfigurationDraft({principalId,idempotencyKey:uuid(1),patch:patchFor(template.configuration)}).kind,'existing');
     const runId=created.draft.runId;const command={principalId,idempotencyKey:uuid(2),runId,expectedRevision:0};
     const ready=journal.validateRunConfigurationDraft(command);if(ready.kind!=='ready')assert.fail(`No Ready:${ready.kind}`);

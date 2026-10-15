@@ -219,6 +219,11 @@ export async function createRepresentationRuntime(input: {
   const narratorReady=testTransport===undefined||(testTransport.narratorSessionFactory!==undefined&&testTransport.narrationReviewSessionFactory!==undefined);
   const reviewer=createNarrationReviewPiPort({journal:input.host.journal,runtime,ownerToken,...(testTransport?.narrationReviewSessionFactory===undefined?{}:{sessionFactory:testTransport.narrationReviewSessionFactory})});
   const narrator=createNarratorPiWorker({journal:input.host.journal,runtime,ownerToken,reviewer,...(testTransport?.narratorSessionFactory===undefined?{}:{sessionFactory:testTransport.narratorSessionFactory})});
+  function advanceRoutineClock(runId:RunId):boolean {
+    if(closed||admissionSuspended||!enabledRuns.has(runId))return false;
+    const result=input.host.journal.advanceRoutineClock({runId,operationId:randomUUID()});
+    return result.kind==='advanced'||result.kind==='existing';
+  }
   const coordinator = createCoordinatorPulseSupervisor({
     journal: input.host.journal,
     ownerToken,
@@ -240,7 +245,8 @@ export async function createRepresentationRuntime(input: {
     },
     async onPulseClosed({runId,pulseId}) {
       const step = input.host.journal.readActiveRunStepJob({runId});
-      if (step?.pulseId !== pulseId) return;
+      if (step === undefined) { advanceRoutineClock(runId); return; }
+      if (step.pulseId !== pulseId) return;
       await delivery.waitForRunIdle({runId});
       const configuration = ReadyRunConfigurationSchema.parse(input.host.journal.readWorldConfiguration({runId}));
       let failed = false;
@@ -280,8 +286,14 @@ export async function createRepresentationRuntime(input: {
     if (closed||admissionSuspended) return false;
     const { runId } = ScheduleRunSchema.parse(rawInput);
     if (!enabledRuns.has(runId)) return false;
-    const begin = input.host.journal.beginCoordinatorPulse({ runId });
+    let begin = input.host.journal.beginCoordinatorPulse({ runId });
     if (begin.kind === 'inactive') return false;
+    while(begin.kind==='idle'&&advanceRoutineClock(runId)) {
+      if(closed||admissionSuspended||!enabledRuns.has(runId))return false;
+      await yieldToHost();
+      begin=input.host.journal.beginCoordinatorPulse({runId});
+      if(begin.kind==='inactive')return false;
+    }
     // An authorized run can wait for its first stimulus. Accepting its schedule
     // must not depend on a fictional event or an already delivered perception.
     if (begin.kind === 'idle') return true;

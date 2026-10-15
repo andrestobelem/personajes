@@ -121,6 +121,7 @@ function eventSummary(event:WorldEvent,stage:RunStageView,speaker:z.infer<typeof
     case 'deviceUsed':return object(event.deviceEntityId)===undefined?undefined:`${label} utilizó ${object(event.deviceEntityId)}.`;
     case 'waited':return `${label} esperó.`;
     case 'rested':return `${label} descansó.`;
+    case 'clockAdvanced':return 'El tiempo ficticio del Escenario avanzó.';
     default:{const exhaustive:never=event;throw new Error(String(exhaustive));}
   }
 }

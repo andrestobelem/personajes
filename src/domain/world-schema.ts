@@ -660,7 +660,14 @@ export const WorldEventSchema = z.discriminatedUnion('kind', [
   ]) }),
   z.strictObject({ ...eventCommon, kind: z.literal('waited') }),
   z.strictObject({ ...eventCommon, kind: z.literal('rested') }),
-]);
+  z.strictObject({ ...eventBase, origin: z.strictObject({ kind: z.literal('system'), causeClockAdvanceId: z.string().uuid() }),
+    kind: z.literal('clockAdvanced'), fromAt: FictionalInstantSchema, toAt: FictionalInstantSchema }),
+]).superRefine((event, context) => {
+  if (event.kind === 'clockAdvanced' && (event.fictitiousAt !== event.fromAt
+    || event.toAt <= event.fromAt || event.durationMs !== event.toAt - event.fromAt)) {
+    context.addIssue({ code: 'custom', path: ['durationMs'], message: 'El evento de reloj debe reflejar el intervalo confirmado.' });
+  }
+});
 export type WorldEvent = z.infer<typeof WorldEventSchema>;
 
 export const WorldPerceptionSchema = z.discriminatedUnion('kind', [
