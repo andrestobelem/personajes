@@ -2,6 +2,14 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 39: cinco familias de circunstancias y percepción situada (v33)
+
+Dirección puede cambiar puerta, iluminación, disponibilidad de dispositivo, condición ambiental y aparición de objeto de catálogo. Se confirman con CAS conjunto, recibos durables, scope y exclusión de trabajo en vuelo; el estado ya vigente deja sólo registro administrativo. Las percepciones no inventan hablante ni entregan órdenes al reparto. La entrega y cadena Actor/Continuista hasta conversación se verificaron con SQLite/ICM reales y Pi SDK de transporte controlado.
+
+El panel, el catálogo y el ambiente inicial se operaron en navegador con datos sintéticos; se corrigió un fallo del editor encontrado en ese recorrido. Se comprobó una operación sin cambio durante pausa y la actualización automática del ledger. Ver [contrato, pruebas y captura](cambios-de-circunstancia.md) y [ADR 0008](../adr/0008-circunstancias-fisicas-y-percepcion.md).
+
+Gate: tipos y **640 pruebas: 639 aprobadas, cero fallidas, una omitida por requerir Linux**. Build: 436 módulos. No hubo acceso o inferencia de proveedores reales. La aceptación integral sigue abierta y no se cierra ningún criterio PRD por sumar este corte.
+
 ## Corte 38: revocación de Dirección y formulario operable
 
 El ledger admite `revokeMetaIndication` con destino de la misma corrida y alcance idéntico. La operación agrega un evento administrativo con CAS y recibo idempotente: conserva la indicación original, el mundo y las percepciones. Los turnos que ya congelaron una revisión de Dirección mantienen su contexto; los cortes posteriores excluyen la indicación revocada. Se rechazan destino ausente, alcance alterado y segunda revocación por otra operación. No requiere migración del almacenamiento JSON existente.

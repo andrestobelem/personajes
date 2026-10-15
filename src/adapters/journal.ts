@@ -1,3 +1,5 @@
+import {CircumstanceOptionsRequestSchema,CircumstanceOptionsSchema,CircumstanceWriteSchema,CircumstanceMutationResultSchema} from '../domain/direction-circumstances.ts';
+import {resolveWorldCircumstance} from '../domain/world-circumstances.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
@@ -345,7 +347,7 @@ const WorldKnowledgeDbRowSchema = z.strictObject({
 const WorldDeliveryDbRowSchema = z.strictObject({
   perception_id: PerceptionIdSchema, run_id: RunIdSchema, world_seq: counter, actor_id: CharacterIdSchema,
   payload_json: z.string(), payload_hash: HashSchema, state: z.enum(['planned', 'delivering', 'delivered', 'failed']),
-  origin_kind: z.enum(['actorAttempt', 'humanIntervention']), origin_id: z.string().min(1).max(200),
+  origin_kind: z.enum(['actorAttempt', 'humanIntervention', 'directionCircumstance']), origin_id: z.string().min(1).max(200),
   claim_token: z.string().uuid().nullable(), owner_token: z.string().uuid().nullable(), attempts: counter,
 });
 const ActorTurnIntentRowSchema = z.strictObject({
@@ -511,7 +513,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1781,6 +1783,42 @@ export function openJournal(input: { path: string }) {
     }
   }
 
+  if (initialVersion === undefined || initialVersion < 33) {
+    try {
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE coordinator_pulses_v33(
+          pulse_id TEXT PRIMARY KEY REFERENCES pulses(pulse_id) ON DELETE RESTRICT,
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          origin_kind TEXT NOT NULL CHECK(origin_kind IN('humanIntervention','actorAttempt','directionCircumstance','actorActivation')),
+          origin_id TEXT NOT NULL,commit_index INTEGER CHECK(commit_index IS NULL OR commit_index>=1),
+          configuration_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('running','completed','blocked')),
+          created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,lifecycle_revision INTEGER CHECK(lifecycle_revision IS NULL OR lifecycle_revision>=0),
+          UNIQUE(run_id,origin_kind,origin_id),
+          FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT,
+          CHECK((origin_kind='actorActivation' AND commit_index IS NULL) OR (origin_kind<>'actorActivation' AND commit_index IS NOT NULL))
+        );
+        INSERT INTO coordinator_pulses_v33 SELECT pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,created_at,updated_at,lifecycle_revision
+          FROM coordinator_pulses;
+        DROP TABLE coordinator_pulses;
+        ALTER TABLE coordinator_pulses_v33 RENAME TO coordinator_pulses;
+        CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
+        CREATE TABLE circumstance_operations(
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,operation_id TEXT NOT NULL UNIQUE,
+          request_hash TEXT NOT NULL,result_json TEXT NOT NULL,result_hash TEXT NOT NULL,
+          recorded_at INTEGER NOT NULL CHECK(recorded_at>=0),PRIMARY KEY(run_id,principal_id,idempotency_key)
+        );
+        INSERT OR IGNORE INTO schema_version VALUES(33);
+      `);
+      const foreignKeyViolations = database.prepare('PRAGMA foreign_key_check').all();
+      if (foreignKeyViolations.length !== 0) throw new Error(`Migración v33 produjo referencias inválidas: ${JSON.stringify(foreignKeyViolations)}`);
+      database.exec('COMMIT; PRAGMA foreign_keys=ON;');
+    } catch (error) {
+      try { database.exec('ROLLBACK; PRAGMA foreign_keys=ON;'); } catch { /* Migration is atomic. */ }
+      database.close(); throw error;
+    }
+  }
+
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
     try {
@@ -1810,7 +1848,17 @@ export function openJournal(input: { path: string }) {
     const evidence=ProductionEvidenceSchema.parse({kind:'operator-choice',operatorId:principalId,recordedAt});
     const normalized=RunDraftPatchSchema.parse(patch);
     const world=normalized.worldSnapshot;
-    if(world?.kind==='configured'||world?.kind==='proposed')normalized.worldSnapshot={...world,value:{...world.value,runId:draft.runId}};
+    if(world?.kind==='configured'||world?.kind==='proposed'){
+      const catalog=world.value.circumstanceCatalog;
+      const priorWorld=draft.worldSnapshot;
+      const prior=priorWorld.kind==='configured'||priorWorld.kind==='proposed'?priorWorld.value.circumstanceCatalog:undefined;
+      const content=(value:NonNullable<typeof catalog>)=>({environmentConditions:value.environmentConditions,
+        objectTemplates:value.objectTemplates,sourceRefs:value.provenance.sourceRefs});
+      const stampedCatalog=catalog===undefined?undefined:prior!==undefined&&canonicalJson(content(prior))===canonicalJson(content(catalog))
+        ?prior:{...catalog,revision:revision+1,provenance:{authoredBy:principalId,recordedAt,sourceRefs:catalog.provenance.sourceRefs}};
+      normalized.worldSnapshot={...world,value:{...world.value,runId:draft.runId,
+        ...(stampedCatalog===undefined?{}:{circumstanceCatalog:stampedCatalog})}};
+    }
     const budget=normalized.budget;
     if(budget?.kind==='configured'){
       const prior=draft.budget;
@@ -2171,7 +2219,7 @@ export function openJournal(input: { path: string }) {
     const value = database.prepare(`SELECT c.*,p.max_calls,p.consumed FROM coordinator_pulses c JOIN pulses p ON p.pulse_id=c.pulse_id
       WHERE c.run_id=? AND c.pulse_id=?`).get(input.runId, input.pulseId);
     if (value === undefined) return undefined;
-    const row = z.strictObject({ pulse_id: PulseIdSchema, run_id: RunIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','actorActivation']),
+    const row = z.strictObject({ pulse_id: PulseIdSchema, run_id: RunIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation']),
       origin_id: z.string(), commit_index: counter.nullable(), configuration_hash: HashSchema, state: z.enum(['running','completed','blocked']),
       lifecycle_revision: counter.nullable(), created_at: counter, updated_at: counter, max_calls: counter, consumed: counter }).parse(value);
     const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(input.runId));
@@ -4359,6 +4407,127 @@ export function openJournal(input: { path: string }) {
       });
     },
 
+    readCircumstanceOptions(input:unknown){
+      const request=CircumstanceOptionsRequestSchema.parse(input);
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      if(value===undefined)return undefined;
+      const run=parseWorldRun(value);
+      const scope=request.scope;
+      const scene=run.snapshot.scenes.find(item=>item.id===run.snapshot.activeSceneId&&item.lifecycle.kind==='open');
+      if(scope.kind==='scene'&&(scene===undefined||scope.sceneId!==scene.id))return undefined;
+      const permitted=(id:string)=>scope.kind==='run'||scene?.placeIds.some(place=>place===id)===true;
+      const doors=run.snapshot.doors.filter(door=>{
+        const affected=[...run.snapshot.connections.filter(item=>item.doorId===door.id).flatMap(item=>[item.from,item.to]),
+          ...run.snapshot.perceptualPaths.filter(item=>item.throughDoorIds.includes(door.id)).flatMap(item=>[item.from,item.to])];
+        return affected.length>0&&affected.every(permitted);
+      });
+      const catalog=run.snapshot.circumstanceCatalog;
+      return CircumstanceOptionsSchema.parse({runId:request.runId,worldRevision:run.row.world_revision,
+        directionRevision:run.row.direction_revision,lifecycle:run.row.lifecycle,activeSceneId:run.snapshot.activeSceneId,scope,
+        places:run.snapshot.places.filter(item=>permitted(item.id)),doors,
+        connections:run.snapshot.connections.filter(item=>permitted(item.from)&&permitted(item.to)),
+        devices:run.snapshot.entities.flatMap(entity=>entity.kind==='device'&&permitted(entity.placeId)
+          ?[{entityId:entity.entityId,label:entity.label,placeId:entity.placeId,availability:entity.availability}]:[]),
+        ...(catalog===undefined?{}:{catalog:{...catalog,objectTemplates:catalog.objectTemplates
+          .map(template=>({...template,allowedPlaceIds:template.allowedPlaceIds.filter(permitted)})).filter(template=>template.allowedPlaceIds.length>0)}}),
+        ...(run.snapshot.environment===undefined?{}:{environment:run.snapshot.environment.filter(item=>permitted(item.placeId))}),
+      });
+    },
+    applyCircumstanceCommand(input:unknown){
+      const request=CircumstanceWriteSchema.parse(input);
+      const requestHash=hashJson({runId:request.runId,operationId:request.operationId,
+        expectedWorldRevision:request.expectedWorldRevision,expectedDirectionRevision:request.expectedDirectionRevision,payload:request.payload}).hash;
+      return transact(()=>{
+        const priorValue=database.prepare('SELECT * FROM circumstance_operations WHERE run_id=? AND principal_id=? AND idempotency_key=?')
+          .get(request.runId,request.principalId,request.idempotencyKey);
+        if(priorValue!==undefined){
+          const prior=z.strictObject({run_id:RunIdSchema,principal_id:z.string(),idempotency_key:z.uuid(),operation_id:z.uuid(),
+            request_hash:HashSchema,result_json:z.string(),result_hash:HashSchema,recorded_at:counter}).parse(priorValue);
+          if(prior.operation_id!==request.operationId||prior.request_hash!==requestHash)
+            return CircumstanceMutationResultSchema.parse({kind:'idempotencyConflict'});
+          const result=CircumstanceMutationResultSchema.parse(parseStoredJson(prior.result_json));
+          if(sha256(prior.result_json)!==prior.result_hash||canonicalJson(result)!==prior.result_json)
+            throw new Error('Receipt de circunstancia alterado');
+          return CircumstanceMutationResultSchema.parse(result.kind==='stored'?{...result,kind:'existing'}:result);
+        }
+        if(database.prepare('SELECT 1 FROM circumstance_operations WHERE operation_id=?').get(request.operationId)!==undefined
+          ||database.prepare('SELECT 1 FROM direction_operations WHERE operation_id=?').get(request.operationId)!==undefined
+          ||database.prepare('SELECT 1 FROM direction_events WHERE operation_id=?').get(request.operationId)!==undefined)
+          return CircumstanceMutationResultSchema.parse({kind:'idempotencyConflict'});
+        const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+        if(value===undefined)return CircumstanceMutationResultSchema.parse({kind:'missing'});
+        const run=parseWorldRun(value);
+        const save=(result:z.infer<typeof CircumstanceMutationResultSchema>)=>{
+          const payload=hashJson(result);
+          database.prepare(`INSERT INTO circumstance_operations(run_id,principal_id,idempotency_key,operation_id,request_hash,result_json,result_hash,recorded_at)
+            VALUES(?,?,?,?,?,?,?,?)`).run(request.runId,request.principalId,request.idempotencyKey,request.operationId,requestHash,payload.json,payload.hash,Date.now());
+          return result;
+        };
+        if(run.row.world_revision!==request.expectedWorldRevision||run.row.direction_revision!==request.expectedDirectionRevision)
+          return save(CircumstanceMutationResultSchema.parse({kind:'conflict',worldRevision:run.row.world_revision,directionRevision:run.row.direction_revision}));
+        if(run.row.lifecycle!=='running'&&run.row.lifecycle!=='paused')
+          return save(CircumstanceMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
+        const pending=database.prepare(`SELECT 1 FROM coordinator_pulses WHERE run_id=? AND state='running'
+          UNION ALL SELECT 1 FROM run_step_jobs WHERE run_id=? AND state IN('queued','running')
+          UNION ALL SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND state IN('queued','running')
+          UNION ALL SELECT 1 FROM continuista_jobs WHERE run_id=? AND state IN('queued','running')
+          UNION ALL SELECT 1 FROM administrative_jobs WHERE run_id=? AND state='running'
+          UNION ALL SELECT 1 FROM actor_turn_jobs a JOIN world_proposals p ON p.run_id=a.run_id AND p.job_id=a.job_id AND p.generation=a.generation
+            WHERE a.run_id=? AND a.state='accepted' AND p.status='pending' AND p.base_revision=? AND a.lifecycle_revision=? LIMIT 1`)
+          .get(request.runId,request.runId,request.runId,request.runId,request.runId,request.runId,run.row.world_revision,run.row.lifecycle_revision);
+        if(pending!==undefined)return save(CircumstanceMutationResultSchema.parse({kind:'invalidState',code:'workPending'}));
+        const ids={eventId:()=>randomUUID(),perceptionId:()=>randomUUID(),experienceId:()=>randomUUID(),offerId:()=>randomUUID(),
+          entityHandle:()=>randomUUID(),placeHandle:()=>randomUUID(),channelHandle:()=>randomUUID(),offerHandle:()=>randomUUID()};
+        const resolution=resolveWorldCircumstance({snapshot:run.snapshot,scope:request.payload.scope,operation:request.payload.operation,
+          operationId:request.operationId,ids});
+        if(resolution.kind==='rejected'&&resolution.reason!=='unchanged')
+          return save(CircumstanceMutationResultSchema.parse({kind:'invalidState',code:resolution.reason}));
+        const recordedAt=Date.now();
+        const directionRevision=RevisionSchema.parse(run.row.direction_revision+1);
+        const commitIndex=resolution.kind==='applied'?RevisionSchema.parse(run.row.commit_index+1):RevisionSchema.parse(run.row.commit_index);
+        const snapshot=resolution.kind==='applied'?resolution.newSnapshot:run.snapshot;
+        if(resolution.kind==='applied'){
+          const payload=hashJson(snapshot);
+          database.prepare(`INSERT INTO world_commits(run_id,origin_kind,origin_id,commit_index,world_revision,last_seq,snapshot_json,snapshot_hash,created_at)
+            VALUES(?,'directionCircumstance',?,?,?,?,?,?,?)`).run(request.runId,request.operationId,commitIndex,snapshot.revision,snapshot.seq,payload.json,payload.hash,recordedAt);
+          for(const event of resolution.events){
+            const eventPayload=hashJson(event);
+            database.prepare('INSERT INTO world_events(event_id,run_id,world_seq,origin_id,payload_json,payload_hash) VALUES(?,?,?,?,?,?)')
+              .run(event.id,request.runId,event.seq,request.operationId,eventPayload.json,eventPayload.hash);
+          }
+          for(const perception of resolution.perceptions){
+            if(perception.kind!=='circumstance')throw new Error('Tipo de percepción ajeno a circunstancia');
+            const event=resolution.events.find(item=>item.id===perception.eventId);
+            if(event===undefined)throw new Error('Percepción de circunstancia sin evento confirmado');
+            const perceptionPayload=hashJson(perception);
+            database.prepare(`INSERT INTO world_perceptions(perception_id,run_id,world_seq,attempt_id,event_id,recipient_actor_id,payload_json,payload_hash,origin_kind,origin_id)
+              VALUES(?,?,?,NULL,?,?,?,?,?,?)`).run(perception.id,request.runId,event.seq,perception.eventId,perception.recipientCharacterId,
+                perceptionPayload.json,perceptionPayload.hash,'directionCircumstance',request.operationId);
+            database.prepare("INSERT INTO world_deliveries(perception_id,state) VALUES(?,'planned')").run(perception.id);
+            database.prepare("INSERT INTO actor_turn_intents(run_id,actor_id,perception_id,world_seq,state,created_at) VALUES(?,?,?,?,'awaitingDelivery',?)")
+              .run(request.runId,perception.recipientCharacterId,perception.id,event.seq,recordedAt);
+          }
+          const changed=database.prepare(`UPDATE world_runs SET world_revision=?,last_seq=?,commit_index=?,snapshot_json=?,snapshot_hash=?,
+            direction_revision=?,updated_at=? WHERE run_id=? AND world_revision=? AND direction_revision=? AND lifecycle_revision=?`)
+            .run(snapshot.revision,snapshot.seq,commitIndex,payload.json,payload.hash,directionRevision,recordedAt,request.runId,
+              run.row.world_revision,run.row.direction_revision,run.row.lifecycle_revision);
+          if(changed.changes!==1)throw new Error('CAS de circunstancia cambió dentro de la transacción');
+        }else{
+          const changed=database.prepare('UPDATE world_runs SET direction_revision=?,updated_at=? WHERE run_id=? AND direction_revision=?')
+            .run(directionRevision,recordedAt,request.runId,run.row.direction_revision);
+          if(changed.changes!==1)throw new Error('CAS de Dirección cambió dentro de la transacción');
+        }
+        const payload=hashJson(request.payload);
+        database.prepare(`INSERT INTO direction_events(run_id,direction_revision,operation_id,principal_id,payload_json,payload_hash,world_revision,world_seq,commit_index,recorded_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?)`).run(request.runId,directionRevision,request.operationId,request.principalId,payload.json,payload.hash,
+            snapshot.revision,snapshot.seq,commitIndex,recordedAt);
+        return save(CircumstanceMutationResultSchema.parse({kind:'stored',receipt:{operationId:request.operationId,directionRevision,recordedAt,
+          worldRevision:snapshot.revision,worldSeq:snapshot.seq,commitIndex,effect:resolution.kind==='applied'
+            ?{kind:'applied',eventIds:resolution.events.map(event=>event.id),recipientActorIds:[...new Set(resolution.perceptions.map(perception=>perception.recipientCharacterId))]}
+            :{kind:'unchanged'}}}));
+      });
+    },
+
     applyDirectionCommand(input: unknown) {
       const request=DirectionCommandWriteSchema.parse(input);
       const requestHash=hashJson({runId:request.runId,operationId:request.operationId,
@@ -4375,8 +4544,9 @@ export function openJournal(input: { path: string }) {
             throw new Error('Receipt de Dirección alterado');
           return DirectionMutationResultSchema.parse(result.kind==='stored'?{...result,kind:'existing'}:result);
         }
-        if(database.prepare('SELECT 1 FROM direction_operations WHERE run_id=? AND operation_id=?').get(request.runId,request.operationId)!==undefined
-          ||database.prepare('SELECT 1 FROM direction_events WHERE run_id=? AND operation_id=?').get(request.runId,request.operationId)!==undefined)
+        if(database.prepare('SELECT 1 FROM direction_operations WHERE operation_id=?').get(request.operationId)!==undefined
+          ||database.prepare('SELECT 1 FROM circumstance_operations WHERE operation_id=?').get(request.operationId)!==undefined
+          ||database.prepare('SELECT 1 FROM direction_events WHERE operation_id=?').get(request.operationId)!==undefined)
           return DirectionMutationResultSchema.parse({kind:'idempotencyConflict'});
         const runValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         if(runValue===undefined)return DirectionMutationResultSchema.parse({kind:'missing'});
@@ -5593,6 +5763,14 @@ export function openJournal(input: { path: string }) {
               || perception.fictitiousAt !== event.fictitiousAt + event.durationMs) {
               throw new Error('Experience no acredita recepción efectiva de la oferta');
             }
+          } else if (perception.kind === 'circumstance') {
+            if (event.kind !== 'circumstanceChanged' || event.origin.kind !== 'direction'
+              || row.origin_kind !== 'directionCircumstance' || event.origin.operationId !== row.origin_id
+              || !event.effectiveAudience.includes(perception.recipientCharacterId)
+              || perception.fictitiousAt !== event.fictitiousAt + event.durationMs
+              || frozen.envelope.content !== perception.detail || frozen.envelope.sourceRefs.length !== 0) {
+              throw new Error('Experience no acredita recepción efectiva de la circunstancia');
+            }
           } else if (perception.kind === 'worldEvent') {
             const sourceActorId = event.origin.kind === 'actor' ? event.origin.actorId : undefined;
             const sourceActor = sourceActorId === undefined
@@ -6782,7 +6960,7 @@ export function openJournal(input: { path: string }) {
           WHERE i.run_id=? AND i.state='queued' AND d.state='delivered'
             AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
           ORDER BY c.commit_index,i.actor_id,i.perception_id LIMIT 100001`).all(request.runId).map((item) => z.strictObject({
-            actor_id: CharacterIdSchema, perception_id: PerceptionIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt']), origin_id: z.string(), commit_index: counter }).parse(item));
+            actor_id: CharacterIdSchema, perception_id: PerceptionIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','directionCircumstance']), origin_id: z.string(), commit_index: counter }).parse(item));
         if (pending.length > 100_000) throw new Error('Demasiadas intenciones para coordinar un pulso');
         const cause = pending[0];
         if (cause === undefined) {

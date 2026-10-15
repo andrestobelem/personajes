@@ -79,3 +79,47 @@ test('objects use inventory coordinates in the plan and confirming empty offers 
   assert.deepEqual(worldCandidate(confirmed), worldCandidate(draft));
   assert.deepEqual(worldMapItems(draft, 'fuera'), []);
 });
+
+test('circumstance catalog and initial environment survive candidate roundtrip and expose typed references', () => {
+  const original = draftFixture();
+  const catalog = { environmentConditions: [{ id: 'lluvia', label: 'Lluvia', states: [{ id: 'visible', description: 'La lluvia cae ante la ventana.', modality: 'visual' }, { id: 'audible', description: 'Se escucha lluvia.', modality: 'auditory' }] }], objectTemplates: [{ id: 'sobre', object: { kind: 'object', entityId: uuid(90), label: 'Sobre visible', description: 'Un sobre cerrado.', collisionRadius: 0.1, blocksMovement: false, portable: true }, allowedPlaceIds: ['sala'] }], provenance: { sourceRefs: ['Decisión del operador de prueba'] } };
+  const withCatalog = applyWorldSection({ draft: original, section: 'circumstanceCatalog', value: catalog });
+  const withEnvironment = applyWorldSection({ draft: withCatalog, section: 'environment', value: [{ placeId: 'sala', conditionId: 'lluvia', stateId: 'visible' }] });
+  const roundtrip = RunConfigurationDraftSchema.parse(JSON.parse(JSON.stringify(withEnvironment)));
+  assert.equal(worldCandidate(roundtrip).circumstanceCatalog?.revision, 1);
+  assert.equal(worldCandidate(roundtrip).circumstanceCatalog?.provenance.authoredBy, 'local-user');
+  assert.deepEqual(worldCandidate(roundtrip).circumstanceCatalog?.provenance.sourceRefs, catalog.provenance.sourceRefs);
+  assert.deepEqual(worldCandidate(roundtrip).environment, [{ placeId: 'sala', conditionId: 'lluvia', stateId: 'visible' }]);
+  assert.deepEqual(worldPreparationIssues(roundtrip), []);
+  assert.deepEqual(worldReferences(roundtrip, 'allowedPlaceIds'), [{ id: 'sala', label: 'Sala de prueba' }]);
+  assert.deepEqual(worldReferences(roundtrip, 'conditionId'), [{ id: 'lluvia', label: 'Lluvia' }]);
+  assert.equal(worldReferences(roundtrip, 'stateId', 'lluvia')?.length, 2);
+  assert.deepEqual(worldReferences(roundtrip, 'stateId', 'forged'), []);
+  const revision2 = applyWorldSection({ draft: roundtrip, section: 'circumstanceCatalog', value: catalog });
+  assert.equal(worldCandidate(revision2).circumstanceCatalog?.revision, 2);
+  assert.deepEqual(worldCandidate(revision2).entities, worldCandidate(original).entities);
+  assert.deepEqual(worldCandidate(revision2).inventory, worldCandidate(original).inventory);
+});
+
+test('explicit empty catalog is valid; unresolved environment and template references block Ready validation', () => {
+  const empty = applyWorldSection({ draft: draftFixture(), section: 'circumstanceCatalog', value: { environmentConditions: [], objectTemplates: [] } });
+  assert.deepEqual(worldPreparationIssues(empty), []);
+  assert.equal(worldCandidate(empty).circumstanceCatalog?.revision, 1);
+  const environment = applyWorldSection({ draft: empty, section: 'environment', value: [{ placeId: 'sala', conditionId: 'unconfigured', stateId: 'forged' }] });
+  assert.ok(worldPreparationIssues(environment).some((issue) => issue.includes('environment')));
+  const invalidTemplate = applyWorldSection({ draft: empty, section: 'circumstanceCatalog', value: { environmentConditions: [], objectTemplates: [{ id: 'box', object: { kind: 'object', entityId: uuid(90), label: 'Caja', description: '', collisionRadius: 0, blocksMovement: false, portable: true }, allowedPlaceIds: ['forged'] }] } });
+  assert.ok(worldPreparationIssues(invalidTemplate).some((issue) => issue.includes('allowedPlaceIds')));
+  const markup = renderToStaticMarkup(React.createElement(WorldPreparationEditor, { draft: empty, onChange: () => {}, onPendingChange: () => {} }));
+  assert.match(markup, /Catálogo de circunstancias/); assert.match(markup, /Ambiente inicial/); assert.doesNotMatch(markup, /<textarea/);
+});
+
+test('catalog and initial environment render their complete typed values without interpreting another section array as an object', () => {
+  const catalog = { environmentConditions: [{ id: 'bruma', label: 'Bruma de prueba', states: [{ id: 'neblina', description: 'Hay neblina en la sala.', modality: 'visual' }] }], objectTemplates: [{ id: 'caja', object: { kind: 'object', entityId: uuid(91), label: 'Caja sintética', description: 'Plantilla de prueba.', collisionRadius: 0.1, blocksMovement: false, portable: true }, allowedPlaceIds: ['sala'] }], provenance: { sourceRefs: ['test:catalog-render'] } };
+  const withCatalog = applyWorldSection({ draft: draftFixture(), section: 'circumstanceCatalog', value: catalog });
+  const draft = applyWorldSection({ draft: withCatalog, section: 'environment', value: [{ placeId: 'sala', conditionId: 'bruma', stateId: 'neblina' }] });
+  const render = (initialSection: 'circumstanceCatalog' | 'environment') => renderToStaticMarkup(React.createElement(WorldPreparationEditor, { draft, initialSection, onChange: () => {}, onPendingChange: () => {} }));
+  const catalogMarkup = render('circumstanceCatalog');
+  assert.match(catalogMarkup, /Bruma de prueba/); assert.match(catalogMarkup, /Caja sintética/); assert.match(catalogMarkup, /Hay neblina en la sala/); assert.match(catalogMarkup, /test:catalog-render/); assert.match(catalogMarkup, /Confirmo este catálogo/);
+  const environmentMarkup = render('environment');
+  assert.match(environmentMarkup, /Bruma de prueba/); assert.match(environmentMarkup, /Hay neblina en la sala/); assert.match(environmentMarkup, /Sala de prueba/);
+});

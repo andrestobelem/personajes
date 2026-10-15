@@ -9,6 +9,7 @@ export const WORLD_SECTIONS = [
   ['doors', 'Puertas'], ['connections', 'Conexiones'], ['perceptualPaths', 'Trayectos de percepción'],
   ['entities', 'Personajes, objetos y dispositivos'], ['inventory', 'Ubicación de objetos'],
   ['actionDurations', 'Duración de las acciones'],
+  ['circumstanceCatalog', 'Catálogo de circunstancias'], ['environment', 'Ambiente inicial'],
 ] as const;
 export type WorldPreparationSection = typeof WORLD_SECTIONS[number][0];
 export type WorldCandidate = z.infer<typeof WorldSnapshotDraftSchema>;
@@ -16,8 +17,12 @@ export function worldCandidate(draft: RunConfigurationDraft): WorldCandidate {
   return draft.worldSnapshot.kind === 'empty' ? {} : draft.worldSnapshot.value;
 }
 export function applyWorldSection(input: { draft: RunConfigurationDraft; section: WorldPreparationSection; value: unknown }): RunConfigurationDraft {
-  const value = WorldSnapshotSchema.shape[input.section].parse(input.value);
   const current = worldCandidate(input.draft);
+  const raw = input.section === 'circumstanceCatalog' ? { ...formObject(input.value),
+    revision: (current.circumstanceCatalog?.revision ?? 0) + 1,
+    provenance: { ...formObject(formObject(input.value).provenance), authoredBy: 'local-user', recordedAt: new Date().toISOString(), sourceRefs: formObject(formObject(input.value).provenance).sourceRefs ?? [] },
+  } : input.value;
+  const value = WorldSnapshotSchema.shape[input.section].parse(raw);
   const candidate = WorldSnapshotDraftSchema.parse({
     schemaVersion: 1, runId: input.draft.runId, revision: 0, seq: 0,
     ...current, [input.section]: value,
@@ -58,11 +63,13 @@ export function worldMapItems(draft: RunConfigurationDraft, placeId: string) {
     return [];
   });
 }
-export function worldReferences(draft: RunConfigurationDraft, field: string): { id: string; label: string }[] | undefined {
+export function worldReferences(draft: RunConfigurationDraft, field: string, conditionId?: string): { id: string; label: string }[] | undefined {
   const world = worldCandidate(draft);
   switch (field) {
-    case 'placeId': case 'placeIds': case 'from': case 'to':
+    case 'placeId': case 'placeIds': case 'allowedPlaceIds': case 'from': case 'to':
       return (world.places ?? []).flatMap((place) => place.id === undefined ? [] : [{ id: place.id, label: place.name ?? place.id }]);
+    case 'conditionId': return (world.circumstanceCatalog?.environmentConditions ?? []).map((condition) => ({ id: condition.id, label: condition.label }));
+    case 'stateId': return (world.circumstanceCatalog?.environmentConditions ?? []).filter((condition) => condition.id === conditionId).flatMap((condition) => condition.states.map((state) => ({ id: state.id, label: `${condition.label}: ${state.description}` })));
     case 'sceneId': return (world.scenes ?? []).flatMap((scene) => scene.id === undefined ? [] : [{ id: scene.id, label: scene.label ?? scene.id }]);
     case 'doorId': case 'throughDoorIds': return (world.doors ?? []).map((door) => ({ id: door.id, label: door.label }));
     case 'channelId': return (world.channels ?? []).map((channel) => ({ id: channel.id, label: channel.label }));

@@ -325,6 +325,40 @@ function uniqueBy<T>(items: readonly T[], key: (item: T) => string): boolean {
   return true;
 }
 
+export const CircumstanceRejectionReasonSchema = z.enum([
+  'scope-unavailable', 'target-not-found', 'outside-scope', 'unchanged',
+  'not-authorized', 'object-already-exists', 'outside-place', 'collision',
+]);
+export const CircumstanceOperationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('setDoorState'), doorId: DoorIdSchema, state: z.enum(['open', 'closed', 'locked']) }),
+  z.strictObject({ kind: z.literal('setLighting'), placeId: PlaceIdSchema, level: LightingSchema }),
+  z.strictObject({ kind: z.literal('setDeviceAvailability'), deviceEntityId: WorldEntityIdSchema, availability: z.enum(['available', 'unavailable']) }),
+  z.strictObject({ kind: z.literal('setEnvironment'), placeId: PlaceIdSchema, conditionId: slug, stateId: slug }),
+  z.strictObject({ kind: z.literal('appearObject'), templateId: slug, placeId: PlaceIdSchema, position: WorldPointSchema }),
+]);
+export type CircumstanceOperation = z.infer<typeof CircumstanceOperationSchema>;
+export const CircumstanceScopeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('run') }),
+  z.strictObject({ kind: z.literal('scene'), sceneId: SceneIdSchema }),
+]);
+export const CircumstanceEffectSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('doorStateChanged'), doorId: DoorIdSchema, state: z.enum(['open', 'closed', 'locked']) }),
+  z.strictObject({ kind: z.literal('lightingChanged'), placeId: PlaceIdSchema, level: LightingSchema }),
+  z.strictObject({ kind: z.literal('deviceAvailabilityChanged'), deviceEntityId: WorldEntityIdSchema, availability: z.enum(['available', 'unavailable']) }),
+  z.strictObject({ kind: z.literal('environmentChanged'), placeId: PlaceIdSchema, conditionId: slug, stateId: slug }),
+  z.strictObject({ kind: z.literal('objectAppeared'), templateId: slug, objectEntityId: WorldEntityIdSchema, placeId: PlaceIdSchema, position: WorldPointSchema }),
+]);
+export const CircumstanceCatalogSchema = z.strictObject({
+  revision: PositiveInteger,
+  provenance: z.strictObject({ authoredBy: z.string().min(1).max(200), recordedAt: z.iso.datetime(), sourceRefs: z.array(z.string().min(1).max(2000)).max(1000) }),
+  environmentConditions: z.array(z.strictObject({
+    id: slug, label: z.string().min(1).max(200),
+    states: z.array(z.strictObject({ id: slug, description: z.string().min(1).max(2000), modality: ModalitySchema })).min(1).max(100),
+  })).max(1000),
+  objectTemplates: z.array(z.strictObject({ id: slug, object: WorldObjectSchema, allowedPlaceIds: z.array(PlaceIdSchema).min(1).max(10000) })).max(10000),
+});
+export const WorldEnvironmentSchema = z.array(z.strictObject({ placeId: PlaceIdSchema, conditionId: slug, stateId: slug })).max(100000);
+
 export const WorldSnapshotSchema = z.strictObject({
   schemaVersion: z.union([z.literal(1), z.literal(2)]),
   runId: RunIdSchema,
@@ -342,6 +376,8 @@ export const WorldSnapshotSchema = z.strictObject({
   activeSceneId: SceneIdSchema.nullable(),
   offers: z.array(WorldOfferSchema).max(100_000),
   actionDurations: ActionDurationsSchema,
+  circumstanceCatalog: CircumstanceCatalogSchema.optional(),
+  environment: WorldEnvironmentSchema.optional(),
 }).superRefine((world, context) => {
   const issue = (path: (string | number)[], message: string) => context.addIssue({ code: 'custom', path, message });
   if (!uniqueBy(world.places, (place) => place.id)) issue(['places'], 'PlaceId duplicado');
@@ -360,6 +396,26 @@ export const WorldSnapshotSchema = z.strictObject({
   const entities = new Map(world.entities.map((entity) => [entity.entityId, entity]));
   const chars = new Map(world.entities.filter((entity) => entity.kind === 'character').map((entity) => [entity.characterId, entity]));
   const scenes = new Map(world.scenes.map((scene) => [scene.id, scene]));
+  const catalog = world.circumstanceCatalog;
+  if (catalog !== undefined) {
+    if (!uniqueBy(catalog.environmentConditions, (item) => item.id)) issue(['circumstanceCatalog', 'environmentConditions'], 'Condición duplicada');
+    if (!uniqueBy(catalog.objectTemplates, (item) => item.id) || !uniqueBy(catalog.objectTemplates, (item) => item.object.entityId)) issue(['circumstanceCatalog', 'objectTemplates'], 'Plantilla o entidad reservada duplicada');
+    for (const [index, condition] of catalog.environmentConditions.entries()) {
+      if (!uniqueBy(condition.states, (state) => state.id)) issue(['circumstanceCatalog', 'environmentConditions', index, 'states'], 'Estado duplicado');
+    }
+    for (const [index, template] of catalog.objectTemplates.entries()) {
+      if (!uniqueBy(template.allowedPlaceIds, (id) => id) || template.allowedPlaceIds.some((id) => !places.has(id))) issue(['circumstanceCatalog', 'objectTemplates', index, 'allowedPlaceIds'], 'Lugares de plantilla inválidos');
+      const live = entities.get(template.object.entityId);
+      if (live !== undefined && (live.kind !== 'object' || world.seq === 0)) issue(['circumstanceCatalog', 'objectTemplates', index, 'object'], 'Entidad reservada incompatible con plantilla');
+    }
+  }
+  if (world.environment !== undefined) {
+    if (!uniqueBy(world.environment, (item) => `${item.placeId}/${item.conditionId}`)) issue(['environment'], 'Condición duplicada en lugar');
+    for (const [index, entry] of world.environment.entries()) {
+      const condition = catalog?.environmentConditions.find((item) => item.id === entry.conditionId);
+      if (!places.has(entry.placeId) || condition === undefined || !condition.states.some((state) => state.id === entry.stateId)) issue(['environment', index], 'Condición ambiental no autorizada');
+    }
+  }
   for (const [index, place] of world.places.entries()) {
     if (!(place.width > 0 && place.height > 0)) issue(['places', index], 'La geometría debe ser positiva');
   }
@@ -636,6 +692,7 @@ const eventCommon = {
 };
 
 export const WorldEventSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ ...eventBase, kind: z.literal('circumstanceChanged'), durationMs: WorldDurationMsSchema.refine((value) => value === 0), origin: z.strictObject({ kind: z.literal('direction'), operationId: z.uuid() }), effect: CircumstanceEffectSchema, effectiveAudience: z.array(CharacterIdSchema).max(100000) }),
   z.strictObject({ ...eventCommon, kind: z.literal('moved'), entityId: WorldEntityIdSchema, from: PlaceIdSchema, to: PlaceIdSchema, arrivalPoint: WorldPointSchema }),
   z.strictObject({ ...eventCommon, kind: z.literal('communicated'), entityId: WorldEntityIdSchema, channelId: ChannelIdSchema, content: CommunicationContentSchema, approvedContentHash: HashSchema, requestedAudience: z.array(CharacterIdSchema).max(100), effectiveAudience: z.array(CharacterIdSchema).max(100), targetEntityId: WorldEntityIdSchema.nullable() }),
   z.strictObject({
@@ -664,6 +721,9 @@ export const WorldEventSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...eventBase, origin: z.strictObject({ kind: z.literal('system'), causeClockAdvanceId: z.string().uuid() }),
     kind: z.literal('clockAdvanced'), fromAt: FictionalInstantSchema, toAt: FictionalInstantSchema }),
 ]).superRefine((event, context) => {
+  if (event.kind === 'circumstanceChanged' && !uniqueBy(event.effectiveAudience, (id) => id)) {
+    context.addIssue({ code: 'custom', path: ['effectiveAudience'], message: 'Testigo de circunstancia duplicado.' });
+  }
   if (event.kind === 'clockAdvanced' && (event.fictitiousAt !== event.fromAt
     || event.toAt <= event.fromAt || event.durationMs !== event.toAt - event.fromAt)) {
     context.addIssue({ code: 'custom', path: ['durationMs'], message: 'El evento de reloj debe reflejar el intervalo confirmado.' });
@@ -672,6 +732,7 @@ export const WorldEventSchema = z.discriminatedUnion('kind', [
 export type WorldEvent = z.infer<typeof WorldEventSchema>;
 
 export const WorldPerceptionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('circumstance'), id: PerceptionIdSchema, runId: RunIdSchema, recipientCharacterId: CharacterIdSchema, eventId: EventIdSchema, placeId: PlaceIdSchema, modality: ModalitySchema, detail: z.string().min(1).max(2000), fictitiousAt: FictionalInstantSchema }),
   z.strictObject({
     kind: z.literal('observation'), id: PerceptionIdSchema, runId: RunIdSchema, recipientCharacterId: CharacterIdSchema,
     attemptId: WorldAttemptIdSchema, subjectEntityId: WorldEntityIdSchema, modality: ModalitySchema,
@@ -791,12 +852,13 @@ export const ActorViewEntitySchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('device'), handle: EntityHandleSchema, label: z.string().min(1).max(200),
     description: z.string().max(2_000), modality: z.array(ModalitySchema).min(1).max(2),
-    placeHandle: PlaceHandleSchema, position: WorldPointSchema, availability: z.enum(['available', 'unavailable']),
+    placeHandle: PlaceHandleSchema, position: WorldPointSchema,
     power: z.enum(['on', 'off']), operations: z.array(ActorDeviceOperationSchema).max(100),
   }),
 ]);
 
 const ActorInboxItemSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('circumstance'), placeHandle: PlaceHandleSchema, modality: ModalitySchema, detail: z.string().min(1).max(2000), fictitiousAt: FictionalInstantSchema }),
   z.strictObject({
     kind: z.literal('observation'), subjectHandle: EntityHandleSchema, modality: ModalitySchema,
     detail: z.string().min(1).max(2_000), fictitiousAt: FictionalInstantSchema,
@@ -858,6 +920,8 @@ export const ActorWorldViewSchema = z.strictObject({
     fromHandle: EntityHandleSchema, expiresAt: FictionalInstantSchema,
   })).max(100_000),
   inbox: z.array(ActorInboxItemSchema).max(100_000),
+  environment: z.array(z.strictObject({ placeHandle: PlaceHandleSchema, modality: ModalitySchema,
+    detail: z.string().min(1).max(2_000) })).max(100_000).optional(),
 });
 /** Compatibility schema for stored/test projections; freshly built actor views use the complete schema below. */
 export const CompleteActorWorldViewSchema = ActorWorldViewSchema.extend({

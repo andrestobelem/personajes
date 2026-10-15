@@ -20,7 +20,8 @@ export const StageEntitySchema = z.discriminatedUnion('kind',[
   z.strictObject({...entityBase,kind:z.literal('object'),placeId:PlaceIdSchema.nullable(),position:WorldPointSchema.nullable(),
     holderEntityId:WorldEntityIdSchema.nullable(),quantity:z.number().int().positive().optional(),condition:z.enum(['usable','damaged','unknown']).optional()}),
 ]);
-export const StagePlaceSchema = z.strictObject({id:PlaceIdSchema,name:label,width:z.number().positive(),height:z.number().positive(),lighting:z.enum(['dark','dim','normal','bright'])});
+export const StagePlaceSchema = z.strictObject({id:PlaceIdSchema,name:label,width:z.number().positive(),height:z.number().positive(),lighting:z.enum(['dark','dim','normal','bright']),
+  environment:z.array(z.strictObject({label,detail:z.string().min(1).max(2_000),modality:z.enum(['visual','auditory'])})).max(100_000).optional()});
 export const StageChannelSchema = z.strictObject({id:ChannelIdSchema,kind:z.enum(['speech','gesture']),label,enabled:z.boolean(),placeIds:z.array(PlaceIdSchema).max(100)});
 export const StageSceneSchema = z.strictObject({id:SceneIdSchema,label,lifecycle:z.enum(['open','closed']),participantIds:z.array(CharacterIdSchema).max(100),placeIds:z.array(PlaceIdSchema).max(100)});
 export const RunStageViewSchema = z.strictObject({kind:z.literal('run-stage'),runId:RunIdSchema,configRevision:RevisionSchema,
@@ -34,7 +35,7 @@ export const RunStageViewSchema = z.strictObject({kind:z.literal('run-stage'),ru
 });
 export type RunStageView = z.infer<typeof RunStageViewSchema>;
 
-export const PublicEventTypeSchema = z.enum(['moved','communicated','humanIntervention','objectTaken','offerCreated','offerAccepted','offerInvalidated','deviceUsed','waited','rested']);
+export const PublicEventTypeSchema = z.enum(['moved','communicated','humanIntervention','objectTaken','offerCreated','offerAccepted','offerInvalidated','deviceUsed','waited','rested','clockAdvanced','circumstanceChanged']);
 export const ConfirmedEventViewSchema = z.strictObject({kind:z.literal('confirmed-event'),eventId:EventIdSchema,runId:RunIdSchema,
   worldSeq:WorldSeqSchema,commitIndex:RevisionSchema,fictionalAt:FictionalInstantSchema,durationMs:z.number().int().nonnegative(),sceneId:SceneIdSchema,
   eventType:PublicEventTypeSchema,speaker:PublicSpeakerSchema.nullable(),summary:z.string().min(1).max(2_000)});

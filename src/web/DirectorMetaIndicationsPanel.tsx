@@ -1,4 +1,5 @@
 import React from 'react';
+import { CircumstancePanel } from './CircumstancePanel.tsx';
 import { SessionModeSchema } from '../domain/http.ts';
 import { MetaIndicationPayloadSchema } from '../domain/direction-indications.ts';
 import type { RunStageView } from '../domain/run-observation.ts';
@@ -13,6 +14,7 @@ const directionClient = createRunDirectionClient();
 type ScopeChoice = 'run' | 'scene';
 type Indication = DirectionDocument['page']['events'][number];
 const unresolvedByRun = new Map<string, DirectionIntent>();
+const circumstanceLabels = {setDoorState:'estado de puerta',setLighting:'iluminación',setDeviceAvailability:'disponibilidad de dispositivo',setEnvironment:'condición ambiental',appearObject:'aparición de objeto preparado'};
 
 function currentModeMatches(session: SessionDocument | null, runId: string, scope: ScopeChoice, sceneId: string | null) {
   const mode = session?.view.mode;
@@ -251,6 +253,7 @@ export function DirectorMetaIndicationsPanel({
     </div>
     {pending !== null && <div className="dramatic-pending" role="alert"><p>El resultado de esta operación sigue pendiente; se conserva la misma clave idempotente.</p>
       <button disabled={busy || !directorActive} onClick={() => void submit(pending)}>Reintentar la misma indicación</button></div>}
+    <CircumstancePanel runId={runId} session={session} active={active} onCommitted={() => void reload()} />
     <section className="dramatic-event-log" aria-label="Historial de metaindicaciones">
       <h3>Historial del ledger</h3>
       {document === null ? <p>El historial está disponible al activar Dirección para esta corrida.</p> : document.page.events.length === 0
@@ -272,7 +275,7 @@ export function DirectorMetaIndicationsPanel({
                   kind: 'revokeMetaIndication', targetOperationId: event.operationId, scope: event.payload.scope,
                 } });
               }}>Revocar metaindicación</button>}
-          </> : <p>Revocación de la metaindicación {event.payload.targetOperationId}. No modifica turnos ya preparados ni borra el historial.</p>}
+          </> : event.payload.kind === 'changeCircumstance' ? <p>Cambio de circunstancia física: {circumstanceLabels[event.payload.operation.kind]}. El registro conserva la operación; los efectos confirmados se consultan en el Escenario.</p> : <p>Revocación de la metaindicación {event.payload.targetOperationId}. No modifica turnos ya preparados ni borra el historial.</p>}
           <p className="muted">Revisión {event.directionRevision} · registrada {new Date(event.recordedAt).toISOString()}</p>
         </li>)}</ol>}
     </section>

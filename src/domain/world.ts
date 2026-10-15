@@ -158,6 +158,33 @@ export function canHearSpeechAt(input: {
   return canPerceive(world, source, recipient, 'auditory', channel);
 }
 
+/** Physical reachability of a circumstance, without assigning an actor as its source.
+ * Unchannelled sounds are explicitly local; remote sound requires a prepared channel. */
+export function canPerceiveCircumstanceAt(input: {
+  snapshot: unknown;
+  source: { placeId: unknown; position: unknown };
+  recipientCharacterId: unknown;
+  modality: unknown;
+  channelId?: unknown;
+}): boolean {
+  const world = WorldSnapshotSchema.parse(input.snapshot);
+  const source = z.strictObject({ placeId: PlaceIdSchema, position: WorldPointSchema }).parse(input.source);
+  const characterId = CharacterIdSchema.parse(input.recipientCharacterId);
+  const modality = ModalitySchema.parse(input.modality);
+  const channelId = ChannelIdSchema.optional().parse(input.channelId);
+  const recipient = characterById(world, characterId);
+  const scene = world.scenes.find((candidate) => candidate.id === world.activeSceneId);
+  if (recipient === undefined || scene === undefined || !scene.placeIds.includes(source.placeId)
+    || !characterCanReceiveAt({ snapshot: world, characterId })) return false;
+  const location = { placeId: recipient.placeId, position: recipient.position };
+  if (channelId === undefined && modality === 'auditory') return source.placeId === location.placeId;
+  const channel = channelId === undefined ? undefined : world.channels.find((candidate) => candidate.id === channelId);
+  if (channelId !== undefined && (channel === undefined || !channel.enabled)) return false;
+  return modality === 'visual'
+    ? canPerceive(world, location, source, modality, channel)
+    : canPerceive(world, source, location, modality, channel);
+}
+
 function entityModalities(world: WorldSnapshot, observer: WorldCharacter, entity: WorldEntity): z.infer<typeof ModalitySchema>[] {
   const targetLocation = entityLocation(world, entity);
   if (targetLocation === undefined) return [];
@@ -310,7 +337,7 @@ function deviceOperationAvailability(
 ): z.infer<typeof ActorActionAvailabilitySchema> {
   if (!actorCanAct(actor, world, scene)) return actionAvailability('actor-unavailable');
   if (!hasCapability(actor, 'useDevice')) return actionAvailability('capability-missing');
-  if (device.availability !== 'available') return actionAvailability('device-unavailable');
+  // Internal operability is resolved when used; seeing a device does not reveal it.
   if (!canInteract(world, actor, device)) return actionAvailability('out-of-reach');
   if (operation.kind === 'setPower') {
     if (device.power === operation.state) return actionAvailability('state-unchanged');
@@ -393,7 +420,7 @@ function actorViewEntity(
     entity: ActorViewEntitySchema.parse({
       kind: 'device', handle: binding.handle, label: entity.label, description: entity.description,
       modality: modalities, placeHandle: placeBinding.handle, position: location.position,
-      availability: entity.availability, power: entity.power, operations,
+      power: entity.power, operations,
     }),
   };
 }
@@ -532,11 +559,30 @@ export function buildActorWorldView(input: {
         inbox.push({ kind: 'worldEvent', sourceHandle: binding.handle, modality: perception.modality, detail: perception.detail, fictitiousAt: perception.fictitiousAt });
         break;
       }
+      case 'circumstance': {
+        const binding = addPlaceBinding(knowledge, perception.placeId, input.ids);
+        knowledge = binding.knowledge;
+        inbox.push({ kind: 'circumstance', placeHandle: binding.handle, modality: perception.modality,
+          detail: perception.detail, fictitiousAt: perception.fictitiousAt });
+        break;
+      }
       default: {
         const exhaustive: never = perception;
         void exhaustive;
       }
     }
+  }
+  const environment: NonNullable<ActorWorldView['environment']> = [];
+  for (const current of snapshot.environment ?? []) {
+    const place = placeById(snapshot, current.placeId);
+    const condition = snapshot.circumstanceCatalog?.environmentConditions.find((item) => item.id === current.conditionId);
+    const state = condition?.states.find((item) => item.id === current.stateId);
+    if (place === undefined || state === undefined || !canPerceiveCircumstanceAt({ snapshot,
+      source: { placeId: place.id, position: { x: place.width / 2, y: place.height / 2 } },
+      recipientCharacterId: actorId, modality: state.modality })) continue;
+    const binding = addPlaceBinding(knowledge, place.id, input.ids);
+    knowledge = binding.knowledge;
+    environment.push({ placeHandle: binding.handle, modality: state.modality, detail: state.description });
   }
   const view = CompleteActorWorldViewSchema.parse({
     kind: 'actor-world-view', revision: snapshot.revision, now: snapshot.clock, sceneLabel: scene.label,
@@ -556,6 +602,7 @@ export function buildActorWorldView(input: {
       experiences: observer.mind.experiences.map((experience) => ({ experienceId: experience.experienceId, kind: experience.kind, content: experience.content, fictitiousAt: experience.fictitiousAt, confidence: experience.confidence })),
     },
     entities, channels, offers, inbox,
+    ...(environment.length === 0 ? {} : { environment }),
   });
   return { view, knowledge: ActorKnowledgeSchema.parse(knowledge) };
 }

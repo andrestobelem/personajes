@@ -18,6 +18,7 @@ import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import type { RunId } from '../src/domain/values.ts';
 import { controlledDirectorSessionFactory } from './fixtures/director-session.ts';
 import { WorldActorActionSchema } from '../src/domain/world-schema.ts';
+import { createCircumstanceApplication } from '../src/application/direction-circumstances.ts';
 import { createRunObservationApplication } from '../src/application/run-observation.ts';
 import { canonical, responseFor, setup, actorId, type Fixture } from './fixtures/continuista.ts';
 
@@ -84,7 +85,7 @@ function hostFromFixture(fixture: Fixture) {
 }
 
 function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLocalHost>, withIntervention = true, withInitialGoal = false,
-  routineWindows?: readonly (readonly [number,number])[]) {
+  routineWindows?: readonly (readonly [number,number])[], broadcast=false) {
   const freshRunId = RunIdSchema.parse(randomUUID());
   const configuration = ReadyRunConfigurationSchema.parse({
     ...fixture.configuration,
@@ -94,7 +95,7 @@ function registerAdditionalRun(fixture: Fixture, host: ReturnType<typeof openLoc
     worldSnapshot: {
       ...fixture.configuration.worldSnapshot,
       runId: freshRunId,
-      channels:fixture.configuration.worldSnapshot.channels.map((channel)=>routineWindows===undefined?channel:{...channel,scope:'broadcast'}),
+      channels:fixture.configuration.worldSnapshot.channels.map((channel)=>routineWindows===undefined&&!broadcast?channel:{...channel,scope:'broadcast'}),
       entities: fixture.configuration.worldSnapshot.entities.map((entity) => entity.kind === 'character'
         ? { ...entity,
           routine:routineWindows===undefined?entity.routine:{kind:'windows',defaultState:'unavailable',
@@ -735,3 +736,47 @@ for(const scenario of [
     }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
   });
 }
+
+
+test('circunstancia física confirmada llega a memoria y Actor/Continuista publican una conversación',realIcmOptions,async()=>{
+  assert.ok(realIcmBinary);
+  const fixture=await setup();const host=hostFromFixture(fixture);
+  const runId=registerAdditionalRun(fixture,host,false,false,undefined,true);
+  const initial=host.journal.loadWorld({runId});assert.ok(initial);
+  const stats={requests:0,recallResults:0,disposed:0};const contexts:string[]=[];
+  const runtime=await createRepresentationRuntime({host,icmBinaryPath:realIcmBinary,
+    testTransport:controlledTransport({fixture,host,runId,stats,onActorPrompt({systemPrompt,prompt}){contexts.push(systemPrompt+prompt.text);},
+      actionForPrompt(){
+        const snapshot=host.journal.loadWorld({runId});assert.ok(snapshot);
+        const knowledge=host.journal.readActorKnowledge({runId,actorId,throughWorldSeq:snapshot.seq});assert.ok(knowledge);
+        const channel=knowledge.knowledge.bindings.find(item=>item.kind==='channel');assert.ok(channel);
+        return WorldActorActionSchema.parse({kind:'communicate',channelHandle:channel.handle,audienceHandles:[],
+          content:{kind:'speech',text:'La luz cambió; voy a observar antes de decidir.'}});
+      }})});
+  const notices:string[]=[];
+  const application=createCircumstanceApplication({journal:host.journal,onCommitted(event){notices.push(...event.eventIds);
+    runtime.scheduleDelivery({runId:event.runId,actorIds:event.actorIds});}});
+  try{
+    assert.equal(await runtime.scheduleRun({runId}),true);await runtime.waitForIdle();
+    assert.equal(stats.requests,0);
+    const command={runId,principalId:'secret-direction-principal',idempotencyKey:randomUUID(),operationId:randomUUID(),
+      expectedWorldRevision:initial.revision,expectedDirectionRevision:0,payload:{kind:'changeCircumstance',scope:{kind:'run'},
+        operation:{kind:'setLighting',placeId:'sala',level:'dim'}}};
+    const result=application.apply(command);assert.equal(result.kind,'stored');
+    if(result.kind!=='stored'||result.receipt.effect.kind!=='applied')assert.fail('Efecto no confirmado');
+    await withTimeout(runtime.waitForIdle(),10_000);
+    assert.equal(stats.requests,3);assert.equal(stats.recallResults,1);
+    assert.equal(contexts.length,1);assert.match(contexts[0]??'',/iluminación|tenue/);
+    assert.doesNotMatch(contexts[0]??'',/secret-direction-principal|changeCircumstance|setLighting|SECRET_PRIVATE_OTHER_MEMORY/);
+    const conversation=createRunObservationApplication({journal:host.journal}).readConversations({runId});
+    if(conversation.kind!=='found'||conversation.value.kind!=='conversation-page')assert.fail('No conversación');
+    assert.equal(conversation.value.items.length,1);
+    assert.deepEqual(conversation.value.items[0]?.content,{kind:'speech',text:'La luz cambió; voy a observar antes de decidir.'});
+    assert.deepEqual(notices,result.receipt.effect.eventIds);
+    const final=host.journal.loadWorld({runId});assert.ok(final);
+    assert.equal(final.revision,initial.revision+2,'un cambio físico y una actuación confirmada');
+    assert.equal(application.apply(command).kind,'existing');await runtime.waitForIdle();
+    assert.equal(stats.requests,3);assert.deepEqual(host.journal.loadWorld({runId}),final);
+    assert.deepEqual(notices,result.receipt.effect.eventIds,'replay no notifica ni actúa otra vez');
+  }finally{await runtime.close();rmSync(fixture.directory,{recursive:true,force:true});}
+});

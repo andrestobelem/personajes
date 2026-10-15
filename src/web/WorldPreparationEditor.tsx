@@ -4,6 +4,7 @@ import type { RunConfigurationDraft } from '../domain/production.ts';
 import { applyWorldSection, chooseActiveScene, confirmNoInitialOffers, formArray, formBlank, formObject, parseWorldNumericInput, parseWorldFormSchema, worldCandidate, worldMapItems, worldPreparationIssues, worldReferences, worldSectionForm, WORLD_SECTIONS, CharacterPlacementSchema, placePreparedCharacter, type FormSchema, type WorldPreparationSection } from './world-preparation.ts';
 
 const LABELS: Record<string, string> = {
+  circumstanceCatalog: 'Catálogo de circunstancias', environmentConditions: 'Condiciones ambientales', states: 'Estados autorizados', objectTemplates: 'Plantillas de objetos', allowedPlaceIds: 'Lugares de aparición autorizados', conditionId: 'Condición ambiental', stateId: 'Estado ambiental', sourceRefs: 'Referencias de procedencia',
   id: 'Identificador', entityId: 'Identificador de entidad', name: 'Nombre', label: 'Nombre visible', description: 'Descripción',
   width: 'Ancho', height: 'Alto', lighting: 'Iluminación', kind: 'Tipo', state: 'Estado', from: 'Desde', to: 'Hasta',
   durationMs: 'Duración (milisegundos)', arrivalPoint: 'Punto de llegada', doorId: 'Puerta', position: 'Posición',
@@ -34,7 +35,7 @@ function matchesVariant(variant: FormSchema, value: unknown): boolean {
   const object = formObject(value);
   return Object.entries(variant.properties ?? {}).filter(([, child]) => child.const !== undefined).every(([key, child]) => object[key] === child.const);
 }
-function Field(props: { schema: FormSchema; value: unknown; name: string; draft: RunConfigurationDraft; onChange: (value: unknown) => void; technicalId?: boolean }) {
+function Field(props: { schema: FormSchema; value: unknown; name: string; draft: RunConfigurationDraft; onChange: (value: unknown) => void; technicalId?: boolean; conditionId?: string | undefined }) {
   const { schema, value, name, draft, onChange } = props;
   const variants = schema.anyOf ?? schema.oneOf;
   if (variants !== undefined && variants.every((variant) => variant.type === 'string')) return <Field {...props} schema={{ type: 'string', pattern: variants[0]?.pattern }} />;
@@ -46,7 +47,7 @@ function Field(props: { schema: FormSchema; value: unknown; name: string; draft:
   if (schema.const !== undefined) return <span>{label(String(schema.const))}</span>;
   if (schema.type === 'object') {
     const object = formObject(value);
-    return <fieldset><legend>{label(name)}</legend>{Object.entries(schema.properties ?? {}).filter(([key, child]) => child.const === undefined && (object.kind !== 'character' || ['placeId', 'position', 'presence', 'availability', 'routine', 'collisionRadius', 'blocksMovement'].includes(key))).map(([key, child]) => <Field key={key} schema={child} value={object[key]} name={key} draft={draft} technicalId={key === 'id' || (key === 'entityId' && object.kind !== 'heldBy')} onChange={(next) => onChange({ ...object, [key]: next })} />)}</fieldset>;
+    return <fieldset><legend>{label(name)}</legend>{Object.entries(schema.properties ?? {}).filter(([key, child]) => child.const === undefined && (object.kind !== 'character' || ['placeId', 'position', 'presence', 'availability', 'routine', 'collisionRadius', 'blocksMovement'].includes(key))).map(([key, child]) => <Field key={key} schema={child} value={object[key]} name={key} draft={draft} conditionId={typeof object.conditionId === 'string' ? object.conditionId : undefined} technicalId={key === 'id' || (key === 'entityId' && object.kind !== 'heldBy')} onChange={(next) => onChange({ ...object, [key]: next })} />)}</fieldset>;
   }
   if (schema.type === 'array') {
     const array = formArray(value); const itemSchema = schema.items;
@@ -61,7 +62,7 @@ function Field(props: { schema: FormSchema; value: unknown; name: string; draft:
   }
   if (name === 'sourceItemId' || name === 'sourceGoalId') return <details><summary>Procedencia técnica</summary><output>{typeof value === 'string' ? value : 'Sin enlace de preparación'}</output></details>;
   if (name === 'revision') return <span>Revisión inicial: {typeof value === 'number' ? value : 'pendiente'}</span>;
-  const references = worldReferences(draft, name);
+  const references = worldReferences(draft, name, props.conditionId);
   const numeric = schema.type === 'number' || schema.type === 'integer';
   const text = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
   if (props.technicalId) return <details><summary>Identificador técnico{value ? ' creado' : ' pendiente'}</summary><output>{text || 'Todavía sin identificador'}</output>{!text && <button type="button" onClick={() => onChange(schema.pattern?.includes('[a-z0-9-]') ? `elemento-${crypto.randomUUID()}` : crypto.randomUUID())}>Crear identificador</button>}</details>;
@@ -69,17 +70,21 @@ function Field(props: { schema: FormSchema; value: unknown; name: string; draft:
   return <label>{label(name)}<input type={numeric ? 'number' : 'text'} step={schema.type === 'integer' ? 1 : 'any'} min={schema.minimum} max={schema.maximum} maxLength={schema.maxLength} value={text} onChange={(event) => onChange(numeric ? parseWorldNumericInput(event.target.value) : event.target.value)} />{!numeric && (name === 'id' || name === 'entityId') && <button type="button" onClick={() => onChange(schema.pattern?.includes('[a-z0-9-]') ? `elemento-${crypto.randomUUID()}` : crypto.randomUUID())}>Crear identificador</button>}</label>;
 }
 
-export function WorldPreparationEditor(props: { draft: RunConfigurationDraft; onChange: (draft: RunConfigurationDraft) => void; onPendingChange: (pending: boolean) => void; readOnly?: boolean }) {
+export function WorldPreparationEditor(props: { draft: RunConfigurationDraft; onChange: (draft: RunConfigurationDraft) => void; onPendingChange: (pending: boolean) => void; readOnly?: boolean; initialSection?: WorldPreparationSection }) {
   const [placing, setPlacing] = React.useState(false);
   const [placement, setPlacement] = React.useState<unknown>({ additionalCapabilities: [], recognizedCharacterIds: [], materialChoices: [] });
-  const [section, setSection] = React.useState<WorldPreparationSection>('places');
-  const [value, setValue] = React.useState<unknown>(() => worldCandidate(props.draft).places ?? []);
+  const [section, setSection] = React.useState<WorldPreparationSection>(props.initialSection ?? 'places');
+  const [localEdit, setLocalEdit] = React.useState<{ section: WorldPreparationSection; value: unknown }>(() => ({ section, value: worldCandidate(props.draft)[section] }));
+  // A section change renders before its effect runs. Never parse the previous section's value with the new form schema.
+  const value = localEdit.section === section ? localEdit.value : worldCandidate(props.draft)[section];
+  function setValue(next: unknown) { setLocalEdit({ section, value: next }); }
+  const [catalogConfirmed, setCatalogConfirmed] = React.useState(false);
   const [pending, setPending] = React.useState(false); const [error, setError] = React.useState('');
   const candidate = worldCandidate(props.draft);
-  React.useEffect(() => { setValue(worldCandidate(props.draft)[section]); setPending(false); setError(''); props.onPendingChange(false); }, [props.draft.runId, props.draft.revision, section]);
-  function edit(next: unknown) { setValue(next); setPending(true); props.onPendingChange(true); setError(''); }
+  React.useEffect(() => { setValue(worldCandidate(props.draft)[section]); setPending(false); setCatalogConfirmed(false); setError(''); props.onPendingChange(false); }, [props.draft.runId, props.draft.revision, section]);
+  function edit(next: unknown) { setCatalogConfirmed(false); setValue(next); setPending(true); props.onPendingChange(true); setError(''); }
   function apply() {
-    try { props.onChange(applyWorldSection({ draft: props.draft, section, value: value ?? formBlank(worldSectionForm(section)) })); setPending(false); props.onPendingChange(false); setError(''); }
+    try { if (section === 'circumstanceCatalog' && !catalogConfirmed) throw new Error('Confirmá explícitamente el catálogo elegido, incluso si queda vacío.'); props.onChange(applyWorldSection({ draft: props.draft, section, value: section === 'circumstanceCatalog' ? { environmentConditions: [], objectTemplates: [], ...formObject(value) } : value ?? formBlank(worldSectionForm(section)) })); setPending(false); props.onPendingChange(false); setError(''); }
     catch (failure) { setError(failure instanceof z.ZodError ? failure.issues.map((issue) => `${issue.path.map((part) => label(String(part))).join(' / ')}: ${issue.message}`).join('; ') : failure instanceof Error ? failure.message : 'Revisá esta sección.'); }
   }
   const issues = worldPreparationIssues(props.draft);
@@ -93,7 +98,13 @@ export function WorldPreparationEditor(props: { draft: RunConfigurationDraft; on
     </fieldset>}
     <fieldset disabled={props.readOnly || placing}><div className="form-row"><label>Sección<select value={section} disabled={pending} onChange={(event) => { const selected = WORLD_SECTIONS.find(([key]) => key === event.target.value); if (selected !== undefined) setSection(selected[0]); }}>{WORLD_SECTIONS.map(([key, title]) => <option key={key} value={key}>{title}</option>)}</select></label><button type="button" onClick={apply}>Aplicar sección</button>{pending && <button type="button" onClick={() => { setValue(candidate[section]); setPending(false); props.onPendingChange(false); }}>Descartar edición local</button>}</div>
       {section === 'entities' && <p>Los personajes requieren contextos preparados mediante la curación del reparto. Aquí podés editar entidades existentes y preparar objetos o dispositivos; no se inventa un actor preparado.</p>}
-      <Field schema={worldSectionForm(section)} value={value} name={WORLD_SECTIONS.find(([key]) => key === section)?.[1] ?? section} draft={props.draft} onChange={edit} />
+      {section === 'circumstanceCatalog' ? <div><p>Autorizá las condiciones y los objetos que Dirección podrá introducir. Puertas, iluminación y dispositivos se configuran en sus propias secciones. Los sonidos ambientales tienen alcance local; la descripción expresa lo percibido, sin instrucciones para el personaje.</p><p>Al aplicar se registra una nueva revisión y la procedencia de esta elección. Revisión actual: {candidate.circumstanceCatalog?.revision ?? 'sin catálogo confirmado'}.</p>
+        <Field schema={worldSectionForm(section).properties?.environmentConditions ?? {}} value={formObject(value).environmentConditions} name="environmentConditions" draft={props.draft} onChange={(next) => edit({ ...formObject(value), environmentConditions: next })} />
+        <Field schema={worldSectionForm(section).properties?.objectTemplates ?? {}} value={formObject(value).objectTemplates} name="objectTemplates" draft={props.draft} onChange={(next) => edit({ ...formObject(value), objectTemplates: next })} />
+        <Field schema={{ type: 'array', items: { type: 'string' } }} value={formObject(formObject(value).provenance).sourceRefs} name="sourceRefs" draft={props.draft} onChange={(next) => edit({ ...formObject(value), provenance: { ...formObject(formObject(value).provenance), sourceRefs: next } })} />
+        <label><input type="checkbox" checked={catalogConfirmed} onChange={(event) => { if (value === undefined) edit({ environmentConditions: [], objectTemplates: [], provenance: { sourceRefs: [] } }); setCatalogConfirmed(event.target.checked); }} />Confirmo este catálogo y su procedencia, incluso si no autorizo condiciones ni objetos.</label>
+      </div> : <Field schema={worldSectionForm(section)} value={value} name={WORLD_SECTIONS.find(([key]) => key === section)?.[1] ?? section} draft={props.draft} onChange={edit} />}
+      {section === 'environment' && <p>Elegí el estado inicial de las condiciones del catálogo para cada lugar. La validación verifica las referencias y evita duplicar la misma condición en un lugar.</p>}
       <button type="button" disabled={pending} onClick={() => props.onChange(applyWorldSection({ draft: props.draft, section: 'inventory', value: candidate.inventory ?? [] }))}>Confirmar inventario inicial{candidate.inventory?.length ? ' conservado' : ' vacío'}</button>
       {(candidate.offers?.length ?? 0) === 0 && <button type="button" disabled={pending} onClick={() => props.onChange(confirmNoInitialOffers(props.draft))}>Confirmar que no hay ofertas previas</button>}
       <label>Escena inicial<select value={candidate.activeSceneId ?? ''} disabled={pending} onChange={(event) => { try { props.onChange(chooseActiveScene({ draft: props.draft, sceneId: event.target.value })); setError(''); } catch (failure) { setError(failure instanceof Error ? failure.message : 'Escena no disponible.'); } }}><option value="">Elegir escena abierta</option>{(candidate.scenes ?? []).filter((scene) => scene.lifecycle?.kind === 'open').map((scene) => <option key={scene.id} value={scene.id}>{scene.label}</option>)}</select></label>

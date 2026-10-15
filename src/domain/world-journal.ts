@@ -413,7 +413,7 @@ export const CoordinatorPulseViewSchema = z.strictObject({
   runId: RunIdSchema, pulseId: PulseIdSchema,
   lifecycleRevision: RevisionSchema.nullable(),
   cause: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.enum(['humanIntervention', 'actorAttempt']), id: z.string().min(1).max(200), commitIndex: z.number().int().positive() }),
+    z.strictObject({ kind: z.enum(['humanIntervention', 'actorAttempt', 'directionCircumstance']), id: z.string().min(1).max(200), commitIndex: z.number().int().positive() }),
     z.strictObject({ kind: z.literal('actorActivation'), id: ActorActivationIdSchema, trigger: z.discriminatedUnion('kind', [
       z.strictObject({kind:z.literal('initial-goal')}),
       z.strictObject({kind:z.literal('routine-boundary'),boundaryAt:FictionalInstantSchema}),

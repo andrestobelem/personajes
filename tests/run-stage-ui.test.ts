@@ -37,6 +37,22 @@ test("public SVG and accessible index preserve confirmed geometry and held inven
   assert.doesNotMatch(html, /draggable/);
 });
 
+test("el lugar seleccionado muestra condiciones confirmadas como texto accesible y escapa su descripción", () => {
+  const base = stageFixture();
+  const stage = RunStageViewSchema.parse({ ...base, places: [...base.places.map((place) => ({ ...place,
+    environment: [{ label: "Lluvia", modality: "auditory", detail: "Se oye lluvia <script>" }] })),
+    { id: "otro", name: "Otro lugar", width: 5, height: 5, lighting: "normal",
+      environment: [{ label: "Condición ajena", modality: "visual", detail: "NO_MOSTRAR_OTRO_LUGAR" }] }] });
+  const html = renderToStaticMarkup(React.createElement(StageMap, { data: stageMapData(stage) }));
+  assert.match(html, /Condiciones confirmadas de Sala/);
+  assert.match(html, /Condiciones del lugar/);
+  assert.match(html, /Lluvia/);
+  assert.match(html, /Auditiva/);
+  assert.match(html, /Se oye lluvia &lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>|NO_MOSTRAR_OTRO_LUGAR/);
+  assert.equal('environment' in base.places[0]!, false);
+});
+
 test("public conversation separates emission, null reception and memory delivery while escaping hostile text", () => {
   const stage = stageFixture();
   const item = conversationFixture();

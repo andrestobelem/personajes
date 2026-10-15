@@ -212,7 +212,7 @@ test('la migración v21 conserva reservas enviadas como tiempo histórico descon
     try {
       old.prepare('INSERT INTO request_reservations VALUES(?,?,?,?,?,?)')
         .run(randomUUID(), 0, 0, one.runId, one.pulseId, 'completed');
-      old.exec('DROP TABLE model_time_spans; DROP TABLE model_time_run_state; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DELETE FROM schema_version WHERE version IN(22,23,24,25,26,27,28,29,30,31,32);');
+      old.exec('DROP TABLE model_time_spans; DROP TABLE model_time_run_state; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS circumstance_operations;DELETE FROM schema_version WHERE version IN(22,23,24,25,26,27,28,29,30,31,32,33);');
     } finally { old.close(); }
     const migrated = openJournal({ path: `${fixture.directory}/journal.sqlite` });
     try {
@@ -224,7 +224,7 @@ test('la migración v21 conserva reservas enviadas como tiempo histórico descon
       assert.equal(migrated.reserveNextRequest({ ...one, jobId: randomUUID(), clockEpochId: randomUUID(), ownerToken: randomUUID() }).kind, 'exhausted');
       const inspect = new DatabaseSync(`${fixture.directory}/journal.sqlite`);
       try {
-        assert.equal(inspect.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 32);
+        assert.equal(inspect.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 33);
         assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(), []);
       } finally { inspect.close(); }
     } finally { migrated.close(); }

@@ -50,8 +50,9 @@ import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, T
 import { WorldSeqSchema } from '../domain/values.ts';
 import { RunRefreshSchema, type RunRefresh } from '../domain/run-refresh.ts';
 import {
-  DirectionEventsPageSchema, DirectionMutationResultSchema, DirectionRequestPayloadSchema,
+  DirectionEventsPageSchema, DirectionMutationResultSchema, DirectionRequestPayloadSchema, ChangeCircumstancePayloadSchema,
 } from '../domain/direction-indications.ts';
+import { CircumstanceOptionsSchema, CircumstanceOptionsRequestSchema, CircumstanceWriteSchema, CircumstanceMutationResultSchema } from '../domain/direction-circumstances.ts';
 import type { createHostRequestBarrier } from '../application/host-request-barrier.ts';
 
 const ObservationSequenceQuerySchema = z.string().regex(/^(0|[1-9]\d{0,15})$/).transform(Number).pipe(WorldSeqSchema);
@@ -119,6 +120,10 @@ export type RunDramaticStructureApplicationPort = {
   readEvents(input: unknown): unknown | undefined | Promise<unknown | undefined>;
   apply(input: unknown): unknown | Promise<unknown>;
   readOperation(input: unknown): unknown | Promise<unknown>;
+};
+export type RunCircumstancesApplicationPort={
+  readOptions(input:z.infer<typeof CircumstanceOptionsRequestSchema>):unknown|Promise<unknown>;
+  apply(input:z.infer<typeof CircumstanceWriteSchema>):unknown|Promise<unknown>;
 };
 export type RunDirectionsApplicationPort={
   readEvents(input:unknown):unknown|undefined|Promise<unknown|undefined>;
@@ -346,6 +351,7 @@ export type LocalHttpOptions = {
   /** Durable operator-only episodes, scenes, acts and structural event journal. */
   readonly runDramaticStructure?: RunDramaticStructureApplicationPort;
   readonly runDirections?: RunDirectionsApplicationPort;
+  readonly runCircumstances?: RunCircumstancesApplicationPort;
   readonly runInspector?: RunInspectorApplication;
   readonly onInspectorRead?: (metadata: {runId:string;characterId?:string;atWorldSeq?:number;requestId:string}) => void;
   /** Host-composed operator services; core routes and their authority take precedence. */
@@ -671,6 +677,16 @@ function runViewEtag(view: z.infer<typeof RunViewSchema>): string {
 
 function dramaticStructureEtag(runId: string, worldRevision: number, structureRevision: number): string {
   return `"structure:${runId}:w${worldRevision}:s${structureRevision}"`;
+}
+
+function circumstanceEtag(runId:string,worldRevision:number,directionRevision:number){return `"circumstances:${runId}:w${worldRevision}:d${directionRevision}"`;}
+function readExpectedCircumstanceRevisions(req:IncomingMessage,runId:string){
+  const provided=req.headers['if-match'];
+  if(typeof provided!=='string')fail({status:428,kind:'precondition',code:'PRECONDITION_REQUIRED',message:'Se requiere If-Match de las circunstancias.'});
+  const match=/^"circumstances:([0-9a-f-]{36}):w(0|[1-9]\d{0,15}):d(0|[1-9]\d{0,15})"$/.exec(provided);
+  if(match?.[1]!==runId||!Number.isSafeInteger(Number(match?.[2]))||!Number.isSafeInteger(Number(match?.[3])))
+    return fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'La revisión no coincide con las circunstancias de esta corrida.'});
+  return {expectedWorldRevision:RevisionSchema.parse(Number(match[2])),expectedDirectionRevision:RevisionSchema.parse(Number(match[3]))};
 }
 
 function directionEtag(runId:string,directionRevision:number){return `"directions:${runId}:d${directionRevision}"`;}
@@ -1424,6 +1440,44 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         const etag = `"structure-events:${runId}:s${page.structureRevision}:a${query.afterStructureRevision ?? 0}${query.throughCommitIndex === undefined ? '' : `:c${query.throughCommitIndex}`}"`;
         sendJson(res,200,page,{ETag:etag});
         return;
+      }
+
+      if(route.length===3&&route[0]==='runs'&&route[2]==='circumstances'&&(method==='GET'||method==='POST')){
+        const runId=parseSchema(RunIdSchema,route[1]);
+        if(method==='POST')requireCsrf(req,session);
+        if(session.mode.kind!=='director'||session.mode.runId!==runId)
+          fail({status:403,kind:'forbidden',code:'CAPABILITY_REQUIRED',message:'La sesión debe estar en modo Director para operar circunstancias.'});
+        const port=options.runCircumstances;
+        if(port===undefined)fail({status:503,kind:'dependency',code:'CIRCUMSTANCES_UNAVAILABLE',message:'Las circunstancias no están disponibles.',safeCode:'CIRCUMSTANCES_UNAVAILABLE',retryable:true});
+        if(method==='GET'){
+          parseQuery(url,z.strictObject({}));
+          const raw=await port.readOptions(CircumstanceOptionsRequestSchema.parse({runId,scope:session.mode.scope}));
+          if(raw===undefined||raw===null)fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+          const view=CircumstanceOptionsSchema.parse(raw);
+          sendJson(res,200,view,{ETag:circumstanceEtag(runId,view.worldRevision,view.directionRevision)});return;
+        }
+        const body=parseSchema(ChangeCircumstancePayloadSchema,await readJsonBody(req));
+        if(session.mode.scope.kind==='scene'&&(body.scope.kind!=='scene'||body.scope.sceneId!==session.mode.scope.sceneId))
+          fail({status:403,kind:'forbidden',code:'SCOPE_MISMATCH',message:'La circunstancia excede el alcance de escena de esta sesión.'});
+        if(checkIdempotentReplay({req,res,session,path:pathname,body}))return;
+        const key=readIdempotencyKey(req);const expected=readExpectedCircumstanceRevisions(req,runId);
+        const operationId=deriveStableUuid(`circumstance:${runId}:${key}:operation`);
+        const result=CircumstanceMutationResultSchema.parse(await port.apply(CircumstanceWriteSchema.parse({runId,principalId:localOperatorPrincipalId(),idempotencyKey:key,operationId,...expected,payload:body})));
+        switch(result.kind){
+          case 'stored':case 'existing':{
+            const etag=circumstanceEtag(runId,result.receipt.worldRevision,result.receipt.directionRevision);
+            rememberOperation({req,session,key,path:pathname,body,status:200,result,etag});
+            sendJson(res,200,result,{ETag:etag,...(result.kind==='existing'?{'Idempotency-Replayed':'true'}:{})});return;
+          }
+          case 'conflict':fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'Cambió el Escenario o Dirección. Actualizá antes de continuar.',currentEtag:circumstanceEtag(runId,result.worldRevision,result.directionRevision)});
+          case 'missing':fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+          case 'idempotencyConflict':fail({status:409,kind:'conflict',code:'IDEMPOTENCY_CONFLICT',message:'La clave ya se usó con otra circunstancia.'});
+          case 'invalidState':{
+            if(result.code==='runNotActive'||result.code==='workPending')fail({status:409,kind:'conflict',code:'CIRCUMSTANCE_NOT_AVAILABLE',message:result.code==='workPending'?'Hay trabajo en curso; esperá un límite de pulso antes de modificar circunstancias.':'La representación debe estar en curso o pausada.'});
+            fail({status:422,kind:'validation',code:'INVALID_CIRCUMSTANCE',message:`El Escenario rechazó la circunstancia: ${result.code}.`,issues:[]});
+          }
+          default:{const exhaustive:never=result;void exhaustive;throw new Error('Resultado de circunstancias desconocido');}
+        }
       }
 
       if(route.length===3&&route[0]==='runs'&&route[2]==='directions'&&method==='GET'){

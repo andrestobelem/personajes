@@ -216,11 +216,13 @@ export const HumanParticipantProfilesSchema = z.array(HumanParticipantProfileSch
 export type HumanParticipantProfiles = z.infer<typeof HumanParticipantProfilesSchema>;
 
 /** Editable, structurally closed candidate. Cross-field completeness is checked only when promoting to Ready. */
-export const WorldSnapshotDraftSchema = z.strictObject({
+export const WorldPreparationCandidateSchema = z.strictObject({
   ...WorldSnapshotSchema.shape,
   places: z.array(z.strictObject(WorldSnapshotSchema.shape.places.element.shape).partial()).max(10_000),
   scenes: z.array(z.strictObject(WorldSnapshotSchema.shape.scenes.element.shape).partial()).max(1_000),
 }).partial();
+/** Compatibility name for serialized world preparation candidates. */
+export const WorldSnapshotDraftSchema = WorldPreparationCandidateSchema;
 
 export const RunConfigurationDraftSchema = z.strictObject({
   kind: z.literal('run-configuration-draft'),

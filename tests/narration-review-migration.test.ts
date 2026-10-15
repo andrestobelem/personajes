@@ -31,7 +31,8 @@ test('v27 publication migrates without reinference; frozen legacy hash rejects a
       DELETE FROM administrative_sessions WHERE job_id IN(SELECT job_id FROM administrative_jobs WHERE role='narration-reviewer');
       DELETE FROM administrative_jobs WHERE role='narration-reviewer';
       DROP TABLE IF EXISTS actor_activation_invitation_jobs;DROP TABLE IF EXISTS actor_activation_invitations;DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances;
-      DELETE FROM schema_version WHERE version IN(28,29,30,31,32);`);}
+      DROP TABLE circumstance_operations;
+      DELETE FROM schema_version WHERE version IN(28,29,30,31,32,33);`);}
     finally {db.close();}
     reopened=openJournal({path:join(f.directory,'journal.sqlite')});
     assert.deepEqual(reopened.readNarrationReceipt(lookup),result.receipt);

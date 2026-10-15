@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import {
-  ActorKnowledgeSchema, WorldAttemptSchema, WorldContentApprovalReceiptSchema, WorldEntityIdSchema, WorldSnapshotSchema,
-  buildActorWorldView, emptyActorKnowledge, hashCommunicationContent, resolveWorldAttempt,
+  ActorKnowledgeSchema, ActorWorldViewSchema, WorldAttemptSchema, WorldContentApprovalReceiptSchema, WorldEntityIdSchema, WorldSnapshotSchema,
+  buildActorWorldView, canPerceiveCircumstanceAt, emptyActorKnowledge, hashCommunicationContent, resolveWorldAttempt,
 } from '../src/domain/world.ts';
 import { resolveHumanIntervention } from '../src/domain/human-intervention.ts';
+import { resolveWorldCircumstance } from '../src/domain/world-circumstances.ts';
 import { projectHumanInteractionContext } from '../src/domain/interaction.ts';
 import {
   CharacterIdSchema, EventIdSchema, ExperienceIdSchema, HumanInterventionIdSchema,
@@ -307,6 +308,29 @@ test('la vista diegética muestra el cover y sólo las experiencias del actor', 
   assert.doesNotMatch(JSON.stringify(recognizedView.view), new RegExp(ninetyNineId));
 });
 
+test('una circunstancia llega como experiencia situada sin atribuirla a un personaje ni exponer identificadores host', () => {
+  const snapshot = worldFixture();
+  const circumstance = {
+    kind: 'circumstance', id: uuid(60_001), runId, recipientCharacterId: maxId,
+    eventId: uuid(60_002), placeId: roomId, modality: 'visual',
+    detail: 'La iluminación disminuyó.', fictitiousAt: snapshot.clock.instant,
+  };
+  const built = buildActorWorldView({
+    snapshot, actorId: maxId, knowledge: emptyActorKnowledge({ runId, actorId: maxId }),
+    pendingPerceptions: [circumstance, { ...circumstance, id: uuid(60_003), recipientCharacterId: ninetyNineId,
+      detail: 'EXPERIENCIA AJENA PRIVADA' }], ids: idSource(60_100),
+  });
+  assert.deepEqual(built.view.inbox, [{
+    kind: 'circumstance', placeHandle: built.view.currentPlace.handle, modality: 'visual',
+    detail: circumstance.detail, fictitiousAt: circumstance.fictitiousAt,
+  }]);
+  const encoded = JSON.stringify(built.view.inbox);
+  assert.doesNotMatch(encoded, /source|actorId|operationId|principal|EXPERIENCIA AJENA/);
+  for (const privateId of [circumstance.id, circumstance.eventId, runId, roomId]) {
+    assert.equal(encoded.includes(privateId), false);
+  }
+});
+
 test('la vista del actor incluye su inventario, rutina, disponibilidad efectiva y permisos sin revelar el estado privado de otros', () => {
   const base = worldFixture();
   const snapshot = WorldSnapshotSchema.parse({
@@ -367,7 +391,8 @@ test('la vista expone efectos, duración y legalidad de dispositivos y objetos p
     pendingPerceptions: [], ids: idSource(21_000),
   });
   const device = built.view.entities.find((entity) => entity.kind === 'device');
-  assert.equal(device?.kind === 'device' ? device.availability : undefined, 'available');
+  assert.ok(device?.kind === 'device');
+  assert.equal('availability' in device, false);
   assert.equal(device?.kind === 'device' ? device.power : undefined, 'off');
   if (device?.kind !== 'device') assert.fail('falta el panel perceptible');
 
@@ -391,6 +416,85 @@ test('la vista expone efectos, duración y legalidad de dispositivos y objetos p
   const envelope = built.view.entities.find((entity) => entity.kind === 'object' && entity.label === 'Sobre');
   assert.equal(envelope?.kind === 'object' ? envelope.custody : undefined, 'heldBySelf');
   assert.deepEqual(envelope?.kind === 'object' ? envelope.takeAvailability : undefined, { kind: 'unavailable', reason: 'object-not-available' });
+});
+
+test('ver un dispositivo no revela su disponibilidad interna y el intento sigue sujeto a ella', () => {
+  const working = worldFixture();
+  const disabled = WorldSnapshotSchema.parse({ ...working, entities: working.entities.map((entity) =>
+    entity.kind === 'device' ? { ...entity, availability: 'unavailable' } : entity) });
+  const project = (snapshot: unknown) => buildActorWorldView({ snapshot, actorId: maxId,
+    knowledge: emptyActorKnowledge({ runId, actorId: maxId }), pendingPerceptions: [], ids: idSource(61_000) }).view;
+  assert.deepEqual(project(working), project(disabled));
+  const result = resolveWorldAttempt({ snapshot: disabled, actorKnowledge: maxKnowledge, ids: idSource(62_000),
+    attempt: attempt({ kind: 'useDevice', attemptId: uuid(62_001), runId, actorId: maxId,
+      expectedRevision: disabled.revision, deviceHandle: 'h-device', operationId: 'power-on' }) });
+  assert.equal(result.kind, 'notApplied');
+  if (result.kind === 'notApplied') assert.equal(result.reason, 'device-unavailable');
+});
+
+test('las circunstancias reutilizan caminos, puertas, iluminación, canal y disponibilidad efectiva', () => {
+  const base = worldFixture();
+  const snapshot = WorldSnapshotSchema.parse({ ...base, entities: base.entities.map((entity) =>
+    entity.kind === 'character' && entity.characterId === maxId ? { ...entity, placeId: hallId } : entity) });
+  const input = { snapshot, source: { placeId: roomId, position: { x: 1, y: 1 } }, recipientCharacterId: maxId };
+  assert.equal(canPerceiveCircumstanceAt({ ...input, modality: 'visual' }), false);
+  assert.equal(canPerceiveCircumstanceAt({ ...input, modality: 'auditory' }), false);
+  assert.equal(canPerceiveCircumstanceAt({ ...input, modality: 'auditory', channelId: speechChannel }), true);
+  const open = { ...snapshot, doors: snapshot.doors.map((door) => ({ ...door, state: 'open' })),
+    perceptualPaths: [...snapshot.perceptualPaths, { kind: 'visual', from: hallId, to: roomId,
+      distance: 4, throughDoorIds: [uuid(50)] }] };
+  assert.equal(canPerceiveCircumstanceAt({ ...input, snapshot: open, modality: 'visual' }), true);
+  const dark = { ...open, places: open.places.map((place) => ({ ...place, lighting: 'dark' })) };
+  assert.equal(canPerceiveCircumstanceAt({ ...input, snapshot: dark, modality: 'visual' }), false);
+  const unavailable = { ...open, entities: open.entities.map((entity) => entity.kind === 'character'
+    && entity.characterId === maxId ? { ...entity, availability: { kind: 'unavailable', reason: 'Privado' } } : entity) };
+  assert.equal(canPerceiveCircumstanceAt({ ...input, snapshot: unavailable, modality: 'visual' }), false);
+  const noSound = { ...snapshot, channels: snapshot.channels.map((channel) => ({ ...channel, enabled: false })) };
+  assert.equal(canPerceiveCircumstanceAt({ ...input, snapshot: noSound, modality: 'auditory', channelId: speechChannel }), false);
+});
+
+test('el actor que llega después percibe el entorno actual sin recibir el cambio pasado ni el catálogo', () => {
+  const base = worldFixture();
+  const initial = WorldSnapshotSchema.parse({ ...base,
+    entities: base.entities.map((entity) => entity.kind === 'character' && entity.characterId === maxId
+      ? { ...entity, presence: { kind: 'absent' } } : entity),
+    circumstanceCatalog: { revision: 1, provenance: { authoredBy: 'PRIVATE_OPERATOR',
+      recordedAt: '2026-10-15T00:00:00Z', sourceRefs: ['PRIVATE_SOURCE'] }, objectTemplates: [],
+      environmentConditions: [{ id: 'weather', label: 'PRIVATE_CONDITION_LABEL', states: [
+        { id: 'visible', modality: 'visual', description: 'Hay niebla visible.' },
+        { id: 'unselected', modality: 'visual', description: 'PRIVATE_UNSELECTED_DESCRIPTION' },
+      ] }, { id: 'sound', label: 'Sonido', states: [{ id: 'heard', modality: 'auditory', description: 'Se oye una alarma.' }] }] },
+  });
+  const changed = resolveWorldCircumstance({ snapshot: initial, operationId: uuid(63_001), scope: { kind: 'run' },
+    operation: { kind: 'setEnvironment', placeId: roomId, conditionId: 'weather', stateId: 'visible' }, ids: idSource(63_100) });
+  if (changed.kind !== 'applied') assert.fail('Expected environmental change');
+  assert.equal(changed.perceptions.some((perception) => perception.recipientCharacterId === maxId), false);
+  const arrived = WorldSnapshotSchema.parse({ ...changed.newSnapshot,
+    environment: [...(changed.newSnapshot.environment ?? []), { placeId: hallId, conditionId: 'sound', stateId: 'heard' }],
+    entities: changed.newSnapshot.entities.map((entity) => entity.kind === 'character' && entity.characterId === maxId
+      ? { ...entity, presence: { kind: 'present', sceneId } } : entity),
+  });
+  const before = JSON.stringify(arrived);
+  const project = (snapshot: unknown) => buildActorWorldView({ snapshot, actorId: maxId,
+    knowledge: emptyActorKnowledge({ runId, actorId: maxId }), pendingPerceptions: [], ids: idSource(64_000) }).view;
+  const view = project(arrived);
+  assert.deepEqual(view.environment, [{ placeHandle: view.currentPlace.handle, modality: 'visual', detail: 'Hay niebla visible.' }]);
+  assert.deepEqual(view.inbox, []);
+  assert.doesNotMatch(JSON.stringify(view), /PRIVATE_|weather|unselected|conditionId|stateId|alarma/);
+  assert.equal(JSON.stringify(arrived), before);
+  const dark = { ...arrived, places: arrived.places.map((place) => ({ ...place, lighting: 'dark' })) };
+  assert.equal(project(dark).environment, undefined);
+  const unavailable = { ...arrived, entities: arrived.entities.map((entity) => entity.kind === 'character'
+    && entity.characterId === maxId ? { ...entity, availability: { kind: 'unavailable', reason: 'PRIVATE_REASON' } } : entity) };
+  assert.equal(project(unavailable).environment, undefined);
+  const invisible = { ...arrived, environment: [{ placeId: hallId, conditionId: 'weather', stateId: 'visible' }] };
+  assert.equal(project(invisible).environment, undefined);
+  const visible = { ...invisible, doors: arrived.doors.map((door) => ({ ...door, state: 'open' })) };
+  assert.deepEqual(project(visible).environment?.map(({ modality, detail }) => ({ modality, detail })),
+    [{ modality: 'visual', detail: 'Hay niebla visible.' }]);
+  const { environment: ignored, ...historical } = view;
+  void ignored;
+  assert.equal('environment' in ActorWorldViewSchema.parse(historical), false);
 });
 
 test('la vista marca acciones que exceden las capacidades efectivas del actor', () => {

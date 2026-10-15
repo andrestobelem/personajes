@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CharacterIdSchema, HashSchema, RunIdSchema, RevisionSchema } from './values.ts';
-import { SceneIdSchema } from './world-schema.ts';
+import { CircumstanceOperationSchema, SceneIdSchema } from './world-schema.ts';
 
 export const DirectionScopeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('run') }),
@@ -20,14 +20,22 @@ export const RevokeMetaIndicationPayloadSchema = z.strictObject({
   scope: DirectionScopeSchema,
 });
 
-export const DirectionPayloadSchema = z.discriminatedUnion('kind', [
+export const ChangeCircumstancePayloadSchema=z.strictObject({
+  kind:z.literal('changeCircumstance'),scope:DirectionScopeSchema,operation:CircumstanceOperationSchema,
+});
+
+export const AdministrativeDirectionPayloadSchema = z.discriminatedUnion('kind', [
   MetaIndicationPayloadSchema,
   RevokeMetaIndicationPayloadSchema,
 ]);
 
+export const DirectionPayloadSchema=z.discriminatedUnion('kind',[
+  MetaIndicationPayloadSchema,RevokeMetaIndicationPayloadSchema,ChangeCircumstancePayloadSchema,
+]);
+
 // Durable historical payloads keep their original character limit. New writes
 // also enforce the UI byte/NUL boundary without making old ledger rows unreadable.
-export const DirectionRequestPayloadSchema = DirectionPayloadSchema.superRefine((payload,ctx)=>{
+export const DirectionRequestPayloadSchema = AdministrativeDirectionPayloadSchema.superRefine((payload,ctx)=>{
   if(payload.kind==='metaIndication'&&(payload.text.includes('\0')||new TextEncoder().encode(payload.text).byteLength>4_000))
     ctx.addIssue({code:'custom',path:['text'],message:'Texto de Dirección inválido o mayor a 4.000 bytes UTF-8'});
 });

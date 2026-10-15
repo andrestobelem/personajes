@@ -1,3 +1,4 @@
+import {createCircumstanceApplication} from '../application/direction-circumstances.ts';
 import { createRunObservationApplication } from '../application/run-observation.ts';
 import { createDramaticStructureApplication } from '../application/dramatic-structure.ts';
 import { createDirectionApplication } from '../application/direction-indications.ts';
@@ -154,6 +155,14 @@ try {
     runObservation:createRunObservationApplication({journal:host.journal}),
     runDramaticStructure:createDramaticStructureApplication({journal:host.journal}),
     runDirections:createDirectionApplication({journal:host.journal}),
+    runCircumstances:createCircumstanceApplication({journal:host.journal,onCommitted(event){
+      try{voices?.onWorldCommitted({runId:event.runId,eventIds:event.eventIds});}
+      finally{
+        const target={runId:event.runId,actorIds:event.actorIds};
+        if(representation!==undefined)representation.scheduleDelivery(target);
+        else worldDeliveries?.schedule(target);
+      }
+    }}),
     runInspector:createRunInspectorApplication({journal:host.journal}),
     authorizeObserverView:(runId)=>host.journal.readWorldLifecycle({runId})!==undefined,
     onInspectorRead:metadata=>process.stderr.write(JSON.stringify({kind:'inspectorRead',...metadata})+'\n'),

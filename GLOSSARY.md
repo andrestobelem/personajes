@@ -124,3 +124,12 @@ _Evitar_: ciclo diario como sinónimo de arco dramático completo.
 **Canon**: Información atribuible al corpus de ficción que se ha delimitado para la investigación.
 
 **Adaptación**: Decisión creativa del proyecto que interpreta o amplía el material de origen, declarando lo que incorpora.
+
+
+## Percepción circunstancial
+
+Información sensorial sobre un cambio confirmado del Escenario sin hablante ni personaje emisor. Un oscurecimiento puede percibirse aunque los objetos dejen de verse. Percibir una circunstancia no equivale a conocer quién la provocó, sus motivos o información ajena.
+
+## Catálogo de circunstancias
+
+Conjunto autorizado para una puesta de condiciones ambientales y plantillas de objetos, con procedencia explícita. Elegir una opción del catálogo permite solicitar su efecto compatible; no decide cómo reaccionará un personaje.

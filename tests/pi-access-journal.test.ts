@@ -80,7 +80,7 @@ test('v20 migra desde v19 sin crear corridas ni borrar operaciones existentes', 
         DROP TABLE pi_access_job_operations; DROP TABLE pi_access_job_results; DROP TABLE pi_access_job_history; DROP TABLE pi_access_jobs;
         DROP TABLE model_time_spans; DROP TABLE model_time_run_state;
         DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances;
-        DELETE FROM schema_version WHERE version IN(20,21,22,23,24,25,26,27,28,29,30,31,32);`);
+        DROP TABLE IF EXISTS circumstance_operations;DELETE FROM schema_version WHERE version IN(20,21,22,23,24,25,26,27,28,29,30,31,32,33);`);
     } finally { old.close(); }
 
     journal = openJournal({ path });
@@ -90,7 +90,7 @@ test('v20 migra desde v19 sin crear corridas ni borrar operaciones existentes', 
     assert.equal(created.state, 'queued');
     const inspect = new DatabaseSync(path);
     try {
-      assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version, 32);
+      assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version, 33);
       assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_runs').get()?.n, 0);
       assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(), []);
     } finally { inspect.close(); }

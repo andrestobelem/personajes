@@ -81,7 +81,15 @@ export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unkn
   return RunStageViewSchema.parse({kind:'run-stage',runId:world.runId,configRevision:configuration.configRevision,
     worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,fictionalAt:world.clock.instant,clock:world.clock,lifecycle:input.lifecycle,lifecycleAsOf:'current',
     activeSceneId:scene.id,scenes:[{id:scene.id,label:scene.label,lifecycle:scene.lifecycle.kind,participantIds:scene.participantIds,placeIds:scene.placeIds}],
-    places:places.map(({id,name,width,height,lighting})=>({id,name,width,height,lighting})),entities,
+    places:places.map(({id,name,width,height,lighting})=>{
+      const environment=(world.environment??[]).flatMap(current=>{
+        if(current.placeId!==id)return [];
+        const condition=world.circumstanceCatalog?.environmentConditions.find(item=>item.id===current.conditionId);
+        const state=condition?.states.find(item=>item.id===current.stateId);
+        return condition===undefined||state===undefined?[]:[{label:condition.label,detail:state.description,modality:state.modality}];
+      });
+      return {id,name,width,height,lighting,...(environment.length===0?{}:{environment})};
+    }),entities,
     connections:connections.map(({from,to,durationMs,arrivalPoint,doorId})=>({from,to,durationMs,arrivalPoint,doorId})),
     doors:world.doors.filter((door)=>doorIds.has(door.id)).map(({id,label,state})=>({id,label,state})),
     channels:world.channels.filter((channel)=>channel.placeIds.some((id)=>visiblePlaces.has(id))).map((channel)=>({
@@ -94,7 +102,7 @@ function characterReference(snapshot:WorldSnapshot,stage:RunStageView,actorId:st
   return visible===undefined?undefined:{entityId:visible.entityId,label:visible.label};
 }
 function speakerFor(event:WorldEvent,snapshot:WorldSnapshot,stage:RunStageView) {
-  if (event.origin.kind==='system') return null;
+  if (event.origin.kind==='system'||event.origin.kind==='direction') return null;
   if (event.origin.kind==='human') {
     const participantId=event.origin.participantId;
     if (!stage.humanParticipants.some((participant)=>participant.participantId===participantId)) return undefined;
@@ -122,6 +130,26 @@ function eventSummary(event:WorldEvent,stage:RunStageView,speaker:z.infer<typeof
     case 'waited':return `${label} esperó.`;
     case 'rested':return `${label} descansó.`;
     case 'clockAdvanced':return 'El tiempo ficticio del Escenario avanzó.';
+    case 'circumstanceChanged': {
+      const effect=event.effect;
+      switch(effect.kind) {
+        case 'doorStateChanged': {
+          const door=stage.doors.find((candidate)=>candidate.id===effect.doorId);
+          return door===undefined?undefined:`La puerta ${door.label} cambió de estado.`;
+        }
+        case 'lightingChanged': {
+          const place=stage.places.find((candidate)=>candidate.id===effect.placeId);
+          return place===undefined?undefined:`Cambió la iluminación de ${place.name}.`;
+        }
+        case 'environmentChanged': {
+          const place=stage.places.find((candidate)=>candidate.id===effect.placeId);
+          return place===undefined?undefined:`Cambió una condición ambiental de ${place.name}.`;
+        }
+        case 'deviceAvailabilityChanged':return object(effect.deviceEntityId)===undefined?undefined:`Cambió la disponibilidad de ${object(effect.deviceEntityId)}.`;
+        case 'objectAppeared':return object(effect.objectEntityId)===undefined?undefined:`Apareció ${object(effect.objectEntityId)}.`;
+        default:{const exhaustive:never=effect;throw new Error(String(exhaustive));}
+      }
+    }
     default:{const exhaustive:never=event;throw new Error(String(exhaustive));}
   }
 }

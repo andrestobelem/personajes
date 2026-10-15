@@ -94,6 +94,18 @@ export function StageMap({ data }: { data: StageMapData }) {
             {lightingLabels[place.lighting]} · Plano {place.width} ×{" "}
             {place.height}
           </p>
+          {place.environment !== undefined && place.environment.length > 0 && (
+            <section aria-label={`Condiciones confirmadas de ${place.name}`}>
+              <h3>Condiciones del lugar</h3>
+              <ul>
+                {place.environment.map((condition, index) => (
+                  <li key={`${condition.label}:${index}`}>
+                    <strong>{condition.label}</strong> · {condition.modality === "visual" ? "Visual" : "Auditiva"}: {condition.detail}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <div className="stage-map-viewport">
             <svg
               className="stage-map"

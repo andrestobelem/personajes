@@ -101,3 +101,8 @@ Configurador usa fuentes globales sólo para preparar/versionar contexto; sus pr
 ## Pruebas
 
 P02/P04–08/P10/P11/P16–20/P22. P18 requiere SDK y cuenta/proveedor reales: dos sesiones distintas, perfil efectivo al crear/reanudar, login/cancelación/refresh/acceso insuficiente. Dobles de proveedor sólo prueban orchestration y no entitlement. P08 compara varias situaciones/secuencias con rúbrica y antecedentes relevantes; no exige frases idénticas ni divergencia en cada ensayo.
+
+
+### Actuación ante una circunstancia
+
+La causa `directionCircumstance` sólo convoca mediante percepciones físicas ya confirmadas y entregadas. La Experience de tipo percepción conserva el detalle sensorial y su evento; no contiene hablante, autor administrativo, comando, catálogo ni motivo. El inbox usa lugar opaco, modalidad y detalle. La instancia Pi propia puede proponer actuar, esperar o ignorar la ocasión; el Continuista revisa la propuesta exacta y Escenario decide su efecto. Los turnos y las cuotas siguen los mismos límites, epochs y cortes que el resto de causas. En pausa puede entregarse un hecho confirmado sin convocar inferencia.

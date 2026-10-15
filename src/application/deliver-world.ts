@@ -152,7 +152,7 @@ function experienceContent(perception: Exclude<WorldPerception, { kind: 'observa
         ? perception.content.text
         : gestureContent(perception.content.gesture);
     case 'offer': return `Recibiste la oferta «${perception.offerHandle}».`;
-    case 'worldEvent': return perception.detail;
+    case 'worldEvent': case 'circumstance': return perception.detail;
   }
 }
 

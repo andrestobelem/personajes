@@ -12,13 +12,14 @@ import { createDramaticStructureApplication } from '../src/application/dramatic-
 import { createRunLifecycleApplication } from '../src/application/run-lifecycle.ts';
 import { validateRunConfiguration } from '../src/application/production-preflight.ts';
 import { runViewFixture } from './fixtures/run-view.ts';
-import { createLocalHttpServer, type RunDramaticStructureApplicationPort, type RunDirectionsApplicationPort, type RunLifecycleApplicationPort } from '../src/server/http.ts';
+import { createLocalHttpServer, type RunDramaticStructureApplicationPort, type RunDirectionsApplicationPort, type RunCircumstancesApplicationPort, type RunLifecycleApplicationPort } from '../src/server/http.ts';
 import { DramaticStructureViewSchema } from '../src/domain/world-journal.ts';
 import { SessionCreatedSchema } from '../src/domain/http.ts';
 import { draftFixture } from './fixtures/continuista.ts';
+import { CircumstanceWriteSchema } from '../src/domain/direction-circumstances.ts';
 import { HashSchema } from '../src/domain/values.ts';
 
-async function setup(t: TestContext, options: { rejectScenePlace?: boolean; directions?:RunDirectionsApplicationPort; runId?:ReturnType<typeof runViewFixture>['runId'] } = {}) {
+async function setup(t: TestContext, options: { rejectScenePlace?: boolean; directions?:RunDirectionsApplicationPort; circumstances?:RunCircumstancesApplicationPort; runId?:ReturnType<typeof runViewFixture>['runId'] } = {}) {
   const view = {...runViewFixture(),...(options.runId===undefined?{}:{runId:options.runId})};
   const structure = DramaticStructureViewSchema.parse({ runId: view.runId, structureRevision: 0, activeEpisodeId: null, activeSceneId: null, episodes: [], unassignedLegacyScenes: [] });
   const applied: unknown[] = [];
@@ -50,7 +51,7 @@ async function setup(t: TestContext, options: { rejectScenePlace?: boolean; dire
     readOperation:()=>({kind:'missing'}),
   };
   const server = createLocalHttpServer({ catalog: await loadCatalog({ repositoryRoot: process.cwd() }),
-    shellHtml: '<!doctype html><html><head></head><body></body></html>', runLifecycle, runDramaticStructure,runDirections:options.directions??runDirections,
+    shellHtml: '<!doctype html><html><head></head><body></body></html>', runLifecycle, runDramaticStructure,runDirections:options.directions??runDirections,...(options.circumstances===undefined?{}:{runCircumstances:options.circumstances}),
     resolveSessionMode:(candidate)=>candidate });
   const { origin } = await server.listen();
   t.after(() => server.close());
@@ -311,4 +312,50 @@ test('HTTP y SQLite revocan una metaindicación sin reescribir contexto congelad
     'If-Match':currentModeEtag,'Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'director',runId:host.runId,
       scope:{kind:'scene',sceneId:original.activeSceneId}})})).status,200);
   assert.equal((await post(revoke,2)).status,403,'sesión de escena no revoca indicación de corrida');
+});
+
+
+test('circunstancias HTTP exige Director y CSRF, usa scope de sesión y dos revisiones; reintento exacto no duplica',async(t)=>{
+  const reads:unknown[]=[];const writes:unknown[]=[];
+  const port:RunCircumstancesApplicationPort={
+    readOptions(input){reads.push(input);return {runId:input.runId,worldRevision:4,directionRevision:2,lifecycle:'paused',activeSceneId:null,scope:input.scope,places:[{id:'office',name:'Oficina sintética',description:'',width:10,height:10,lighting:'normal'}],doors:[],connections:[],devices:[]};},
+    apply(input){writes.push(input);return {kind:'stored',receipt:{operationId:input.operationId,worldRevision:5,directionRevision:3,worldSeq:6,commitIndex:7,recordedAt:1,effect:{kind:'applied',eventIds:[randomUUID()],recipientActorIds:[]}}};},
+  };
+  const host=await setup(t,{circumstances:port});const url=`${host.origin}/api/v1/runs/${host.runId}/circumstances`;
+  assert.equal((await fetch(url,{headers:host.headers})).status,403);assert.equal(reads.length,0);
+  const mode=await fetch(`${host.origin}/api/v1/session/mode`,{method:'PUT',headers:{...host.headers,'If-Match':host.sessionEtag??'','Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'director',runId:host.runId,scope:{kind:'run'}})});assert.equal(mode.status,200);
+  const read=await fetch(url,{headers:host.headers});assert.equal(read.status,200,await read.clone().text());
+  const etag=`"circumstances:${host.runId}:w4:d2"`;assert.equal(read.headers.get('etag'),etag);assert.deepEqual(reads,[{runId:host.runId,scope:{kind:'run'}}]);
+  assert.equal((await fetch(url+'?scope=run',{headers:host.headers})).status,422);
+  const key=randomUUID();const payload={kind:'changeCircumstance',scope:{kind:'run'},operation:{kind:'setLighting',placeId:'office',level:'dim'}};
+  const post=(headers:Record<string,string>={},body:unknown=payload)=>fetch(url,{method:'POST',headers:{...host.headers,'If-Match':etag,'Idempotency-Key':key,...headers},body:JSON.stringify(body)});
+  assert.equal((await post({'X-CSRF-Token':'bad'})).status,403);
+  assert.equal((await post({'If-Match':`"circumstances:${randomUUID()}:w4:d2"`})).status,412);
+  assert.equal((await post({}, {...payload,actorId:'maxwell-smart'})).status,422);
+  assert.equal((await post({}, {...payload,operation:{kind:'setLighting',placeId:'office',level:'dim',patch:{}}})).status,422);
+  assert.equal(writes.length,0);
+  const accepted=await post();assert.equal(accepted.status,200,await accepted.clone().text());assert.equal(accepted.headers.get('etag'),`"circumstances:${host.runId}:w5:d3"`);
+  assert.equal(writes.length,1);const submitted=portInput(writes[0]);assert.equal(submitted.expectedWorldRevision,4);assert.equal(submitted.expectedDirectionRevision,2);assert.deepEqual(submitted.payload,payload);
+  assert.equal((await post()).status,200);assert.equal(writes.length,1);
+  assert.equal((await post({}, {...payload,operation:{...payload.operation,level:'bright'}})).status,409);assert.equal(writes.length,1);
+});
+
+function portInput(value:unknown){return CircumstanceWriteSchema.parse(value);}
+
+for(const scenario of [
+  {result:{kind:'conflict',worldRevision:5,directionRevision:3},status:412},
+  {result:{kind:'missing'},status:404},
+  {result:{kind:'idempotencyConflict'},status:409},
+  {result:{kind:'invalidState',code:'workPending'},status:409},
+  {result:{kind:'invalidState',code:'runNotActive'},status:409},
+  {result:{kind:'invalidState',code:'outside-scope'},status:422},
+])test(`circunstancias HTTP traduce ${JSON.stringify(scenario.result)} a ${scenario.status}`,async(t)=>{
+  const sceneId=randomUUID();const writes:unknown[]=[];
+  const host=await setup(t,{circumstances:{readOptions:()=>undefined,apply:input=>{writes.push(input);return scenario.result;}}});
+  const mode=await fetch(`${host.origin}/api/v1/session/mode`,{method:'PUT',headers:{...host.headers,'If-Match':host.sessionEtag??'','Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'director',runId:host.runId,scope:{kind:'scene',sceneId}})});assert.equal(mode.status,200);
+  const url=`${host.origin}/api/v1/runs/${host.runId}/circumstances`;
+  const payload={kind:'changeCircumstance',scope:{kind:'scene',sceneId},operation:{kind:'setDoorState',doorId:randomUUID(),state:'closed'}};
+  const post=(scope:unknown)=>fetch(url,{method:'POST',headers:{...host.headers,'If-Match':`"circumstances:${host.runId}:w1:d0"`,'Idempotency-Key':randomUUID()},body:JSON.stringify({...payload,scope})});
+  assert.equal((await post({kind:'run'})).status,403);assert.equal((await post({kind:'scene',sceneId:randomUUID()})).status,403);assert.equal(writes.length,0);
+  const result=await post(payload.scope);assert.equal(result.status,scenario.status,await result.clone().text());assert.equal(writes.length,1);
 });
