@@ -50,7 +50,7 @@ import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, T
 import { WorldSeqSchema } from '../domain/values.ts';
 import { RunRefreshSchema, type RunRefresh } from '../domain/run-refresh.ts';
 import {
-  DirectionEventsPageSchema, DirectionMutationResultSchema, MetaIndicationPayloadSchema,
+  DirectionEventsPageSchema, DirectionMutationResultSchema, DirectionRequestPayloadSchema,
 } from '../domain/direction-indications.ts';
 import type { createHostRequestBarrier } from '../application/host-request-barrier.ts';
 
@@ -1446,7 +1446,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           fail({status:403,kind:'forbidden',code:'CAPABILITY_REQUIRED',message:'La sesión debe estar en modo Director para enviar indicaciones.'});
         const port=options.runDirections;
         if(port===undefined)fail({status:503,kind:'dependency',code:'DIRECTION_UNAVAILABLE',message:'El ledger de Dirección no está disponible.',safeCode:'DIRECTION_UNAVAILABLE',retryable:true});
-        const body=parseSchema(MetaIndicationPayloadSchema,await readJsonBody(req));
+        const body=parseSchema(DirectionRequestPayloadSchema,await readJsonBody(req));
         if(session.mode.scope.kind==='scene'
           &&(body.scope.kind!=='scene'||body.scope.sceneId!==session.mode.scope.sceneId))
           fail({status:403,kind:'forbidden',code:'SCOPE_MISMATCH',message:'La indicación excede el alcance de escena de esta sesión.'});
@@ -1465,6 +1465,9 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
           case 'missing':fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
           case 'idempotencyConflict':fail({status:409,kind:'conflict',code:'IDEMPOTENCY_CONFLICT',message:'La clave ya se usó con otra indicación.'});
           case 'invalidState':{
+            if(result.code==='directionNotFound')fail({status:404,kind:'notFound',code:'DIRECTION_NOT_FOUND',message:'La metaindicación que se intenta revocar no existe en esta corrida.'});
+            if(result.code==='directionScopeMismatch')fail({status:422,kind:'validation',code:'INVALID_DIRECTION_SCOPE',message:'La revocación debe conservar el alcance exacto de la metaindicación original.',issues:[]});
+            if(result.code==='directionAlreadyRevoked')fail({status:409,kind:'conflict',code:'DIRECTION_ALREADY_REVOKED',message:'La metaindicación ya fue revocada por otra operación.'});
             if(result.code==='invalidRecipient'||result.code==='sceneRecipientMismatch')fail({status:422,kind:'validation',code:'INVALID_DIRECTION',message:'La indicación refiere un destinatario que no corresponde al reparto o escena.',issues:[]});
             fail({status:409,kind:'conflict',code:'DIRECTION_SCOPE_CLOSED',message:'La corrida o escena ya no admite esa indicación.'});
           }

@@ -51,3 +51,35 @@ test('el cliente valida que la lectura del ledger y su ETag sean de la misma cor
   }), { status: 200, headers: { 'Content-Type': 'application/json', ETag: directionEtag(randomUUID(), 4) } }), session);
   await assert.rejects(wrong.read(runId), /no coincide/);
 });
+
+
+test('la lectura completa incluye revocaciones más allá de la primera página y rechaza cortes mezclados',async()=>{
+  const targetOperationId=randomUUID();
+  const rows=Array.from({length:1_001},(_,index)=>({runId,directionRevision:index+1,operationId:index===0?targetOperationId:randomUUID(),
+    principalId:'local-operator',payload:index===1_000?{kind:'revokeMetaIndication',targetOperationId,scope:{kind:'run'}}
+      :{kind:'metaIndication',recipients:['maxwell-smart'],text:`Indicación ${index+1}`,scope:{kind:'run'}},
+    payloadHash:'a'.repeat(64),worldRevision:0,worldSeq:0,commitIndex:0,recordedAt:100}));
+  const cuts:number[]=[];
+  const client=createRunDirectionClient(async(url)=>{
+    const query=new URL(String(url),'http://localhost').searchParams;
+    const after=Number(query.get('afterDirectionRevision'));cuts.push(after);
+    return new Response(JSON.stringify({events:rows.slice(after,after+1_000),directionRevision:1_001,hasMore:after===0}),
+      {headers:{ETag:directionEtag(runId,1_001)}});
+  },session);
+  const complete=await client.readComplete(runId);
+  assert.deepEqual(cuts,[0,1_000]);assert.equal(complete.page.hasMore,false);assert.equal(complete.page.events.length,1_001);
+  const withdrawn=complete.page.events.filter(event=>event.payload.kind==='revokeMetaIndication').map(event=>event.payload);
+  assert.deepEqual(withdrawn,[{kind:'revokeMetaIndication',targetOperationId,scope:{kind:'run'}}]);
+  const changing=createRunDirectionClient(async(url)=>{
+    const after=Number(new URL(String(url),'http://localhost').searchParams.get('afterDirectionRevision'));
+    const revision=after===0?1_001:1_002;
+    return new Response(JSON.stringify({events:rows.slice(after,after+1_000),directionRevision:revision,hasMore:after===0}),
+      {headers:{ETag:directionEtag(runId,revision)}});
+  },session);
+  await assert.rejects(changing.readComplete(runId),/cambió durante la lectura/);
+  for(const events of [rows.slice(0,1),[],[rows[1]]]){
+    const incomplete=createRunDirectionClient(async()=>new Response(JSON.stringify({events,directionRevision:1_001,hasMore:false}),
+      {headers:{ETag:directionEtag(runId,1_001)}}),session);
+    await assert.rejects(incomplete.readComplete(runId),/no está completo/);
+  }
+});

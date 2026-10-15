@@ -3,7 +3,7 @@ import { ApiProblemSchema } from '../domain/http.ts';
 import {
   DirectionEventsPageSchema,
   DirectionMutationResultSchema,
-  MetaIndicationPayloadSchema,
+  DirectionRequestPayloadSchema,
 } from '../domain/direction-indications.ts';
 import { RevisionSchema, RunIdSchema } from '../domain/values.ts';
 import { bootstrapSession } from './client.ts';
@@ -13,7 +13,7 @@ const IntentSchema = z.strictObject({
   runId: RunIdSchema,
   etag: z.string().min(1).max(200),
   key: Uuid,
-  payload: MetaIndicationPayloadSchema,
+  payload: DirectionRequestPayloadSchema,
 });
 export type DirectionDocument = {
   page: z.infer<typeof DirectionEventsPageSchema>;
@@ -70,8 +70,7 @@ export function createRunDirectionClient(
   request: typeof fetch = (url, init) => fetch(url, init),
   bootstrap = bootstrapSession,
 ) {
-  return Object.freeze({
-    async read(runId: string, afterDirectionRevision = 0, limit = 1_000): Promise<DirectionDocument> {
+  async function read(runId: string, afterDirectionRevision = 0, limit = 1_000): Promise<DirectionDocument> {
       const validRunId = RunIdSchema.parse(runId);
       const after = RevisionSchema.parse(afterDirectionRevision);
       const boundedLimit = z.number().int().min(1).max(1_000).parse(limit);
@@ -84,6 +83,28 @@ export function createRunDirectionClient(
         throw new Error('El ledger de Dirección no coincide con la corrida o revisión solicitada.');
       }
       return { page, etag };
+  }
+  return Object.freeze({
+    read,
+    async readComplete(runId: string): Promise<DirectionDocument> {
+      const first=await read(runId);
+      const events=[...first.page.events];
+      let current=first;
+      while(current.page.hasMore){
+        const after=current.page.events.at(-1)?.directionRevision;
+        if(after===undefined)throw new Error('Página de Dirección incompleta sin cursor.');
+        const next=await read(runId,after);
+        if(next.page.directionRevision!==first.page.directionRevision)
+          throw new Error('El ledger cambió durante la lectura. Actualizá Dirección para consultar su vigencia.');
+        if(next.page.events.length===0||next.page.events.some(event=>event.directionRevision<=after))
+          throw new Error('El historial de Dirección no avanzó de forma coherente.');
+        events.push(...next.page.events);
+        current=next;
+      }
+      if(events.some((event,index)=>event.directionRevision!==index+1)
+        ||(events.at(-1)?.directionRevision??0)!==first.page.directionRevision)
+        throw new Error('El historial de Dirección no está completo para determinar su vigencia.');
+      return {page:{...first.page,events,hasMore:false},etag:first.etag};
     },
     async mutate(input: DirectionIntent) {
       const intent = captureDirectionIntent(input);

@@ -88,3 +88,5 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 Los pendientes sustantivos se mantienen visibles: no hay representación iniciada, interfaz completa de representación, login ejecutado ni voces generadas. La biblioteca local sí está implementada. La investigación de doblaje no obtuvo una medición de audio. La cobertura documental extensa del reparto no equivale a una auditoría audiovisual de todos los episodios ni a biografías sin lagunas.
 
 - [Preflight durable](auditoria/preflight-durable.md): comprobación explícita del corte guardado, recuperación y obsolescencia, sin inicio ni inferencia implícitos.
+
+- [Cambios de circunstancia: contrato y brechas de implementación](auditoria/cambios-de-circunstancia.md): auditoría de las cinco familias, percepciones sin emisor ficticio, autoridad y pruebas pendientes.

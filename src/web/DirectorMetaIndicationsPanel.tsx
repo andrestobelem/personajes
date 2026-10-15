@@ -5,7 +5,7 @@ import type { RunStageView } from '../domain/run-observation.ts';
 import { RunIdSchema } from '../domain/values.ts';
 import { createHumanInteractionClient, type SessionDocument } from './human-interaction-client.ts';
 import { createRunDramaticStructureClient } from './run-dramatic-structure-client.ts';
-import { createRunDirectionClient, type DirectionDocument, type DirectionIntent } from './run-direction-client.ts';
+import { createRunDirectionClient, type DirectionDocument, type DirectionIntent, type RunDirectionClient } from './run-direction-client.ts';
 
 const sessionClient = createHumanInteractionClient();
 const structureClient = createRunDramaticStructureClient();
@@ -18,6 +18,55 @@ function currentModeMatches(session: SessionDocument | null, runId: string, scop
   const mode = session?.view.mode;
   if (mode?.kind !== 'director' || mode.runId !== runId || mode.scope.kind !== scope) return false;
   return scope === 'run' || (sceneId !== null && mode.scope.kind === 'scene' && mode.scope.sceneId === sceneId);
+}
+
+function definitiveFailure(error: unknown) {
+  const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
+  return status !== undefined && status >= 400 && status < 500 && status !== 408;
+}
+
+// Keep uncertain operations across remounts, but release terminal responses so the
+// operator can correct the draft and submit a fresh idempotent operation.
+export async function sendDirectionIntent(intent: DirectionIntent, client: Pick<RunDirectionClient, 'mutate'> = directionClient) {
+  unresolvedByRun.set(intent.runId, intent);
+  try {
+    const result = await client.mutate(intent);
+    unresolvedByRun.delete(intent.runId);
+    return result;
+  } catch (error) {
+    if (definitiveFailure(error)) unresolvedByRun.delete(intent.runId);
+    throw error;
+  }
+}
+
+export function MetaIndicationComposer({ enabled, recipients, availableRecipients, text, scope, onRecipientsChange, onTextChange, onSubmit }: {
+  enabled: boolean;
+  recipients: string[];
+  availableRecipients: Array<{ characterId: string; label: string }>;
+  text: string;
+  scope: ScopeChoice;
+  onRecipientsChange: (recipients: string[]) => void;
+  onTextChange: (text: string) => void;
+  onSubmit: () => void;
+}) {
+  const invalidText = text.includes('\0') || new TextEncoder().encode(text).byteLength > 4_000;
+  const canSubmit = enabled && recipients.length > 0 && text.trim().length > 0 && !invalidText;
+  return <form onSubmit={(event) => { event.preventDefault(); if (canSubmit) onSubmit(); }}>
+    <h3>Indicación privada</h3>
+    <fieldset disabled={!enabled}>
+      <legend>Personajes destinatarios</legend>
+      {availableRecipients.length === 0
+        ? <p>{scope === 'scene' ? 'La escena activa no tiene personajes preparados.' : 'No hay personajes preparados.'}</p>
+        : availableRecipients.map((person) => <label className="dramatic-check" key={person.characterId}>
+          <input type="checkbox" checked={recipients.includes(person.characterId)} onChange={(event) => onRecipientsChange(event.currentTarget.checked
+            ? [...recipients, person.characterId] : recipients.filter((id) => id !== person.characterId))} />
+          {person.label}
+        </label>)}
+    </fieldset>
+    <label>Texto para el personaje<textarea value={text} maxLength={4_000} disabled={!enabled} onChange={(event) => onTextChange(event.currentTarget.value)} placeholder="Indicá una intención de dirección, sin dictar una respuesta literal." /></label>
+    {invalidText && <p role="alert">El texto no puede contener NUL ni superar 4.000 bytes UTF-8.</p>}
+    <button type="submit" disabled={!canSubmit}>Registrar metaindicación</button>
+  </form>;
 }
 
 export function DirectorMetaIndicationsPanel({
@@ -63,7 +112,7 @@ export function DirectorMetaIndicationsPanel({
       setOptions(sceneOptions);
       if (sessionDocument.view.mode.kind === 'director' && sessionDocument.view.mode.runId === runId) {
         setScope(sessionDocument.view.mode.scope.kind);
-        const directionDocument = await directionClient.read(runId);
+        const directionDocument = await directionClient.readComplete(runId);
         if (started !== epoch.current) return;
         setDocument(directionDocument);
       } else {
@@ -105,7 +154,7 @@ export function DirectorMetaIndicationsPanel({
       if (started !== epoch.current) return;
       if (result.kind !== 'mode') throw new Error('El host no confirmó el modo Dirección.');
       setSession(result.document);
-      const next = await directionClient.read(runId);
+      const next = await directionClient.readComplete(runId);
       if (started !== epoch.current) return;
       setDocument(next);
       setMessage('Modo Dirección confirmado por el host.');
@@ -118,19 +167,26 @@ export function DirectorMetaIndicationsPanel({
 
   async function submit(intent: DirectionIntent) {
     if (busy || !directorActive) return;
-    unresolvedByRun.set(runId, intent);
     setPending(intent);
     setBusy(true);
     setMessage(null);
     try {
-      const result = await directionClient.mutate(intent);
+      const result = await sendDirectionIntent(intent);
       if (result.kind === 'stored' || result.kind === 'existing') {
         unresolvedByRun.delete(runId);
         setPending(null);
-        setText('');
-        setRecipients([]);
-        setMessage(result.kind === 'existing' ? 'Se recuperó la misma indicación ya registrada.' : 'Metaindicación registrada en el ledger de Dirección.');
-        setDocument(await directionClient.read(runId));
+        if (intent.payload.kind === 'metaIndication') {
+          setText('');
+          setRecipients([]);
+        }
+        setMessage(result.kind === 'existing' ? 'Se recuperó la misma operación ya registrada.' : intent.payload.kind === 'metaIndication'
+          ? 'Metaindicación registrada en el ledger de Dirección.' : 'Metaindicación revocada para turnos nuevos.');
+        try {
+          setDocument(await directionClient.readComplete(runId));
+        } catch {
+          setDocument(null);
+          setMessage('La operación quedó confirmada, pero no se pudo actualizar el historial. Actualizá sesión y ledger antes de continuar.');
+        }
       } else {
         unresolvedByRun.delete(runId);
         setPending(null);
@@ -140,7 +196,7 @@ export function DirectorMetaIndicationsPanel({
       }
     } catch (error) {
       const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
-      if (status !== undefined && status >= 400 && status < 500 && status !== 408) setPending(null);
+      setPending(unresolvedByRun.get(runId) ?? null);
       setMessage(error instanceof Error
         ? `${error.message}${status === undefined || status === 408 || status >= 500 ? ' Se conserva la misma operación para reintentar.' : ''}`
         : 'Resultado incierto. Se conserva la misma operación para reintentar.');
@@ -149,31 +205,18 @@ export function DirectorMetaIndicationsPanel({
     }
   }
 
-  async function loadMore() {
-    if (document === null || busy) return;
-    const last = document.page.events.at(-1)?.directionRevision ?? 0;
-    if (!document.page.hasMore || last === 0) return;
-    setBusy(true);
-    try {
-      const next = await directionClient.read(runId, last);
-      setDocument({ page: { ...next.page, events: [...document.page.events, ...next.page.events] }, etag: next.etag });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo ampliar el historial de Dirección.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const scopeForPayload = scope === 'scene' && activeSceneId !== null
     ? { kind: 'scene' as const, sceneId: activeSceneId }
     : { kind: 'run' as const };
-  const invalidText = text.includes('\0') || new TextEncoder().encode(text).byteLength > 4_000;
-  const canWrite = active && lifecycle === 'running' && directorActive && pending === null && !busy
-    && document !== null && recipients.length > 0 && text.trim().length > 0 && !invalidText;
+  const canEdit = active && lifecycle === 'running' && directorActive && pending === null && !busy && !loading && document !== null;
+  const canRevoke = active && ['ready','running','paused','stopped'].includes(lifecycle) && directorActive
+    && pending === null && !busy && !loading && document !== null;
+  const revokedIds = new Set(document?.page.events.flatMap((event) => event.payload.kind === 'revokeMetaIndication' ? [event.payload.targetOperationId] : []) ?? []);
 
   return <section className="dramatic-structure-panel director-indications" aria-label="Metaindicaciones del Director">
     <header><span className="eyebrow">CANAL PRIVADO DE DIRECCIÓN</span><h2>Metaindicaciones</h2>
       <p>Se entregan al personaje como guía administrativa separada de su diálogo, memoria e historia. No reemplazan identidad, conocimiento, deseos ni capacidades; el actor conserva su punto de vista y puede resistirse.</p>
+      <p>Las indicaciones vigentes se presentan juntas, sin una prioridad implícita entre ellas. Revocar una indicación impide su entrega a turnos nuevos; conserva el historial y no altera turnos ya preparados.</p>
     </header>
     {loading && <p role="status">Consultando sesión y ledger de Dirección…</p>}
     {message !== null && <p role="status">{message}</p>}
@@ -195,29 +238,16 @@ export function DirectorMetaIndicationsPanel({
         {directorActive && <p>La sesión tiene autoridad de Dirección para el alcance seleccionado.</p>}
         <button type="button" disabled={busy} onClick={() => void reload()}>Actualizar sesión y ledger</button>
       </form>
-      <form onSubmit={(event) => {
-        event.preventDefault();
-        if (!canWrite || document === null) return;
-        const payload = MetaIndicationPayloadSchema.parse({ kind: 'metaIndication', recipients, text, scope: scopeForPayload });
-        void submit({ runId: RunIdSchema.parse(runId), etag: document.etag, key: crypto.randomUUID(), payload });
-      }}>
-        <h3>Indicación privada</h3>
-        <fieldset disabled={!canWrite}>
-          <legend>Personajes destinatarios</legend>
-          {availableRecipients.length === 0
-            ? <p>{scope === 'scene' ? 'La escena activa no tiene personajes preparados.' : 'No hay personajes preparados.'}</p>
-            : availableRecipients.map((person) => <label className="dramatic-check" key={person.characterId}>
-              <input type="checkbox" checked={recipients.includes(person.characterId)} onChange={(event) => setRecipients((current) => event.currentTarget.checked
-                ? [...current, person.characterId] : current.filter((id) => id !== person.characterId))} />
-              {person.label}
-            </label>)}
-        </fieldset>
-        <label>Texto para el personaje<textarea value={text} maxLength={4_000} disabled={!canWrite} onChange={(event) => setText(event.currentTarget.value)} placeholder="Indicá una intención de dirección, sin dictar una respuesta literal." /></label>
-        {invalidText && <p role="alert">El texto no puede contener NUL ni superar 4.000 bytes UTF-8.</p>}
+      <div>
+        <MetaIndicationComposer enabled={canEdit} recipients={recipients} availableRecipients={availableRecipients} text={text} scope={scope}
+          onRecipientsChange={setRecipients} onTextChange={setText} onSubmit={() => {
+            if (!canEdit || document === null) return;
+            const payload = MetaIndicationPayloadSchema.parse({ kind: 'metaIndication', recipients, text, scope: scopeForPayload });
+            void submit({ runId: RunIdSchema.parse(runId), etag: document.etag, key: crypto.randomUUID(), payload });
+          }} />
         {lifecycle !== 'running' && <p>La representación debe estar en curso para registrar una indicación nueva.</p>}
         {!directorActive && <p>Activá el modo Dirección con el alcance elegido antes de escribir.</p>}
-        <button type="submit" disabled={!canWrite}>Registrar metaindicación</button>
-      </form>
+      </div>
     </div>
     {pending !== null && <div className="dramatic-pending" role="alert"><p>El resultado de esta operación sigue pendiente; se conserva la misma clave idempotente.</p>
       <button disabled={busy || !directorActive} onClick={() => void submit(pending)}>Reintentar la misma indicación</button></div>}
@@ -230,10 +260,21 @@ export function DirectorMetaIndicationsPanel({
           {((event.payload.scope.kind === 'scene' && event.payload.scope.sceneId !== activeSceneId)
             || (event.payload.scope.kind === 'run' && lifecycle === 'closed'))
             && <span> · alcance vencido; ya no se entrega a turnos nuevos</span>}
-          <p>{event.payload.text}</p>
-          <p className="muted">Personajes: {event.payload.recipients.map((id) => options?.participants.find((person) => person.characterId === id)?.label ?? id).join(', ')} · revisión {event.directionRevision} · registrada {new Date(event.recordedAt).toISOString()}</p>
+          {event.payload.kind === 'metaIndication' ? <>
+            <p>{event.payload.text}</p>
+            <p className="muted">Personajes: {event.payload.recipients.map((id) => options?.participants.find((person) => person.characterId === id)?.label ?? id).join(', ')}</p>
+            {revokedIds.has(event.operationId) ? <p>Revocada: no se entrega a turnos nuevos.</p> : <button type="button"
+              disabled={!canRevoke || (session?.view.mode.kind === 'director' && session.view.mode.scope.kind === 'scene'
+                && (event.payload.scope.kind !== 'scene' || session.view.mode.scope.sceneId !== event.payload.scope.sceneId))}
+              onClick={() => {
+                if (!canRevoke || document === null) return;
+                void submit({ runId: RunIdSchema.parse(runId), etag: document.etag, key: crypto.randomUUID(), payload: {
+                  kind: 'revokeMetaIndication', targetOperationId: event.operationId, scope: event.payload.scope,
+                } });
+              }}>Revocar metaindicación</button>}
+          </> : <p>Revocación de la metaindicación {event.payload.targetOperationId}. No modifica turnos ya preparados ni borra el historial.</p>}
+          <p className="muted">Revisión {event.directionRevision} · registrada {new Date(event.recordedAt).toISOString()}</p>
         </li>)}</ol>}
-      {document?.page.hasMore && <button type="button" disabled={busy} onClick={() => void loadMore()}>Cargar indicaciones anteriores</button>}
     </section>
   </section>;
 }

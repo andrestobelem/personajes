@@ -583,6 +583,151 @@ test('metaindicaciones se versionan aparte del mundo y el actor conserva el cort
   }
 });
 
+test('revocar Dirección conserva la historia, el corte actoral y el mundo al reabrir', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-direction-revoke-'));
+  const path=join(directory,'world.sqlite');
+  let journal=openJournal({path});
+  try{
+    await createQueuedHumanIntentFixture(journal,['Activar el corte de Dirección.']);
+    const worldBefore=journal.loadWorld({runId});
+    if(worldBefore===undefined)assert.fail('Falta el Escenario de prueba');
+    const eventsBefore=journal.readObservationEvents({runId,fromWorldSeq:0,toWorldSeq:worldBefore.seq,afterWorldSeq:null,limit:100,communicationsOnly:false});
+    const readPerceptions=()=>{
+      const database=new DatabaseSync(path);
+      try{return database.prepare('SELECT * FROM world_perceptions WHERE run_id=? ORDER BY perception_id').all(runId);}
+      finally{database.close();}
+    };
+    const perceptionsBefore=readPerceptions();
+    const indication={runId,principalId:'director-test',operationId:uuid(9_820),idempotencyKey:uuid(9_821),
+      expectedDirectionRevision:0,payload:{kind:'metaIndication',recipients:[maxId],text:'Conservá la reserva.',scope:{kind:'scene',sceneId}}};
+    assert.equal(journal.applyDirectionCommand(indication).kind,'stored');
+    journal.configureRun({runId,maxCalls:5});
+    const pulseId=PulseIdSchema.parse(uuid(9_822));journal.configurePulse({runId,pulseId,maxCalls:2});
+    const scheduled=journal.scheduleActorTurnJob({runId,actorId:maxId,pulseId});
+    if(scheduled.kind!=='scheduled')assert.fail('Falta turno para congelar Dirección');
+    const claim=journal.claimActorTurnJob({runId,actorId:maxId,jobId:scheduled.job.jobId,generation:scheduled.job.generation,
+      ownerToken:uuid(9_823),claimToken:uuid(9_824)});
+    if(claim.kind!=='claimed'||claim.job.frozenDirectionRevision===null)assert.fail('Falta corte congelado');
+    const frozenRevision=claim.job.frozenDirectionRevision;
+    const revoke={runId,principalId:'director-test',operationId:uuid(9_825),idempotencyKey:uuid(9_826),
+      expectedDirectionRevision:1,payload:{kind:'revokeMetaIndication',targetOperationId:indication.operationId,scope:{kind:'scene',sceneId}}};
+    const stored=journal.applyDirectionCommand(revoke);
+    assert.equal(stored.kind,'stored');
+    assert.deepEqual(journal.applyDirectionCommand(revoke),stored.kind==='stored'?{...stored,kind:'existing'}:stored);
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:frozenRevision,activeSceneId:sceneId}).indications.length,1);
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:2,activeSceneId:sceneId}).indications.length,0);
+    assert.deepEqual(readPerceptions(),perceptionsBefore);
+    assert.deepEqual(journal.loadWorld({runId}),worldBefore);
+    assert.deepEqual(journal.readObservationEvents({runId,fromWorldSeq:0,toWorldSeq:worldBefore.seq,afterWorldSeq:null,limit:100,communicationsOnly:false}),eventsBefore);
+    assert.deepEqual(readPerceptions(),perceptionsBefore,'revocar no cambia ni agrega percepciones');
+    const page=journal.readDirectionEvents({runId,afterDirectionRevision:0,limit:1});
+    assert.equal(page?.hasMore,true);
+    assert.equal(page?.events[0]?.payload.kind,'metaIndication');
+    assert.equal(journal.readDirectionEvents({runId,afterDirectionRevision:1,limit:1})?.events[0]?.payload.kind,'revokeMetaIndication');
+    journal.close();journal=openJournal({path});
+    assert.deepEqual(journal.readDirectionOperation({runId,principalId:revoke.principalId,idempotencyKey:revoke.idempotencyKey}),{kind:'found',result:stored});
+    assert.equal(journal.applyDirectionCommand(revoke).kind,'existing');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:frozenRevision,activeSceneId:sceneId}).indications.length,1);
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:2,activeSceneId:sceneId}).indications.length,0);
+    assert.deepEqual(readPerceptions(),perceptionsBefore);
+    assert.deepEqual(journal.loadWorld({runId}),worldBefore);
+    assert.deepEqual(journal.readObservationEvents({runId,fromWorldSeq:0,toWorldSeq:worldBefore.seq,afterWorldSeq:null,limit:100,communicationsOnly:false}),eventsBefore);
+  }finally{
+    try{journal.close();}catch{/* Puede estar cerrado por el reinicio. */}
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test('Dirección lee y revoca una fila legada de hasta 4000 caracteres aunque supere el límite UTF-8 nuevo', () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-direction-legacy-text-'));
+  const path=join(directory,'world.sqlite');
+  let journal=openJournal({path});
+  try{
+    registerRun(journal);
+    const worldBefore=journal.loadWorld({runId});
+    const targetOperationId=uuid(9_880);
+    const text='á'.repeat(2_001);
+    const payload={kind:'metaIndication',recipients:[maxId],text,scope:{kind:'run'}};
+    const payloadJson=canonicalJson(payload);
+    // Explicit prior-version database fixture. The old contract admitted 4000
+    // characters; this is not a newly submitted command under today's byte limit.
+    const database=new DatabaseSync(path);
+    try{
+      const cut=z.strictObject({world_revision:z.number(),last_seq:z.number(),commit_index:z.number()})
+        .parse(database.prepare('SELECT world_revision,last_seq,commit_index FROM world_runs WHERE run_id=?').get(runId));
+      database.exec('BEGIN IMMEDIATE');
+      database.prepare(`INSERT INTO direction_events(run_id,direction_revision,operation_id,principal_id,payload_json,payload_hash,
+        world_revision,world_seq,commit_index,recorded_at) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+        .run(runId,1,targetOperationId,'legacy-fixture',payloadJson,sha256(payloadJson),cut.world_revision,cut.last_seq,cut.commit_index,100);
+      database.prepare('UPDATE world_runs SET direction_revision=1 WHERE run_id=?').run(runId);
+      database.exec('COMMIT');
+    }finally{database.close();}
+    journal.close();journal=openJournal({path});
+    const page=journal.readDirectionEvents({runId});
+    assert.equal(page?.directionRevision,1);
+    assert.deepEqual(page?.events[0]?.payload,payload,'reabrir conserva el texto histórico exacto y su hash');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:1,activeSceneId:sceneId}).indications[0]?.text,text);
+    const revoke={runId,principalId:'director-test',operationId:uuid(9_881),idempotencyKey:uuid(9_882),expectedDirectionRevision:1,
+      payload:{kind:'revokeMetaIndication',targetOperationId,scope:{kind:'run'}}};
+    assert.equal(journal.applyDirectionCommand(revoke).kind,'stored');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:2,activeSceneId:sceneId}).indications.length,0);
+    journal.close();journal=openJournal({path});
+    assert.equal(journal.applyDirectionCommand(revoke).kind,'existing');
+    assert.equal(journal.readDirectionEvents({runId})?.events.length,2);
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:1,activeSceneId:sceneId}).indications[0]?.text,text,
+      'la revocación y el nuevo límite no reescriben el corte anterior');
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:2,activeSceneId:sceneId}).indications.length,0);
+    assert.deepEqual(journal.loadWorld({runId}),worldBefore);
+  }finally{
+    try{journal.close();}catch{/* Puede estar cerrado por el reinicio. */}
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test('revocación rechaza alcance distinto, referencias ausentes, doble revocación y CAS obsoleto sin eventos', () => {
+  withJournal((journal)=>{
+    registerRun(journal);
+    const targetOperationId=uuid(9_840);
+    assert.equal(journal.applyDirectionCommand({runId,principalId:'director-test',operationId:targetOperationId,idempotencyKey:uuid(9_841),
+      expectedDirectionRevision:0,payload:{kind:'metaIndication',recipients:[maxId],text:'Reserva.',scope:{kind:'run'}}}).kind,'stored');
+    const otherRunId=RunIdSchema.parse(uuid(9_860));
+    const otherSnapshot=WorldSnapshotSchema.parse(JSON.parse(JSON.stringify(worldFixture()).replaceAll(runId,otherRunId)));
+    assert.equal(journal.registerWorldRun({initialSnapshot:otherSnapshot,configurationRevision:0,configuration:{model:'test-profile',limit:1},
+      continuityFence:{kind:'prepared-contexts',atWorldSeq:0,contexts:[maxId,agentId].map((actorId)=>({actorId,
+        continuityId:'continuity-main',continuityRevision:0,continuityContentHash:'b'.repeat(64),identityVersion:1,preparedContextHash:'a'.repeat(64)}))},lifecycle:'ready'}),'stored');
+    const otherTarget=uuid(9_861);
+    assert.equal(journal.applyDirectionCommand({runId:otherRunId,principalId:'director-test',operationId:otherTarget,idempotencyKey:uuid(9_862),
+      expectedDirectionRevision:0,payload:{kind:'metaIndication',recipients:[maxId],text:'Sólo otra representación.',scope:{kind:'run'}}}).kind,'stored');
+    const worldBefore=journal.loadWorld({runId});
+    const revoke=(n:number,target:string,scope:unknown,expectedDirectionRevision=1)=>({runId,principalId:'director-test',
+      operationId:uuid(n),idempotencyKey:uuid(n+1),expectedDirectionRevision,
+      payload:{kind:'revokeMetaIndication',targetOperationId:target,scope}});
+    const absent=revoke(9_842,uuid(999_999),{kind:'run'});
+    assert.deepEqual(journal.applyDirectionCommand(absent),{kind:'invalidState',code:'directionNotFound'});
+    assert.deepEqual(journal.applyDirectionCommand(absent),{kind:'invalidState',code:'directionNotFound'});
+    const mismatch=revoke(9_844,targetOperationId,{kind:'scene',sceneId});
+    assert.deepEqual(journal.applyDirectionCommand(mismatch),{kind:'invalidState',code:'directionScopeMismatch'});
+    assert.deepEqual(journal.applyDirectionCommand(revoke(9_846,targetOperationId,{kind:'run'},0)),{kind:'conflict',directionRevision:1});
+    assert.deepEqual(journal.applyDirectionCommand(revoke(9_864,otherTarget,{kind:'run'})),{kind:'invalidState',code:'directionNotFound'},'no puede revocar en otra representación');
+    assert.equal(journal.readDirectionEvents({runId})?.events.length,1);
+    const valid=revoke(9_848,targetOperationId,{kind:'run'});
+    assert.equal(journal.applyDirectionCommand(valid).kind,'stored');
+    assert.deepEqual(journal.applyDirectionCommand(revoke(9_850,targetOperationId,{kind:'run'},2)),{kind:'invalidState',code:'directionAlreadyRevoked'});
+    assert.deepEqual(journal.applyDirectionCommand(revoke(9_852,valid.operationId,{kind:'run'},2)),{kind:'invalidState',code:'directionNotFound'},'no se revoca una revocación');
+    assert.deepEqual(journal.applyDirectionCommand({...valid,payload:{...valid.payload,targetOperationId:uuid(999_998)}}),{kind:'idempotencyConflict'});
+    assert.equal(journal.readDirectionEvents({runId})?.events.length,2);
+    assert.equal(journal.readDirectionEvents({runId})?.directionRevision,2);
+    assert.deepEqual(journal.loadWorld({runId}),worldBefore);
+    const sceneTarget=uuid(9_866);
+    assert.equal(journal.applyDirectionCommand({runId,principalId:'director-test',operationId:sceneTarget,idempotencyKey:uuid(9_867),
+      expectedDirectionRevision:2,payload:{kind:'metaIndication',recipients:[maxId],text:'Sólo esta escena.',scope:{kind:'scene',sceneId}}}).kind,'stored');
+    assert.deepEqual(journal.applyDirectionCommand(revoke(9_868,sceneTarget,{kind:'run'},3)),{kind:'invalidState',code:'directionScopeMismatch'});
+    assert.deepEqual(journal.applyDirectionCommand(revoke(9_870,sceneTarget,{kind:'scene',sceneId:uuid(9_872)},3)),{kind:'invalidState',code:'directionScopeMismatch'});
+    assert.equal(journal.readDirectionEvents({runId})?.directionRevision,3);
+    assert.equal(journal.readActorMetaIndications({runId,actorId:maxId,directionRevision:3,activeSceneId:sceneId}).indications.length,1);
+  });
+});
+
 test('world run fija configuración/continuidad, CAS de conocimiento y cortes durables', () => {
   withJournal((journal) => {
     registerRun(journal);

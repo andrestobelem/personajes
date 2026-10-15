@@ -15,7 +15,7 @@ import { HumanInterventionResolutionSchema, resolveHumanIntervention } from '../
 import {
   ActorDirectionContextSchema, DirectionCommandWriteSchema, DirectionEventsQuerySchema,
   DirectionEventsPageSchema, DirectionLookupSchema, DirectionLookupResultSchema,
-  DirectionMutationResultSchema, MetaIndicationEventSchema, MetaIndicationPayloadSchema,
+  DirectionMutationResultSchema, DirectionEventSchema, DirectionPayloadSchema,
 } from '../domain/direction-indications.ts';
 import { freezeExperience, readPrivateExperience } from '../application/experience-envelope.ts';
 import type { FrozenExperience } from '../domain/experience.ts';
@@ -4391,17 +4391,42 @@ export function openJournal(input: { path: string }) {
           return save(DirectionMutationResultSchema.parse({kind:'conflict',directionRevision:run.row.direction_revision}));
         if(!['ready','running','paused','stopped'].includes(run.row.lifecycle))
           return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
-        const recipients=request.payload.recipients.map((id)=>run.snapshot.entities.find((entity)=>
-          entity.kind==='character'&&entity.characterId===id&&entity.preparation.kind==='prepared'));
-        if(recipients.some((entity)=>entity===undefined))
-          return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'invalidRecipient'}));
-        const scopeSceneId=request.payload.scope.kind==='scene'?request.payload.scope.sceneId:null;
-        if(scopeSceneId!==null){
-          const scene=run.snapshot.scenes.find((item)=>item.id===scopeSceneId&&item.lifecycle.kind==='open');
-          if(scene===undefined||run.snapshot.activeSceneId!==scopeSceneId)
-            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'sceneNotActive'}));
-          if(request.payload.recipients.some((id)=>!scene.participantIds.includes(id)))
-            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'sceneRecipientMismatch'}));
+        if(request.payload.kind==='metaIndication'){
+          const recipients=request.payload.recipients.map((id)=>run.snapshot.entities.find((entity)=>
+            entity.kind==='character'&&entity.characterId===id&&entity.preparation.kind==='prepared'));
+          if(recipients.some((entity)=>entity===undefined))
+            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'invalidRecipient'}));
+          const scopeSceneId=request.payload.scope.kind==='scene'?request.payload.scope.sceneId:null;
+          if(scopeSceneId!==null){
+            const scene=run.snapshot.scenes.find((item)=>item.id===scopeSceneId&&item.lifecycle.kind==='open');
+            if(scene===undefined||run.snapshot.activeSceneId!==scopeSceneId)
+              return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'sceneNotActive'}));
+            if(request.payload.recipients.some((id)=>!scene.participantIds.includes(id)))
+              return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'sceneRecipientMismatch'}));
+          }
+        }else{
+          const targetValue=database.prepare('SELECT * FROM direction_events WHERE run_id=? AND operation_id=?')
+            .get(request.runId,request.payload.targetOperationId);
+          if(targetValue===undefined)
+            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'directionNotFound'}));
+          const targetRow=DirectionEventDbRowSchema.parse(targetValue);
+          const target=DirectionPayloadSchema.parse(parseStoredJson(targetRow.payload_json));
+          if(sha256(targetRow.payload_json)!==targetRow.payload_hash||canonicalJson(target)!==targetRow.payload_json)
+            throw new Error('Evento de Dirección alterado');
+          if(target.kind!=='metaIndication')
+            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'directionNotFound'}));
+          if(canonicalJson(target.scope)!==canonicalJson(request.payload.scope))
+            return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'directionScopeMismatch'}));
+          const laterRows=database.prepare('SELECT * FROM direction_events WHERE run_id=? AND direction_revision>? ORDER BY direction_revision')
+            .all(request.runId,targetRow.direction_revision);
+          const revoked=laterRows.some((value)=>{
+            const row=DirectionEventDbRowSchema.parse(value);
+            const payload=DirectionPayloadSchema.parse(parseStoredJson(row.payload_json));
+            if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json)
+              throw new Error('Evento de Dirección alterado');
+            return payload.kind==='revokeMetaIndication'&&payload.targetOperationId===targetRow.operation_id;
+          });
+          if(revoked)return save(DirectionMutationResultSchema.parse({kind:'invalidState',code:'directionAlreadyRevoked'}));
         }
         const directionRevision=RevisionSchema.parse(run.row.direction_revision+1);
         const payload=hashJson(request.payload);
@@ -4434,9 +4459,9 @@ export function openJournal(input: { path: string }) {
         .all(request.runId,request.afterDirectionRevision,request.limit+1);
       const events=rows.slice(0,request.limit).map((rowValue)=>{
         const row=DirectionEventDbRowSchema.parse(rowValue);
-        const payload=MetaIndicationPayloadSchema.parse(parseStoredJson(row.payload_json));
+        const payload=DirectionPayloadSchema.parse(parseStoredJson(row.payload_json));
         if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json)throw new Error('Metaindicación alterada');
-        return MetaIndicationEventSchema.parse({runId:row.run_id,directionRevision:row.direction_revision,operationId:row.operation_id,
+        return DirectionEventSchema.parse({runId:row.run_id,directionRevision:row.direction_revision,operationId:row.operation_id,
           principalId:row.principal_id,payload,payloadHash:row.payload_hash,worldRevision:row.world_revision,worldSeq:row.world_seq,
           commitIndex:row.commit_index,recordedAt:row.recorded_at});
       });
@@ -4447,10 +4472,15 @@ export function openJournal(input: { path: string }) {
         activeSceneId:SceneIdSchema.nullable()}).parse(input);
       const rows=database.prepare('SELECT * FROM direction_events WHERE run_id=? AND direction_revision<=? ORDER BY direction_revision')
         .all(request.runId,request.directionRevision);
-      const indications=rows.flatMap((rowValue)=>{
+      const events=rows.map((rowValue)=>{
         const row=DirectionEventDbRowSchema.parse(rowValue);
-        const payload=MetaIndicationPayloadSchema.parse(parseStoredJson(row.payload_json));
-        if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json)throw new Error('Metaindicación alterada');
+        const payload=DirectionPayloadSchema.parse(parseStoredJson(row.payload_json));
+        if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json)throw new Error('Evento de Dirección alterado');
+        return {operationId:row.operation_id,payload};
+      });
+      const revoked=new Set(events.flatMap(({payload})=>payload.kind==='revokeMetaIndication'?[payload.targetOperationId]:[]));
+      const indications=events.flatMap(({operationId,payload})=>{
+        if(payload.kind!=='metaIndication'||revoked.has(operationId))return [];
         const inScope=payload.scope.kind==='run'||payload.scope.sceneId===request.activeSceneId;
         return inScope&&payload.recipients.includes(request.actorId)?[payload]:[];
       });

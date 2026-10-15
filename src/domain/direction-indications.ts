@@ -14,12 +14,30 @@ export const MetaIndicationPayloadSchema = z.strictObject({
   scope: DirectionScopeSchema,
 });
 
-export const MetaIndicationEventSchema = z.strictObject({
+export const RevokeMetaIndicationPayloadSchema = z.strictObject({
+  kind: z.literal('revokeMetaIndication'),
+  targetOperationId: z.string().uuid(),
+  scope: DirectionScopeSchema,
+});
+
+export const DirectionPayloadSchema = z.discriminatedUnion('kind', [
+  MetaIndicationPayloadSchema,
+  RevokeMetaIndicationPayloadSchema,
+]);
+
+// Durable historical payloads keep their original character limit. New writes
+// also enforce the UI byte/NUL boundary without making old ledger rows unreadable.
+export const DirectionRequestPayloadSchema = DirectionPayloadSchema.superRefine((payload,ctx)=>{
+  if(payload.kind==='metaIndication'&&(payload.text.includes('\0')||new TextEncoder().encode(payload.text).byteLength>4_000))
+    ctx.addIssue({code:'custom',path:['text'],message:'Texto de Dirección inválido o mayor a 4.000 bytes UTF-8'});
+});
+
+export const DirectionEventSchema = z.strictObject({
   runId: RunIdSchema,
   directionRevision: RevisionSchema,
   operationId: z.string().uuid(),
   principalId: z.string().trim().min(1).max(200),
-  payload: MetaIndicationPayloadSchema,
+  payload: DirectionPayloadSchema,
   payloadHash: HashSchema,
   worldRevision: RevisionSchema,
   worldSeq: RevisionSchema,
@@ -33,7 +51,7 @@ export const DirectionCommandWriteSchema = z.strictObject({
   idempotencyKey: z.string().uuid(),
   operationId: z.string().uuid(),
   expectedDirectionRevision: RevisionSchema,
-  payload: MetaIndicationPayloadSchema,
+  payload: DirectionRequestPayloadSchema,
 });
 
 export const DirectionReceiptSchema = z.strictObject({
@@ -47,7 +65,7 @@ export const DirectionMutationResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('existing'), receipt: DirectionReceiptSchema }),
   z.strictObject({ kind: z.literal('conflict'), directionRevision: RevisionSchema }),
   z.strictObject({ kind: z.literal('missing') }),
-  z.strictObject({ kind: z.literal('invalidState'), code: z.enum(['runNotActive', 'invalidRecipient', 'sceneNotActive', 'sceneRecipientMismatch']) }),
+  z.strictObject({ kind: z.literal('invalidState'), code: z.enum(['runNotActive', 'invalidRecipient', 'sceneNotActive', 'sceneRecipientMismatch', 'directionNotFound', 'directionScopeMismatch', 'directionAlreadyRevoked']) }),
   z.strictObject({ kind: z.literal('idempotencyConflict') }),
 ]);
 
@@ -59,6 +77,6 @@ export const DirectionLookupResultSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const DirectionEventsQuerySchema = z.strictObject({ runId: RunIdSchema, afterDirectionRevision: RevisionSchema.default(() => RevisionSchema.parse(0)), limit: z.number().int().min(1).max(1_000).default(100) });
-export const DirectionEventsPageSchema = z.strictObject({ events: z.array(MetaIndicationEventSchema).max(1_000), directionRevision: RevisionSchema, hasMore: z.boolean() });
+export const DirectionEventsPageSchema = z.strictObject({ events: z.array(DirectionEventSchema).max(1_000), directionRevision: RevisionSchema, hasMore: z.boolean() });
 
 export const ActorDirectionContextSchema = z.strictObject({ directionRevision: RevisionSchema.default(() => RevisionSchema.parse(0)), indications: z.array(MetaIndicationPayloadSchema).max(1_000) });

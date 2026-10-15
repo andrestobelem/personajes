@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { loadCatalog } from '../src/adapters/catalog.ts';
 import { openJournal } from '../src/adapters/journal.ts';
+import { createDirectionApplication } from '../src/application/direction-indications.ts';
+import { DirectionMutationResultSchema, DirectionEventsPageSchema } from '../src/domain/direction-indications.ts';
 import { createDramaticStructureApplication } from '../src/application/dramatic-structure.ts';
 import { createRunLifecycleApplication } from '../src/application/run-lifecycle.ts';
 import { validateRunConfiguration } from '../src/application/production-preflight.ts';
@@ -16,8 +18,8 @@ import { SessionCreatedSchema } from '../src/domain/http.ts';
 import { draftFixture } from './fixtures/continuista.ts';
 import { HashSchema } from '../src/domain/values.ts';
 
-async function setup(t: TestContext, options: { rejectScenePlace?: boolean } = {}) {
-  const view = runViewFixture();
+async function setup(t: TestContext, options: { rejectScenePlace?: boolean; directions?:RunDirectionsApplicationPort; runId?:ReturnType<typeof runViewFixture>['runId'] } = {}) {
+  const view = {...runViewFixture(),...(options.runId===undefined?{}:{runId:options.runId})};
   const structure = DramaticStructureViewSchema.parse({ runId: view.runId, structureRevision: 0, activeEpisodeId: null, activeSceneId: null, episodes: [], unassignedLegacyScenes: [] });
   const applied: unknown[] = [];
   const directionWrites: unknown[]=[];
@@ -48,7 +50,7 @@ async function setup(t: TestContext, options: { rejectScenePlace?: boolean } = {
     readOperation:()=>({kind:'missing'}),
   };
   const server = createLocalHttpServer({ catalog: await loadCatalog({ repositoryRoot: process.cwd() }),
-    shellHtml: '<!doctype html><html><head></head><body></body></html>', runLifecycle, runDramaticStructure,runDirections,
+    shellHtml: '<!doctype html><html><head></head><body></body></html>', runLifecycle, runDramaticStructure,runDirections:options.directions??runDirections,
     resolveSessionMode:(candidate)=>candidate });
   const { origin } = await server.listen();
   t.after(() => server.close());
@@ -246,4 +248,67 @@ test('HTTP y journal SQLite reproducen una apertura y rechazan lugares desconoci
   assert.equal(partialCut.status, 422);
   const futureCut = await fetch(`${origin}${base}/dramatic-structure?worldRevision=${configuration.worldSnapshot.revision + 50}&worldSeq=${configuration.worldSnapshot.seq}`, { headers });
   assert.equal(futureCut.status, 422);
+});
+
+
+test('HTTP y SQLite revocan una metaindicación sin reescribir contexto congelado ni hechos',async(t)=>{
+  const directory=mkdtempSync(join(tmpdir(),'personajes-direction-revoke-http-'));
+  const journal=openJournal({path:join(directory,'journal.sqlite')});
+  t.after(()=>{journal.close();rmSync(directory,{recursive:true,force:true});});
+  const ready=validateRunConfiguration({draft:draftFixture()});
+  if(ready.kind!=='ready')assert.fail('Fixture no Ready');
+  const configuration=ready.configuration;
+  journal.registerWorldRun({initialSnapshot:configuration.worldSnapshot,configurationRevision:configuration.configRevision,
+    configuration,continuityFence:{kind:'prepared-contexts',atWorldSeq:configuration.worldSnapshot.seq,
+      contexts:configuration.roster.preparedCharacters.map(actor=>({actorId:actor.characterId,
+        continuityId:actor.continuity.continuityId,continuityRevision:actor.continuity.revision,
+        continuityContentHash:actor.continuity.contentHash,identityVersion:actor.identityVersion,preparedContextHash:HashSchema.parse('a'.repeat(64))}))},lifecycle:'running'});
+  const original=journal.loadWorld({runId:configuration.runId});assert.ok(original);
+  const host=await setup(t,{directions:createDirectionApplication({journal}),runId:configuration.runId});
+  const base=`${host.origin}/api/v1/runs/${host.runId}/directions`;
+  const mode=await fetch(`${host.origin}/api/v1/session/mode`,{method:'PUT',headers:{...host.headers,
+    'If-Match':host.sessionEtag??'','Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'director',runId:host.runId,scope:{kind:'run'}})});
+  assert.equal(mode.status,200,await mode.clone().text());
+  const actor=configuration.roster.preparedCharacters[0];assert.ok(actor);
+  const post=(payload:unknown,revision:number,key=randomUUID(),extra:Record<string,string>={})=>fetch(base,{method:'POST',
+    headers:{...host.headers,'If-Match':`"directions:${host.runId}:d${revision}"`,'Idempotency-Key':key,...extra},body:JSON.stringify(payload)});
+  const first=await post({kind:'metaIndication',recipients:[actor.characterId],text:'Observá antes de intervenir.',scope:{kind:'run'}},0);
+  assert.equal(first.status,200,await first.clone().text());
+  const accepted=DirectionMutationResultSchema.parse(await first.json());
+  if(accepted.kind!=='stored')assert.fail('Metaindicación no almacenada');
+  const revoke={kind:'revokeMetaIndication',targetOperationId:accepted.receipt.operationId,scope:{kind:'run'}};
+  for(const text of ['\0','á'.repeat(2_001)])assert.equal((await post({kind:'metaIndication',recipients:[actor.characterId],text,scope:{kind:'run'}},1)).status,422,'límite UTF-8 y NUL también en host');
+  assert.equal((await post(revoke,1,randomUUID(),{'X-CSRF-Token':'incorrecto'})).status,403);
+  assert.equal((await post({...revoke,text:'cambio no autorizado'},1)).status,422,'payload de revocación cerrado');
+  assert.equal((await post({...revoke,scope:{kind:'scene',sceneId:original.activeSceneId}},1)).status,422,'alcance distinto al original');
+  assert.equal((await post({...revoke,targetOperationId:randomUUID()},1)).status,404);
+  assert.equal((await post(revoke,0)).status,412,'CAS anterior no revoca');
+  assert.equal(journal.readActorMetaIndications({runId:host.runId,actorId:actor.characterId,directionRevision:1,
+    activeSceneId:original.activeSceneId}).indications.length,1);
+  journal.setWorldLifecycle({runId:host.runId,expectedWorldRevision:original.revision,expectedConfigRevision:configuration.configRevision,target:'paused'});
+  const key=randomUUID();const removed=await post(revoke,1,key);
+  assert.equal(removed.status,200,await removed.clone().text());
+  const removedBody=DirectionMutationResultSchema.parse(await removed.json());
+  if(removedBody.kind!=='stored')assert.fail('Revocación no almacenada');
+  assert.equal(removedBody.receipt.directionRevision,2);
+  const replay=await post(revoke,1,key);assert.equal(replay.status,200);
+  const replayBody=DirectionMutationResultSchema.parse(await replay.json());
+  assert.equal(replay.headers.get('idempotency-replayed'),'true');
+  if(replayBody.kind!=='existing'&&replayBody.kind!=='stored')assert.fail('Replay no recuperó recibo');
+  assert.deepEqual(replayBody.receipt,removedBody.receipt);
+  assert.equal((await post(revoke,2)).status,409,'una segunda operación no vuelve a revocar');
+  assert.equal(journal.readActorMetaIndications({runId:host.runId,actorId:actor.characterId,directionRevision:1,
+    activeSceneId:original.activeSceneId}).indications.length,1,'corte anterior conserva indicación');
+  assert.equal(journal.readActorMetaIndications({runId:host.runId,actorId:actor.characterId,directionRevision:2,
+    activeSceneId:original.activeSceneId}).indications.length,0,'nuevo corte excluye indicación revocada');
+  const page=DirectionEventsPageSchema.parse(await (await fetch(base,{headers:host.headers})).json());
+  assert.deepEqual(page.events.map(event=>event.payload.kind),['metaIndication','revokeMetaIndication']);
+  assert.deepEqual(journal.loadWorld({runId:host.runId}),original,'ni metaindicación ni revocación generan hechos');
+  const changedKey=await post({...revoke,targetOperationId:randomUUID()},1,key);assert.equal(changedKey.status,409);
+  const scopeMode=await fetch(`${host.origin}/api/v1/session`,{headers:host.headers});
+  const currentModeEtag=scopeMode.headers.get('etag');assert.ok(currentModeEtag);
+  assert.equal((await fetch(`${host.origin}/api/v1/session/mode`,{method:'PUT',headers:{...host.headers,
+    'If-Match':currentModeEtag,'Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'director',runId:host.runId,
+      scope:{kind:'scene',sceneId:original.activeSceneId}})})).status,200);
+  assert.equal((await post(revoke,2)).status,403,'sesión de escena no revoca indicación de corrida');
 });

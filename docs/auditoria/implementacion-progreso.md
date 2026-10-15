@@ -2,6 +2,18 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 38: revocación de Dirección y formulario operable
+
+El ledger admite `revokeMetaIndication` con destino de la misma corrida y alcance idéntico. La operación agrega un evento administrativo con CAS y recibo idempotente: conserva la indicación original, el mundo y las percepciones. Los turnos que ya congelaron una revisión de Dirección mantienen su contexto; los cortes posteriores excluyen la indicación revocada. Se rechazan destino ausente, alcance alterado y segunda revocación por otra operación. No requiere migración del almacenamiento JSON existente.
+
+El panel permite seleccionar destinatario y escribir desde un borrador vacío; habilitar edición ya no depende de haber completado ese mismo formulario. Los rechazos HTTP definitivos liberan la operación pendiente incluso tras remontar; una respuesta incierta conserva su clave. Registrar o revocar confirma el resultado antes de recargar historial: una falla de lectura posterior no crea otra operación. Revocar conserva el siguiente borrador. El host también valida NUL y límite UTF-8 del texto nuevo, separando ese contrato de escritura del schema histórico para permitir leer y revocar indicaciones antiguas. Una prueba reabre y revoca una fila legada de 4.002 bytes que era válida bajo el límite original de caracteres. El cliente completa el historial con revisión estable antes de deducir vigencia; una prueba de 1.001 eventos ubica la revocación en la segunda página y rechaza páginas faltantes o cortes mezclados.
+
+El navegador integrado recorrió el build productivo con SQLite y una corrida sintética separada: activó Dirección, comprobó edición de formulario vacío y envío deshabilitado hasta completarlo, registró una indicación, escribió el borrador siguiente y revocó sin perderlo. El historial mostró original revocado y evento de retirada, revisiones 1 y 2. [Captura del resultado](evidencias/direccion-revocacion-20261015.png). No hubo llamadas a proveedores; ICM no estaba configurado en ese launcher de prueba. El build final verificó además una segunda indicación: pausar deshabilitó la nueva escritura y mantuvo la revocación operable; se confirmó la retirada sin reanudar. Los tests HTTP/SQLite cubren además alcance de sesión, CSRF, CAS, replay, target inválido y cortes anteriores; los de journal comprueban reopen, paginación y ausencia de efectos ficticios.
+
+`TMPDIR=/private/tmp PERSONAJES_ICM_TEST_BINARY=/tmp/personajes-icm-0.11.4-audit/install/bin/icm npm run verify` pasó con **590 pruebas: 589 aprobadas, cero fallidas y una omitida** por requerir Linux. TypeScript, build (433 módulos) y `git diff --check` pasaron.
+
+La revisión de las circunstancias físicas se conserva por separado en [cambios-de-circunstancia](cambios-de-circunstancia.md). Siguen pendientes sus cinco familias, precedencia/reemplazo de indicaciones y aceptación integral de la obra. La revocación no acredita esas capacidades ni cierra los 77 requisitos.
+
 ## Corte 37: rutina hasta conversación y avance sólo en reposo
 
 La cadena integrada usa ICM 0.11.4 local y el SDK Pi con transporte controlado: atraviesa dos ventanas consecutivas, confirma parlamentos actorales tras la revisión del Continuista y los lee desde la aplicación de conversaciones. Otro escenario recibe una respuesta humana durante la ventana y la procesa antes del descanso; un tercero solicita un paso sin estímulo, alcanza la siguiente rutina y vuelve a pausa tras un único pulso. Recuperar conserva reloj y conversación sin repetir actuación.
