@@ -4,7 +4,7 @@ import { HashSchema, RunIdSchema } from './values.ts';
 export const BackupIdSchema = z.uuid().brand<'BackupId'>();
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const BackupPathSchema = z.string().max(500).refine(value =>
-  value === 'world.sqlite' || /^runs\/[0-9a-f-]{36}\/(actors\/[a-z0-9-]{1,80}\/(memory\.sqlite|sessions\/[A-Za-z0-9_-]+\.jsonl)|roles\/[a-z0-9-]+\/sessions\/[A-Za-z0-9_-]+\.jsonl)$/.test(value) || /^media\/[0-9a-f-]{36}\.(mp3|wav|ogg|json|bin)$/.test(value),
+  value === 'world.sqlite' || /^runs\/[0-9a-f-]{36}\/fork-owner\.json$/.test(value) || /^forks\/[0-9a-f-]{36}\/(package\.json|artifacts\.json|staging\/runs\/[0-9a-f-]{36}\/(fork-owner\.json|actors\/[a-z0-9-]{1,80}\/(memory\.sqlite(?:-wal)?|icm-config\.toml)))$/.test(value) || /^runs\/[0-9a-f-]{36}\/(actors\/[a-z0-9-]{1,80}\/(memory\.sqlite(?:-wal)?|icm-config\.toml|sessions\/[A-Za-z0-9_-]+\.jsonl)|roles\/[a-z0-9-]+\/sessions\/[A-Za-z0-9_-]+\.jsonl)$/.test(value) || /^media\/[0-9a-f-]{36}\.(mp3|wav|ogg|json|bin)$/.test(value),
   'BACKUP_PATH_NOT_ALLOWED');
 export const BackupFenceSchema = z.strictObject({ runId: RunIdSchema, commitIndex: count, worldRevision: count, lastSeq: count, snapshotHash: HashSchema });
 export const BackupManifestSchema = z.strictObject({

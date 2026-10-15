@@ -519,7 +519,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1875,6 +1875,18 @@ export function openJournal(input: { path: string }) {
     `); } catch(error) {try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
   }
 
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=36').get()) {
+    try {database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE fork_job_retries(
+        principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,operation_id TEXT NOT NULL,
+        expected_revision INTEGER NOT NULL CHECK(expected_revision>=0),request_hash TEXT NOT NULL,
+        result_json TEXT NOT NULL,result_hash TEXT NOT NULL,
+        PRIMARY KEY(principal_id,idempotency_key)
+      );
+      INSERT INTO schema_version VALUES(36);COMMIT;
+    `);}catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+
   const pendingInitialActorCuts = new Set<string>();
   const ActorStateCutManifestSchema = z.strictObject({
     source: ActorStateCutSchema.shape.source,
@@ -2111,7 +2123,7 @@ export function openJournal(input: { path: string }) {
         if(record.job.operationId!==request.operationId||record.job.idempotencyKey!==request.idempotencyKey)return {kind:'idempotencyConflict' as const};
         return {kind:'existing' as const,job:record.job};
       }
-      const conflicting=['run_draft_operations','pi_oauth_job_operations','pi_access_job_operations','run_preflight_job_operations','run_control_operations','structure_operations'].some(table=>database.prepare(`SELECT 1 FROM ${table} WHERE principal_id=? AND idempotency_key=?`).get(request.principalId,request.idempotencyKey)!==undefined);
+      const conflicting=['fork_job_retries','run_draft_operations','pi_oauth_job_operations','pi_access_job_operations','run_preflight_job_operations','run_control_operations','structure_operations'].some(table=>database.prepare(`SELECT 1 FROM ${table} WHERE principal_id=? AND idempotency_key=?`).get(request.principalId,request.idempotencyKey)!==undefined);
       if(conflicting)return {kind:'idempotencyConflict' as const};
       validateForkPackageSource(request.package,request);
       if(database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(request.package.state.targetRunId)!==undefined||database.prepare('SELECT 1 FROM run_configuration_drafts WHERE run_id=?').get(request.package.state.targetRunId)!==undefined)throw new Error('Destino de fork existente');
@@ -2161,10 +2173,41 @@ export function openJournal(input: { path: string }) {
     const record=forkJobRecord(request);if(record===undefined)return undefined;if(record.job.state!=='staging')return record.job;if(record.job.revision!==request.expectedRevision)throw new Error('CAS de fork obsoleto');
     return appendForkJob(ForkJobSchema.parse({...record.job,state:'failed',code:request.code,revision:record.job.revision+1,updatedAt:Date.now()}));
   });}
-  function retryForkJob(input:unknown){const request=z.strictObject({...ForkJobLookupSchema.shape,expectedRevision:RevisionSchema}).parse(input);return transact(()=>{
-    const record=forkJobRecord(request);if(record===undefined)return undefined;if(record.job.state!=='failed')return record.job;if(record.job.revision!==request.expectedRevision)throw new Error('CAS de fork obsoleto');
-    const {code,...previous}=record.job;void code;return appendForkJob(ForkJobSchema.parse({...previous,state:'staging',revision:record.job.revision+1,updatedAt:Date.now()}));
-  });}
+  const ForkRetryRequestSchema=z.strictObject({...ForkJobLookupSchema.shape,expectedRevision:RevisionSchema,idempotencyKey:z.string().uuid()});
+  const ForkRetryResultSchema=z.discriminatedUnion('kind',[
+    z.strictObject({kind:z.literal('updated'),job:ForkJobSchema}),z.strictObject({kind:z.literal('existing'),job:ForkJobSchema}),
+    z.strictObject({kind:z.literal('missing')}),z.strictObject({kind:z.literal('conflict'),currentRevision:RevisionSchema}),
+    z.strictObject({kind:z.literal('invalidState')}),z.strictObject({kind:z.literal('idempotencyConflict')}),
+  ]);
+  function retryForkJob(input:unknown):z.infer<typeof ForkRetryResultSchema>{
+    const request=ForkRetryRequestSchema.parse(input);const requestHash=hashJson(request).hash;
+    return transact(()=>{
+      const value=database.prepare('SELECT operation_id,expected_revision,request_hash,result_json,result_hash FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?').get(request.principalId,request.idempotencyKey);
+      if(value!==undefined){
+        const row=z.strictObject({operation_id:z.string().uuid(),expected_revision:RevisionSchema,request_hash:HashSchema,result_json:z.string(),result_hash:HashSchema}).parse(value);
+        const stored=ForkRetryResultSchema.parse(parseStoredJson(row.result_json));
+        if(sha256(row.result_json)!==row.result_hash||canonicalJson(stored)!==row.result_json
+          ||hashJson({...request,operationId:row.operation_id,expectedRevision:row.expected_revision}).hash!==row.request_hash||stored.kind==='existing'||stored.kind==='idempotencyConflict')throw new Error('Receipt de retry de fork alterado');
+        if(stored.kind==='updated'){
+          const history=database.prepare('SELECT payload_json,payload_hash FROM fork_job_history WHERE operation_id=? AND revision=?').get(row.operation_id,stored.job.revision);
+          const payload=hashJson(stored.job);const original=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(history);
+          if(stored.job.state!=='staging'||stored.job.operationId!==row.operation_id||stored.job.principalId!==request.principalId||stored.job.revision!==row.expected_revision+1
+            ||original.payload_json!==payload.json||original.payload_hash!==payload.hash)throw new Error('Retry de fork no coincide con su transición histórica');
+        }
+        if(row.operation_id!==request.operationId||row.expected_revision!==request.expectedRevision||row.request_hash!==requestHash)return {kind:'idempotencyConflict'};
+        return stored.kind==='updated'?{kind:'existing',job:stored.job}:stored;
+      }
+      const tables=['fork_jobs','run_draft_operations','pi_oauth_job_operations','pi_access_job_operations','run_preflight_job_operations','run_control_operations','structure_operations'];
+      if(tables.some(table=>database.prepare(`SELECT 1 FROM ${table} WHERE principal_id=? AND idempotency_key=?`).get(request.principalId,request.idempotencyKey)!==undefined))return {kind:'idempotencyConflict'};
+      const record=(result:z.infer<typeof ForkRetryResultSchema>)=>{const payload=hashJson(result);database.prepare('INSERT INTO fork_job_retries VALUES(?,?,?,?,?,?,?)').run(request.principalId,request.idempotencyKey,request.operationId,request.expectedRevision,requestHash,payload.json,payload.hash);return result;};
+      const current=forkJobRecord(request);if(current===undefined)return record({kind:'missing'});
+      if(current.job.revision!==request.expectedRevision)return record({kind:'conflict',currentRevision:current.job.revision});
+      if(current.job.state!=='failed')return record({kind:'invalidState'});
+      const {code,...previous}=current.job;void code;
+      const job=appendForkJob(ForkJobSchema.parse({...previous,state:'staging',revision:current.job.revision+1,updatedAt:Date.now()}));
+      return record({kind:'updated',job});
+    });
+  }
   function publishForkJob(input:unknown){const request=z.strictObject({...ForkJobLookupSchema.shape,expectedRevision:RevisionSchema,artifacts:ForkArtifactManifestSchema}).parse(input);return transact(()=>{
     const record=forkJobRecord(request);if(record===undefined)throw new Error('Fork ausente');if(record.job.state==='ready')return record.job;
     if(record.job.state!=='staging'||record.job.revision!==request.expectedRevision)throw new Error('CAS de fork no publicable');
@@ -2284,7 +2327,8 @@ export function openJournal(input: { path: string }) {
     if(changed.changes!==1)throw new Error('CAS OAuth cambió en transacción');database.prepare('INSERT INTO pi_oauth_job_history VALUES(?,?,?,?)').run(job.jobId,job.revision,payload.json,payload.hash);return job;
   }
   function replayPiOAuthOperation(input:{principalId:string;idempotencyKey:string;kind:'login'|'logout'|'cancel';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
@@ -2348,7 +2392,8 @@ export function openJournal(input: { path: string }) {
     return job;
   }
   function replayPiAccessOperation(input:{principalId:string;idempotencyKey:string;kind:'start'|'cancel';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
@@ -2427,7 +2472,8 @@ export function openJournal(input: { path: string }) {
     return job;
   }
   function replayRunPreflightOperation(input:{principalId:string;idempotencyKey:string;kind:'start'|'cancel';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
@@ -2483,7 +2529,8 @@ export function openJournal(input: { path: string }) {
   }
 
   function replayRunDraftOperation(input:{principalId:string;idempotencyKey:string;kind:'create'|'update'|'validate';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
@@ -4460,6 +4507,7 @@ export function openJournal(input: { path: string }) {
 
   function structuralOperationCrossExists(principalId:string,idempotencyKey:string) {
     return [
+      'SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
@@ -5110,7 +5158,8 @@ export function openJournal(input: { path: string }) {
       const request = RunLifecycleCommandLookupSchema.parse(input);
       const requestHash = hashJson({ runId: request.runId, command: request.command, preflightJobId: request.preflightJobId ?? null }).hash;
       const crossOperationExists = [
-        'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
+        'SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
         'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
         'SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?',
@@ -5138,7 +5187,8 @@ export function openJournal(input: { path: string }) {
       const requestHash = hashJson({ runId: request.runId, command: request.command, preflightJobId: request.preflightJobId ?? null }).hash;
       return transact(() => {
         const crossOperationExists = [
-          'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
+          'SELECT 1 FROM fork_job_retries WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
           'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
           'SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?',
@@ -6717,7 +6767,8 @@ export function openJournal(input: { path: string }) {
         const entry=readRunDraft(request);if(entry===undefined)return undefined;
         const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);const world=value===undefined?undefined:parseWorldRun(value);
         return RunDraftStateSchema.parse({runId:request.runId,revision:entry.draft.revision,configurationRevision:world?.row.config_revision??entry.draft.revision,
-          lifecycle:world?.row.lifecycle??'draft',worldRevision:world?.row.world_revision??null,configurationHash:world?.row.configuration_hash??null});
+          lifecycle:world?.row.lifecycle??'draft',worldRevision:world?.row.world_revision??null,configurationHash:world?.row.configuration_hash??null,
+          editability:world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined)?'fork-published':'editable'});
       });
     },
 

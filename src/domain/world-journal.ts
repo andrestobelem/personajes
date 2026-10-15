@@ -81,7 +81,7 @@ export const RunDraftMutationResultSchema = z.discriminatedUnion('kind',[
 
 export const RunDraftOperationResultSchema = z.union([RunDraftMutationResultSchema,RunDraftValidationResultSchema]);
 
-export const RunDraftStateSchema = z.strictObject({runId:RunIdSchema,revision:RevisionSchema,configurationRevision:RevisionSchema,lifecycle:WorldLifecycleSchema,worldRevision:RevisionSchema.nullable(),configurationHash:HashSchema.nullable()});
+export const RunDraftStateSchema = z.strictObject({runId:RunIdSchema,revision:RevisionSchema,configurationRevision:RevisionSchema,lifecycle:WorldLifecycleSchema,worldRevision:RevisionSchema.nullable(),configurationHash:HashSchema.nullable(),editability:z.enum(['editable','fork-published']).optional()});
 export type WorldLifecycle = z.infer<typeof WorldLifecycleSchema>;
 
 export const PreparedContextFenceSchema = z.strictObject({

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { forkBackupArtifacts,type ForkBackupArtifact } from './fork-backup-artifacts.ts';
 import { BackupPathSchema } from '../domain/backup.ts';
 import { RunIdSchema, CharacterIdSchema } from '../domain/values.ts';
 import { ActorJobCheckpointSchema,ContinuistaJobExecutionSchema,RunLifecycleCommandResultSchema } from '../domain/world-journal.ts';
@@ -28,7 +29,7 @@ function physicalRole(raw:unknown){
 export function createHostBackupQuiesce(input:{
  host:ReturnType<typeof openLocalHost>;admission:ReturnType<typeof createHostRequestBarrier>;
  oauth:BusyPort;access:BusyPort;preflight:BusyPort;
- representation?:RepresentationSuspension;deliveries?:Suspension;voice:MediaSuspension;
+ representation?:RepresentationSuspension;deliveries?:Suspension;forks?:Suspension;voice:MediaSuspension;
 }):BackupQuiescePort{
  if(input.representation===undefined&&input.deliveries===undefined)throw new Error('BACKUP_DELIVERY_BARRIER_UNAVAILABLE');
  return {async acquire(){
@@ -39,6 +40,8 @@ export function createHostBackupQuiesce(input:{
    if(input.oauth.backupBusy)throw new Error('BACKUP_OAUTH_ACTIVE_CANCEL_OR_RETRY');
    if(input.access.backupBusy)throw new Error('BACKUP_ACCESS_CHECK_ACTIVE_CANCEL_OR_RETRY');
    if(input.preflight.backupBusy)throw new Error('BACKUP_PREFLIGHT_ACTIVE_CANCEL_OR_RETRY');
+   if(input.forks)releases.push(await input.forks.suspendAdmissions());
+   else if(db.prepare("SELECT 1 FROM fork_jobs WHERE state IN ('staging','failed') LIMIT 1").get())throw new Error('BACKUP_FORK_BARRIER_UNAVAILABLE');
    const runRows=db.prepare('SELECT run_id FROM world_runs ORDER BY run_id LIMIT 100001').all();
    if(runRows.length>100000)throw new Error('BACKUP_RUN_LIMIT');
    const runIds=runRows.map(row=>z.strictObject({run_id:RunIdSchema}).parse(row).run_id);
@@ -57,8 +60,8 @@ export function createHostBackupQuiesce(input:{
    releases.push(await input.voice.suspendAdmissions());
    // Admission remains closed: these observations cannot become stale via HTTP starts.
    if(input.oauth.backupBusy||input.access.backupBusy||input.preflight.backupBusy)throw new Error('BACKUP_ADMINISTRATIVE_WORK_CHANGED');
-   const artifacts=new Map<string,{path:string;kind:'sqlite'|'session'|'media'}>();
-   function add(path:string,kind:'sqlite'|'session'|'media'){
+   const artifacts=new Map<string,{path:string;kind:'sqlite'|'session'|'media'|ForkBackupArtifact['kind']}>();
+   function add(path:string,kind:'sqlite'|'session'|'media'|ForkBackupArtifact['kind']){
     const allowed=BackupPathSchema.parse(path);if(artifacts.size>=100000&&!artifacts.has(allowed))throw new Error('BACKUP_ARTIFACT_LIMIT');
     const previous=artifacts.get(allowed);if(previous&&previous.kind!==kind)throw new Error('BACKUP_ARTIFACT_KIND_CONFLICT');
     artifacts.set(allowed,{path:allowed,kind});
@@ -102,6 +105,7 @@ export function createHostBackupQuiesce(input:{
     const record=z.strictObject({run_id:RunIdSchema,actor_id:CharacterIdSchema,session_path:z.string(),canonical_payload:z.string(),payload_hash:z.string()}).parse(row);
     if(hash(record.canonical_payload)!==record.payload_hash)throw new Error('BACKUP_SESSION_METADATA_TAMPERED');const candidate=z.object({runId:RunIdSchema,actorId:CharacterIdSchema,base:z.object({sessionPath:z.string()})}).parse(JSON.parse(record.canonical_payload));if(candidate.runId!==record.run_id||candidate.actorId!==record.actor_id||candidate.base.sessionPath!==record.session_path)throw new Error('BACKUP_SESSION_SCOPE_INVALID');sessionPath(record.session_path,record.run_id,`actors/${record.actor_id}`);
    }
+   for(const artifact of forkBackupArtifacts({host:input.host,database:db}))add(artifact.path,artifact.kind);
    for(const artifact of input.voice.backupArtifacts())add(artifact.path,artifact.kind);
    db.close();db=undefined;let released=false;
    return {artifacts:[...artifacts.values()].sort((a,b)=>a.path.localeCompare(b.path)),release(){if(released)return;released=true;for(const release of releases.reverse())release();releaseHttp();}};

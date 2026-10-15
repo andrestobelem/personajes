@@ -37,13 +37,15 @@ import {
 import {
   CatalogCharacterEntrySchema, CatalogDocumentEntrySchema, DossierSchema,
 } from '../domain/catalog.ts';
-import { CharacterIdSchema, EventIdSchema, JobIdSchema, RevisionSchema, RunIdSchema } from '../domain/values.ts';
+import { CharacterIdSchema, EventIdSchema, JobIdSchema, OperationIdSchema, RevisionSchema, RunIdSchema } from '../domain/values.ts';
 import { PlaceIdSchema, SceneIdSchema } from '../domain/world-schema.ts';
 import { RunConfigurationDraftSchema } from '../domain/production.ts';
 import { validateRunConfiguration } from '../application/production-preflight.ts';
 import { RunModelTimeBudgetSchema } from '../domain/model-time-budget.ts';
 import { OperatorResponseSchema, type OperatorExtension, type OperatorRequest } from './operator-extension.ts';
 import { InspectorCharactersSchema, InspectorRequestSchema, InspectorViewSchema } from '../domain/run-inspector.ts';
+import { ForkBeginBodySchema,ForkBeginResultSchema,ForkJobViewSchema,ForkRetryResultSchema,forkJobEtag,forkSourceEtag } from '../domain/fork-http.ts';
+import type { ForkApplicationPort } from '../application/fork-application.ts';
 import type { RunInspectorApplication } from '../application/run-inspector.ts';
 
 import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema, DirectorObservationListSchema } from '../domain/run-observation.ts';
@@ -353,6 +355,7 @@ export type LocalHttpOptions = {
   readonly runDirections?: RunDirectionsApplicationPort;
   readonly runCircumstances?: RunCircumstancesApplicationPort;
   readonly runInspector?: RunInspectorApplication;
+  readonly forks?: ForkApplicationPort;
   readonly onInspectorRead?: (metadata: {runId:string;characterId?:string;atWorldSeq?:number;requestId:string}) => void;
   /** Host-composed operator services; core routes and their authority take precedence. */
   readonly operatorExtensions?: readonly OperatorExtension[];
@@ -838,7 +841,7 @@ function runConfigurationDraftView(input: unknown, stateValue: unknown, reportVa
   }
   return RunConfigurationDraftViewSchema.parse({
     kind: 'run-configuration-draft', configuration,
-    state: { lifecycle: state.lifecycle, configurationRevision: state.configurationRevision, worldRevision: state.worldRevision },
+    state: { lifecycle: state.lifecycle, configurationRevision: state.configurationRevision, worldRevision: state.worldRevision, ...(state.editability===undefined?{}:{editability:state.editability}) },
     validation,
   });
 }
@@ -1336,6 +1339,58 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
 
     if (route.length === 0 || route[0] !== 'health') {
       const session = requireSession(req, sessions, now());
+
+      if((route.length===3&&route[0]==='runs'&&route[2]==='forks'&&method==='POST')
+        ||(route[0]==='forks'&&((route.length===2&&method==='GET')||(route.length===3&&route[2]==='retry'&&method==='POST')))){
+        parseQuery(url,z.strictObject({}));
+        if(method==='POST')requireCsrf(req,session);
+        const port=options.forks;
+        if(port===undefined)fail({status:503,kind:'dependency',code:'FORK_UNAVAILABLE',message:'La bifurcación no está disponible.',safeCode:'FORK_UNAVAILABLE',retryable:true});
+        const principalId=localOperatorPrincipalId();
+        if(method==='GET'){
+          const operationId=parseSchema(OperationIdSchema,route[1]);const result=await port.read({operationId,principalId});
+          if(result.kind==='missing')fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Bifurcación no encontrada.'});
+          const job=ForkJobViewSchema.parse(result.job);if(job.operationId!==operationId)throw new Error('Fork scope mismatch');
+          sendJson(res,200,job,{ETag:forkJobEtag(job)});return;
+        }
+        const idempotencyKey=readIdempotencyKey(req);
+        if(route[0]==='runs'){
+          const runId=parseSchema(RunIdSchema,route[1]);const body=parseSchema(ForkBeginBodySchema,await readJsonBody(req));
+          const expected=forkSourceEtag({runId,...body});const supplied=req.headers['if-match'];
+          if(typeof supplied!=='string')fail({status:428,kind:'precondition',code:'PRECONDITION_REQUIRED',message:'Se requiere If-Match del corte fuente.'});
+          if(supplied!==expected)fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'El corte fuente no coincide con If-Match.'});
+          const result=ForkBeginResultSchema.parse(await port.begin({runId,principalId,idempotencyKey,...body}));
+          switch(result.kind){
+            case 'created':case 'existing':{
+              const job=result.job;if(job.operationId!==body.operationId||job.source.runId!==runId||job.source.commitIndex!==body.commitIndex||job.source.worldRevision!==body.worldRevision||job.source.worldSeq!==body.worldSeq||job.name!==body.name||job.reason!==body.reason)throw new Error('Fork receipt scope mismatch');
+              sendJson(res,202,job,{Location:`/api/v1/forks/${job.operationId}`,ETag:forkJobEtag(job),...(result.kind==='existing'?{'Idempotency-Replayed':'true'}:{})});return;
+            }
+            case 'missing':fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida fuente no encontrada.'});
+            case 'unavailable':fail({status:409,kind:'conflict',code:'FORK_SOURCE_UNAVAILABLE',message:'El corte exacto no tiene una fuente verificable para bifurcar.'});
+            case 'idempotencyConflict':fail({status:409,kind:'conflict',code:'IDEMPOTENCY_CONFLICT',message:'La clave ya se usó para otra operación.'});
+            case 'dependencyUnavailable':fail({status:503,kind:'dependency',code:'FORK_UNAVAILABLE',message:'La bifurcación requiere ICM configurado.',safeCode:'FORK_UNAVAILABLE',retryable:true});
+            default:{const exhaustive:never=result;void exhaustive;throw new Error('Unknown fork result');}
+          }
+        }
+        const operationId=parseSchema(OperationIdSchema,route[1]);parseSchema(z.strictObject({}),await readJsonBody(req));const provided=req.headers['if-match'];
+        if(typeof provided!=='string')fail({status:428,kind:'precondition',code:'PRECONDITION_REQUIRED',message:'Se requiere If-Match de la bifurcación.'});
+        const match=/^"fork:([0-9a-f-]{36}):r(0|[1-9]\d{0,15})"$/.exec(provided);
+        if(match===null||match[1]!==operationId)fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'If-Match no corresponde a la bifurcación.'});
+        const expectedRevision=parseSchema(RevisionSchema,Number(match[2]));
+        const result=ForkRetryResultSchema.parse(await port.retry({operationId,principalId,idempotencyKey,expectedRevision}));
+        switch(result.kind){
+          case 'created':case 'existing':{
+            if(result.job.operationId!==operationId)throw new Error('Fork retry scope mismatch');
+            sendJson(res,202,result.job,{Location:`/api/v1/forks/${operationId}`,ETag:forkJobEtag(result.job),...(result.kind==='existing'?{'Idempotency-Replayed':'true'}:{})});return;
+          }
+          case 'missing':fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Bifurcación no encontrada.'});
+          case 'stale':fail({status:412,kind:'precondition',code:'PRECONDITION_FAILED',message:'La bifurcación cambió. Volvé a leer su estado.',currentEtag:forkJobEtag({operationId,revision:result.currentRevision})});
+          case 'invalidState':fail({status:409,kind:'conflict',code:'FORK_NOT_FAILED',message:'Sólo una bifurcación fallida admite reintento.'});
+          case 'idempotencyConflict':fail({status:409,kind:'conflict',code:'IDEMPOTENCY_CONFLICT',message:'La clave ya se usó para otra operación.'});
+          case 'dependencyUnavailable':fail({status:503,kind:'dependency',code:'FORK_UNAVAILABLE',message:'La bifurcación requiere ICM configurado.',safeCode:'FORK_UNAVAILABLE',retryable:true});
+          default:{const exhaustive:never=result;void exhaustive;throw new Error('Unknown fork retry result');}
+        }
+      }
 
       if(route.length===4&&route[0]==='runs'&&route[2]==='events'&&route[3]==='stream'&&method==='GET'){
         parseQuery(url,z.strictObject({}));

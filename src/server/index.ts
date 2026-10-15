@@ -1,3 +1,5 @@
+import { createForkRuntime } from '../application/fork-runtime.ts';
+import { createForkApplication } from '../application/fork-application.ts';
 import {createCircumstanceApplication} from '../application/direction-circumstances.ts';
 import { createRunObservationApplication } from '../application/run-observation.ts';
 import { createDramaticStructureApplication } from '../application/dramatic-structure.ts';
@@ -63,6 +65,7 @@ let preflightJobs: Awaited<ReturnType<typeof createRunPreflightJobs>> | undefine
 const oauthController = new AbortController();
 let voices: ReturnType<typeof createVoiceRuntime> | undefined;
 let exchange: Awaited<ReturnType<typeof createExchangeRuntime>> | undefined;
+let forks: ReturnType<typeof createForkRuntime> | undefined;
 try {
   voices=createVoiceRuntime({host,...(process.env.PERSONAJES_PRIVATE_AUTH_ROOT===undefined?{}:{privateAuthRoot:process.env.PERSONAJES_PRIVATE_AUTH_ROOT}),onDiagnostic:diagnostic=>process.stderr.write(JSON.stringify(diagnostic)+'\n')});
   exchange=await createExchangeRuntime({host,catalog});
@@ -84,6 +87,7 @@ try {
       ...(process.env.PERSONAJES_ICM_BINARY === undefined ? {} : { icmBinaryPath: process.env.PERSONAJES_ICM_BINARY }) }),
   });
   if (process.env.PERSONAJES_ICM_BINARY !== undefined) {
+    forks = createForkRuntime({host, binaryPath: process.env.PERSONAJES_ICM_BINARY});
     representation = await createRepresentationRuntime({
       host, piRuntime, icmBinaryPath: process.env.PERSONAJES_ICM_BINARY,
       onDiagnostic: (diagnostic) => process.stderr.write(JSON.stringify({ kind: 'representationDiagnostic', diagnostic }) + '\n'),
@@ -93,6 +97,7 @@ try {
   }
 } catch (error) {
   oauthController.abort();
+  await forks?.close();
   await voices?.close();
   exchange?.close();
   try { await preflightJobs?.close(); }
@@ -113,6 +118,7 @@ const worldDeliveries = representation === undefined ? createWorldDeliverySuperv
 const admissionBarrier=createHostRequestBarrier();
 if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!==undefined&&preflightJobs!==undefined) {
   exchange.setBackupQuiesce(createHostBackupQuiesce({host,admission:admissionBarrier,oauth:oauthJobs,access:accessJobs,preflight:preflightJobs,
+    ...(forks===undefined?{}:{forks}),
     ...(representation===undefined?{}:{representation}),...(worldDeliveries===undefined?{}:{deliveries:worldDeliveries}),voice:voices.service}));
 }
   const runLifecycle = createRunLifecycleApplication({
@@ -123,6 +129,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   });
 async function closeWorkersAndHost() {
   oauthController.abort();
+  await forks?.close();
   await voices?.close();
   exchange?.close();
   try { await preflightJobs?.close(); }
@@ -148,6 +155,7 @@ try {
     runtimeComposition:()=>({kind:representation!==undefined&&!representation.isClosed?'composed':'unavailable'}),
     operatorExtensions:[createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),...(exchange===undefined?[]:[exchange.routes])],
     runConfigurationDrafts: host.journal,
+    forks: createForkApplication({journal:host.journal,...(forks===undefined?{}:{runtime:forks})}),
     readRunModelTimeBudget: (request) => host.journal.readRunModelTimeBudget(request),
     ...(oauthJobs === undefined ? {} : { piOAuthJobs: oauthJobs }),
     ...(accessJobs === undefined ? {} : { piAccessJobs: accessJobs }),
@@ -217,6 +225,7 @@ process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 // Recovery can await memory processes or Pi. Shutdown handlers must exist first.
 try {
+  forks?.recover();
   if (representation !== undefined) await representation.recover();
   else worldDeliveries?.recover();
 }

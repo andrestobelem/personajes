@@ -32,7 +32,7 @@ function syncDirectory(path: string) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
-const ArtifactSchema = z.strictObject({ path: BackupPathSchema, kind: z.enum(['sqlite', 'session', 'media']) });
+const ArtifactSchema = z.strictObject({ path: BackupPathSchema, kind: z.enum(['sqlite', 'session', 'media', 'fork-memory', 'fork-metadata']) });
 /** Host-only port: holds a global write fence across journal, ICM, sessions and media.
  * Acquire must wait for in-flight writers outside any SQLite transaction. Its inventory
  * is from registered sessions/media, never a recursive privateData scan. */
@@ -135,7 +135,7 @@ export function openBackupService(input: { privateDataRoot: string; quiesce?: Ba
           const source = new DatabaseSync(join(root, artifact.path), { readOnly: true });
           try { await backup(source, target); chmodSync(target,0o600); } finally { source.close(); }
         } else {
-          if (artifact.kind === 'session' ? !artifact.path.endsWith('.jsonl') : !artifact.path.startsWith('media/')) throw new Error('BACKUP_INVENTORY_INVALID');
+          if (artifact.kind === 'session' ? !artifact.path.endsWith('.jsonl') : artifact.kind === 'media' ? !artifact.path.startsWith('media/') : artifact.kind === 'fork-memory' ? !/\/memory\.sqlite(?:-wal)?$/.test(artifact.path) : !/(?:\/(?:package|artifacts|fork-owner)\.json|\/icm-config\.toml)$/.test(artifact.path)) throw new Error('BACKUP_INVENTORY_INVALID');
           durableFile(target, privateFile(root, artifact.path));
         }
       }

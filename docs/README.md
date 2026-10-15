@@ -99,4 +99,4 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 
 - [Preparación de bifurcación: fuente exacta, identidades y recuerdos](auditoria/preparacion-de-bifurcacion.md): transformación interna e ICM separado; publicación durable pendiente.
 
-- [Publicación durable de bifurcaciones](auditoria/publicacion-de-bifurcaciones.md), [ADR 0011](adr/0011-publicacion-de-fork-y-base-dramatica.md), [entrevista](auditoria/dialogo-publicacion-fork.md) y [respuestas](auditoria/publicacion-fork-respuestas.md): núcleo host con recuperación; composición/API/GUI pendientes.
+- [Publicación durable de bifurcaciones](auditoria/publicacion-de-bifurcaciones.md), [ADR 0011](adr/0011-publicacion-de-fork-y-base-dramatica.md), [entrevista](auditoria/dialogo-publicacion-fork.md) y [respuestas](auditoria/publicacion-fork-respuestas.md): núcleo host con recuperación. El [corte 46](auditoria/operacion-de-bifurcaciones.md) conecta launcher/API/GUI, retry durable y backup de trabajo incompleto.

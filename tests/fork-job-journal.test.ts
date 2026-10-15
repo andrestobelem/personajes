@@ -80,7 +80,7 @@ test('receipts staged exigen scope y payload exactos y no adelantan revisión de
 test('fallo y retry conservan paquete, IDs y proyecciones aceptadas sin publicar target',async()=>{
  const f=await fixture();try{
   const staged=f.stage();f.project();const failed=f.journal.failForkJob({...f.lookup,expectedRevision:staged.revision,code:'FORK_INTERRUPTED'});assert.equal(failed?.state,'failed');assert.equal(f.journal.loadWorld({runId:staged.targetRunId}),undefined);
-  assert.deepEqual(f.journal.listStagingForkJobs(),[]);const retried=f.journal.retryForkJob({...f.lookup,expectedRevision:failed?.revision});assert.equal(retried?.state,'staging');assert.equal(retried?.targetRunId,staged.targetRunId);assert.equal(retried?.revision,2);
+  assert.deepEqual(f.journal.listStagingForkJobs(),[]);const retried=f.journal.retryForkJob({...f.lookup,expectedRevision:failed?.revision,idempotencyKey:randomUUID()});assert.equal(retried.kind,'updated');if(retried.kind!=='updated')assert.fail();assert.equal(retried.job.state,'staging');assert.equal(retried.job.targetRunId,staged.targetRunId);assert.equal(retried.job.revision,2);
   assert.deepEqual(f.journal.readForkPackage(f.lookup),f.payload);assert.deepEqual(f.journal.readForkProjectionReceipts(f.lookup),f.receipts);
  }finally{f.close();}
 });
@@ -174,7 +174,7 @@ for(const empty of [true,false])test(`preparación publicada ${empty?'sin experi
  const f=await fixture({empty});try{
   const staged=f.stage();f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});
   const getRows=()=>{let result:unknown;f.mutate(db=>{result=['world_runs','world_commits','episodes','episode_scenes','acts','act_scenes','fork_dramatic_seeds','actor_knowledge','experiences','actor_state_cut_batches','actor_state_cuts','run_configuration_drafts','run_configuration_draft_history'].map(table=>({table,rows:db.prepare(`SELECT * FROM ${table} WHERE run_id=? ORDER BY rowid`).all(ready.targetRunId)}));});return result;};
-  const before=getRows();
+  const before=getRows();assert.equal(f.journal.readRunConfigurationDraftState({runId:ready.targetRunId})?.editability,'fork-published');
   const patch={principalId:'fork-test',idempotencyKey:randomUUID(),runId:ready.targetRunId,expectedRevision:0,
     patch:{name:{kind:'configured',value:'No debe sobreescribir el fork',evidence:{kind:'operator-choice',operatorId:'fork-test',recordedAt:'2026-10-16T00:00:00Z'}}}};
   const readonly={kind:'readonly',reason:'fork-published'};
@@ -205,5 +205,68 @@ test('preparación derivada atribuye nombre al operador y valores heredados al h
   for(const field of ['fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const){
    const section:{kind:string;evidence?:{kind:string;derivationRef?:string}}|undefined=draft[field];assert.ok(section);assert.equal(section.kind,'configured');assert.equal(section.evidence?.kind,'host-derived');assert.equal(section.evidence?.derivationRef,`fork:${staged.operationId}`);
   }
+ }finally{f.close();}
+});
+
+test('retry durable devuelve su recibo original tras publicar Ready y después de reiniciar',async()=>{
+ const f=await fixture();try{
+  const first=f.stage();const failed=f.journal.failForkJob({...f.lookup,expectedRevision:first.revision,code:'FORK_INTERRUPTED'});assert.ok(failed);
+  const request={...f.lookup,expectedRevision:failed.revision,idempotencyKey:randomUUID()};
+  const retried=f.journal.retryForkJob(request);assert.equal(retried.kind,'updated');if(retried.kind!=='updated')assert.fail();
+  const expected={kind:'existing',job:retried.job};assert.deepEqual(f.journal.retryForkJob(request),expected);
+  f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:retried.job.revision,artifacts:f.artifacts});assert.equal(ready.state,'ready');
+  assert.deepEqual(f.journal.retryForkJob(request),expected);assert.deepEqual(f.journal.readForkJob(f.lookup),ready);
+  const reopened=openJournal({path:join(f.directory,'journal.sqlite')});try{assert.deepEqual(reopened.retryForkJob(request),expected);assert.deepEqual(reopened.readForkJob(f.lookup),ready);}finally{reopened.close();}
+  assert.deepEqual(f.journal.readForkPackage(f.lookup),f.payload);
+ }finally{f.close();}
+});
+
+test('retry preserva missing, invalidState y conflict originales sin responder con el job actual',async()=>{
+ const f=await fixture();try{
+  const job=f.stage();const invalid={...f.lookup,expectedRevision:job.revision,idempotencyKey:randomUUID()};assert.deepEqual(f.journal.retryForkJob(invalid),{kind:'invalidState'});
+  const failed=f.journal.failForkJob({...f.lookup,expectedRevision:job.revision,code:'FORK_INTERRUPTED'});assert.ok(failed);
+  const conflict={...f.lookup,expectedRevision:0,idempotencyKey:randomUUID()};assert.deepEqual(f.journal.retryForkJob(conflict),{kind:'conflict',currentRevision:failed.revision});
+  const good={...f.lookup,expectedRevision:failed.revision,idempotencyKey:randomUUID()};assert.equal(f.journal.retryForkJob(good).kind,'updated');
+  assert.deepEqual(f.journal.retryForkJob(invalid),{kind:'invalidState'});assert.deepEqual(f.journal.retryForkJob(conflict),{kind:'conflict',currentRevision:failed.revision});
+  const absentOperation=randomUUID();const missing={...f.lookup,operationId:absentOperation,expectedRevision:0,idempotencyKey:randomUUID()};assert.deepEqual(f.journal.retryForkJob(missing),{kind:'missing'});
+  const created=f.journal.beginForkJob({...f.request,operationId:absentOperation,idempotencyKey:randomUUID(),package:f.packet(absentOperation)});assert.equal(created.kind,'created');
+  assert.deepEqual(f.journal.retryForkJob(missing),{kind:'missing'});
+ }finally{f.close();}
+});
+
+test('retry rechaza cambios de identidad o CAS para la misma clave y comparte namespace con otras operaciones',async()=>{
+ const f=await fixture();try{
+  const job=f.stage();assert.deepEqual(f.journal.retryForkJob({...f.lookup,expectedRevision:0,idempotencyKey:f.request.idempotencyKey}),{kind:'idempotencyConflict'});
+  const failed=f.journal.failForkJob({...f.lookup,expectedRevision:job.revision,code:'FORK_INTERRUPTED'});assert.ok(failed);
+  const request={...f.lookup,expectedRevision:failed.revision,idempotencyKey:randomUUID()};const result=f.journal.retryForkJob(request);assert.equal(result.kind,'updated');
+  assert.deepEqual(f.journal.retryForkJob({...request,operationId:randomUUID()}),{kind:'idempotencyConflict'});assert.deepEqual(f.journal.retryForkJob({...request,expectedRevision:0}),{kind:'idempotencyConflict'});
+  assert.equal(f.journal.createRunConfigurationDraft({principalId:request.principalId,idempotencyKey:request.idempotencyKey,patch:{}}).kind,'idempotencyConflict');
+  const op=randomUUID();assert.deepEqual(f.journal.beginForkJob({...f.request,operationId:op,idempotencyKey:request.idempotencyKey,package:f.packet(op)}),{kind:'idempotencyConflict'});
+  assert.deepEqual(f.journal.retryForkJob({...request,principalId:'otro-operador'}),{kind:'missing'});
+ }finally{f.close();}
+});
+
+test('la transición retry y su recibo se revierten juntos si falla la escritura de la operación',async()=>{
+ const f=await fixture();try{
+  const job=f.stage();const failed=f.journal.failForkJob({...f.lookup,expectedRevision:job.revision,code:'FORK_INTERRUPTED'});assert.ok(failed);
+  const request={...f.lookup,expectedRevision:failed.revision,idempotencyKey:randomUUID()};
+  f.mutate(db=>db.exec("CREATE TRIGGER fail_retry_receipt BEFORE INSERT ON fork_job_retries BEGIN SELECT RAISE(ABORT,'forced-retry-receipt'); END"));
+  assert.throws(()=>f.journal.retryForkJob(request),/forced-retry-receipt/);assert.deepEqual(f.journal.readForkJob(f.lookup),failed);
+  f.mutate(db=>{assert.equal(db.prepare('SELECT COUNT(*) count FROM fork_job_retries').get()?.count,0);assert.equal(db.prepare('SELECT COUNT(*) count FROM fork_job_history WHERE operation_id=?').get(job.operationId)?.count,2);db.exec('DROP TRIGGER fail_retry_receipt');});
+  const retried=f.journal.retryForkJob(request);assert.equal(retried.kind,'updated');if(retried.kind==='updated')assert.equal(retried.job.revision,failed.revision+1);
+  assert.deepEqual(f.journal.readForkPackage(f.lookup),f.payload);assert.equal(f.journal.loadWorld({runId:job.targetRunId}),undefined);
+ }finally{f.close();}
+});
+
+for(const corruption of ['hash','metadata','history'] as const)test(`retry falla cerrado ante corrupción de ${corruption} y conserva staging actual`,async()=>{
+ const f=await fixture();try{
+  const first=f.stage();const failed=f.journal.failForkJob({...f.lookup,expectedRevision:first.revision,code:'FORK_INTERRUPTED'});assert.ok(failed);
+  const request={...f.lookup,expectedRevision:failed.revision,idempotencyKey:randomUUID()};const result=f.journal.retryForkJob(request);assert.equal(result.kind,'updated');if(result.kind!=='updated')assert.fail();
+  f.mutate(db=>{
+   if(corruption==='hash')db.prepare('UPDATE fork_job_retries SET result_hash=?').run('f'.repeat(64));
+   if(corruption==='metadata')db.prepare('UPDATE fork_job_retries SET expected_revision=?').run(failed.revision+1);
+   if(corruption==='history')db.prepare('UPDATE fork_job_history SET payload_hash=? WHERE operation_id=? AND revision=?').run('f'.repeat(64),first.operationId,result.job.revision);
+  });
+  assert.throws(()=>f.journal.retryForkJob(request),/alterado|inconsistente|histórica/);
  }finally{f.close();}
 });

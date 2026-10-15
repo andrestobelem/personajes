@@ -13,7 +13,7 @@ import { canonical, draftFixture } from './fixtures/continuista.ts';
 // Restores the exact v33 storage boundary: no private-state checkpoint tables.
 // Durable snapshot bytes and hashes are evidence; present mutable state cannot
 // substitute for a checkpoint that was never recorded.
-test('v33→v35 conserva bytes y hashes históricos sin fabricar cortes; sólo captura el próximo commit', () => {
+test('v33→v36 conserva bytes y hashes históricos sin fabricar cortes; sólo captura el próximo commit', () => {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-actor-cut-migration-'));
   const path = join(directory, 'world.sqlite');
   let journal = openJournal({ path });
@@ -48,13 +48,13 @@ test('v33→v35 conserva bytes y hashes históricos sin fabricar cortes; sólo c
       commitBytes = legacy.prepare('SELECT * FROM world_commits ORDER BY commit_index').all();
       assert.ok(Array.isArray(commitBytes) && commitBytes.length > 0);
       legacy.exec(`BEGIN; DROP TABLE actor_state_cuts; DROP TABLE actor_state_cut_batches;
-        DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_jobs; DELETE FROM schema_version WHERE version IN(34,35); COMMIT;`);
+        DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_jobs; DELETE FROM schema_version WHERE version IN(34,35,36); COMMIT;`);
       assert.equal(legacy.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 33);
     } finally { legacy.close(); }
     journal = openJournal({ path });
     const inspection = new DatabaseSync(path);
     try {
-      assert.equal(inspection.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 35);
+      assert.equal(inspection.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 36);
       assert.deepEqual(inspection.prepare('SELECT * FROM world_runs').all(), runBytes);
       assert.deepEqual(inspection.prepare('SELECT * FROM world_commits ORDER BY commit_index').all(), commitBytes);
       assert.equal(inspection.prepare('SELECT COUNT(*) AS n FROM actor_state_cuts').get()?.n, 0);

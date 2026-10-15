@@ -22,7 +22,7 @@ Un solo host escritor controla cada `privateData`. Antes de abrir workers se adq
 
 ## Schema de journal
 
-El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v35; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El núcleo durable de fork está implementado en v35; su operación integral sigue pendiente.
+El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v36; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El núcleo durable de fork está implementado en v35; su operación integral sigue pendiente.
 
 Migraciones numeradas con `schema_version`; JSON versionado validado en lectura/escritura. Tablas requeridas:
 
@@ -66,7 +66,7 @@ La migración v30 añade `direction_revision` a `world_runs`, `direction_events`
 
 ### Contrato requerido para forks y continuidad (evolución posterior a v29)
 
-El corte 45 implementa el núcleo host de fork por corte con job durable staging/ready/failed y fuente inmutable. Su composición, API/GUI y restauración por corte siguen pendientes; el contrato integral se define a continuación. El contrato de episodios y escenas ya está implementado en v29: snapshots/commits históricos conservan sus hashes y las escenas preexistentes permanecen sin episodio asignado. v29 no incluye un comando para asociar una escena heredada a un episodio; si el producto lo requiere, esa operación debe diseñarse y probarse de forma explícita.
+El corte 45 implementa el núcleo host de fork por corte con job durable staging/ready/failed y fuente inmutable. Su composición y API/GUI se conectaron en el corte 46; restauración pública por corte sigue pendiente; el contrato integral se define a continuación. El contrato de episodios y escenas ya está implementado en v29: snapshots/commits históricos conservan sus hashes y las escenas preexistentes permanecen sin episodio asignado. v29 no incluye un comando para asociar una escena heredada a un episodio; si el producto lo requiere, esa operación debe diseñarse y probarse de forma explícita.
 
 Cada apertura/cierre estructural se escribe en la misma transacción SQLite que el nuevo snapshot y su fila `world_commits`: incrementa `world_revision` y `commit_index`, pero no `worldSeq`, el reloj ficticio, `world_events`, percepciones, outbox ni memoria ICM. `structure_events` conserva el comando idempotente, actor administrativo, tipo y corte. `readDramaticStructureAtCut` valida el snapshot/hash y reproduce sólo eventos estructurales hasta el commit que corresponde al par confirmado `worldRevision` + `worldSeq`; el estado actual nunca se usa como sustituto del pasado. El historial de eventos acepta el mismo límite de commit y no convierte estructura editorial en conocimiento de un personaje. Sin escena activa, acción actoral e intervención humana fallan con causa explícita; no se crean convocatorias ni avance de rutinas. Abrir una escena/episodio permite continuar y conserva la continuidad corriente.
 
@@ -197,3 +197,7 @@ El paquete prepared-fork-state reúne mundo remapeado, estados privados y manifi
 ## Publicación interna del fork — v35
 
 La implementación agrega fork_jobs, fork_job_history, fork_projection_receipts y fork_dramatic_seeds. Congela un paquete verificable, prepara bases ICM propias y persiste recibos antes de trasladar un directorio identificado por operación. Sólo la transacción final publica configuración, estado, conocimiento, archivo de experiencias/recibos, semilla editorial y checkpoint privado cero; hasta entonces no hay corrida visible en world_runs. Un cierre del servicio conserva staging para recuperar identidades y recibos exactos. Ready no aprueba ejecución. El núcleo host no está todavía compuesto en launcher/API/GUI ni restore. [Evidencia, revisión y límites](../auditoria/publicacion-de-bifurcaciones.md).
+
+## Integración de bifurcaciones — corte 46
+
+Launcher, API autenticada y panel de bifurcación ya están conectados. El retry tiene recibo durable en journal v36; la suspensión de fork precede al inventario de backup e incluye archivos de operaciones incompletas sin cambiar IDs de memoria. La interfaz conserva el corte/intento ante navegación y recarga, consulta sin reejecutar y protege la preparación heredada. La procedencia editorial y los controles Ready derivados son explícitos. [Contrato ejecutado, recorrido de navegador y límites](../auditoria/operacion-de-bifurcaciones.md). Las notas de cortes anteriores conservan su alcance histórico; restauración pública y aceptación integral siguen pendientes.

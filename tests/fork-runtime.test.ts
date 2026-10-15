@@ -66,7 +66,7 @@ test('fork initializes empty private archives and rejects a symlink target befor
  assert.ok(binaryPath);const f=fixture();const runtime=createForkRuntime({host:f.host,binaryPath});try{
   const begun=runtime.begin(f.request);assert.ok(begun.kind==='created');mkdirSync(join(f.data,'runs'),{recursive:true});const external=join(f.directory,'unrelated');mkdirSync(external);const target=join(f.data,'runs',begun.job.targetRunId);symlinkSync(external,target);
   await runtime.waitForIdle();const failed=runtime.read(f.request);assert.ok(failed?.state==='failed');assert.equal(f.host.journal.loadWorld({runId:failed.targetRunId}),undefined);assert.equal(existsSync(join(external,'fork-owner.json')),false);
-  rmSync(target);const retried=runtime.retry({...f.request,expectedRevision:failed.revision});assert.ok(retried?.state==='staging');await runtime.waitForIdle();const ready=runtime.read(f.request);assert.ok(ready?.state==='ready');
+  rmSync(target);const retried=runtime.retry({...f.request,idempotencyKey:randomUUID(),expectedRevision:failed.revision});assert.ok(retried.kind==='updated'&&retried.job.state==='staging');await runtime.waitForIdle();const ready=runtime.read(f.request);assert.ok(ready?.state==='ready');
   const db=new DatabaseSync(join(f.data,'runs',ready.targetRunId,'actors',f.actorId,'memory.sqlite'),{readOnly:true});try{assert.deepEqual(db.prepare('PRAGMA quick_check').all().map(row=>row.quick_check),['ok']);}finally{db.close();}
  }finally{await runtime.close();f.host.close();rmSync(f.directory,{recursive:true,force:true});}
 });
@@ -83,4 +83,39 @@ test('fork recovers a completed ICM store that was interrupted before its journa
   f.host.close();reopened=openLocalHost({privateDataRoot:f.data});recovered=createForkRuntime({host:reopened,binaryPath});recovered.recover();await recovered.waitForIdle();
   assert.equal(recovered.read(f.request)?.state,'ready');assert.equal(reopened.journal.readForkProjectionReceipts(identity(f))[0]?.memoryId,stored);
  }finally{await runtime?.close();await recovered?.close();reopened?.close();f.host.close();rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('fork backup suspension drains mechanical publication and blocks every admission until release',real,async()=>{
+ assert.ok(binaryPath);const f=fixture(2);const runtime=createForkRuntime({host:f.host,binaryPath});
+ try{
+  const begun=runtime.begin(f.request);assert.ok(begun.kind==='created');
+  const holding=runtime.suspendAdmissions();
+  assert.throws(()=>runtime.begin({...f.request,operationId:randomUUID(),idempotencyKey:randomUUID()}),/FORK_ADMISSIONS_SUSPENDED/);
+  assert.throws(()=>runtime.retry({...identity(f),expectedRevision:0,idempotencyKey:randomUUID()}),/FORK_ADMISSIONS_SUSPENDED/);
+  assert.throws(()=>runtime.recover(),/FORK_ADMISSIONS_SUSPENDED/);
+  const release=await holding;
+  assert.ok(runtime.read(identity(f))?.state==='ready','backup reads only after the admitted writer has settled');
+  assert.throws(()=>runtime.begin(f.request),/FORK_ADMISSIONS_SUSPENDED/);
+  release();release();
+  const replay=runtime.begin(f.request);assert.ok(replay.kind==='existing'&&replay.job.state==='ready');
+  await runtime.close();assert.throws(()=>runtime.recover(),/FORK_RUNTIME_CLOSED/);
+ }finally{await runtime.close();f.host.close();rmSync(f.directory,{recursive:true,force:true});}
+});
+
+test('retry receipt replay during import cannot reopen ICM after the worker publishes Ready',real,async()=>{
+ assert.ok(binaryPath);const f=fixture(2);let packageReads=0;let replayed=false;
+ let retryRequest:{operationId:string;principalId:string;expectedRevision:number;idempotencyKey:string}|undefined;
+ const observedHost={...f.host,journal:{...f.host.journal,readForkPackage(request:unknown){packageReads++;return f.host.journal.readForkPackage(request);}}};
+ const runtime=createForkRuntime({host:observedHost,binaryPath,onProgress(event){
+  if(event.kind==='memory'&&event.completed===1&&retryRequest!==undefined&&!replayed){replayed=true;const replay=runtime.retry(retryRequest);assert.equal(replay.kind,'existing');}
+ }});
+ try{
+  const begun=runtime.begin(f.request);assert.ok(begun.kind==='created');mkdirSync(join(f.data,'runs'),{recursive:true});
+  const external=join(f.directory,'external');mkdirSync(external);const target=join(f.data,'runs',begun.job.targetRunId);symlinkSync(external,target);
+  await runtime.waitForIdle();const failed=runtime.read(identity(f));assert.ok(failed?.state==='failed');rmSync(target);
+  retryRequest={...identity(f),expectedRevision:failed.revision,idempotencyKey:randomUUID()};
+  assert.equal(runtime.retry(retryRequest).kind,'updated');await runtime.waitForIdle();
+  assert.equal(replayed,true);assert.equal(runtime.read(identity(f))?.state,'ready');
+  assert.equal(packageReads,2,'exactly one failed attempt and one successful import; no delayed replay after Ready');
+ }finally{await runtime.close();f.host.close();rmSync(f.directory,{recursive:true,force:true});}
 });

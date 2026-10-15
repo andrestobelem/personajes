@@ -192,3 +192,7 @@ Verificar fuente exacta completa, todos los personajes, unión privada sin infor
 ## Gate de publicación y recuperación — corte 45
 
 Comprobar SQLite/ICM reales con vacío y múltiples recuerdos; exactitud del paquete completo, recibos e identidades; rollback de publicación ante checkpoint inválido; interrupción entre store/receipt, tras receipt y tras traslado; replay, propietario, retry y fork de fork. Verificar semilla editorial sin eventos fabricados y apertura explícita entre escenas, proteger la edición Ready ordinaria y rechazar hardlinks/symlinks antes de escribir. La GUI/launcher/restore y cargas largas no quedan acreditadas por estos gates host. [Resultados](../auditoria/publicacion-de-bifurcaciones.md).
+
+## Integración de bifurcaciones — corte 46
+
+Launcher, API autenticada y panel de bifurcación ya están conectados. El retry tiene recibo durable en journal v36; la suspensión de fork precede al inventario de backup e incluye archivos de operaciones incompletas sin cambiar IDs de memoria. La interfaz conserva el corte/intento ante navegación y recarga, consulta sin reejecutar y protege la preparación heredada. La procedencia editorial y los controles Ready derivados son explícitos. [Contrato ejecutado, recorrido de navegador y límites](../auditoria/operacion-de-bifurcaciones.md). Las notas de cortes anteriores conservan su alcance histórico; restauración pública y aceptación integral siguen pendientes.

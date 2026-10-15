@@ -1,7 +1,7 @@
 import React from 'react';
 import { z } from 'zod';
 import type { RunStageView } from '../domain/run-observation.ts';
-import type { DramaticStructureEventSchema } from '../domain/dramatic-structure.ts';
+import type { DramaticEpisodeViewSchema, DramaticStructureEventSchema } from '../domain/dramatic-structure.ts';
 import { createRunDramaticStructureClient, type DramaticStructureDocument, type StructureMutation, type StructureMutationIntent } from './run-dramatic-structure-client.ts';
 
 const client = createRunDramaticStructureClient();
@@ -23,14 +23,31 @@ const eventNames: Record<StructureEvent['kind'], string> = {
   sceneOpened: 'Se abrió una escena', sceneClosed: 'Se cerró una escena', actsSet: 'Se actualizaron los actos',
 };
 
+export function structureLifecycleAllowsEdit(lifecycle: RunStageView['lifecycle'], derivedPreparation: boolean) {
+  return lifecycle === 'running' || lifecycle === 'paused' || lifecycle === 'stopped' || (lifecycle === 'ready' && derivedPreparation);
+}
+
+export function EpisodeForkOrigins({ episode }: { episode: z.infer<typeof DramaticEpisodeViewSchema> }) {
+  const origins = episode.forkOrigins ?? [];
+  if (origins.length === 0) return null;
+  return <details><summary>Base dramática heredada ({origins.length} orígenes)</summary><p>Este episodio y sus actos se conservaron desde otra representación. Los cortes locales de base no son nuevas aperturas ni cierres de la ficción.</p><ul>{origins.map((origin, index) => <li key={`${origin.source.runId}:${origin.episodeId}:${index}`}>
+    Origen <code>{origin.source.runId}</code> · episodio <code>{origin.episodeId}</code> · corte fuente commit {origin.source.commitIndex} · secuencia {origin.source.worldSeq}.
+    <p>Apertura en origen: commit {origin.openingCut.commitIndex} · secuencia {origin.openingCut.worldSeq}{origin.closingCut === null ? ' · sin cierre heredado' : ` · cierre en origen: commit ${origin.closingCut.commitIndex} · secuencia ${origin.closingCut.worldSeq}`}.</p>
+    {origin.consequenceEventIds.length > 0 && <p>Consecuencias del origen: {origin.consequenceEventIds.map((id) => <code key={id}>{id} </code>)}</p>}
+    {origin.openLines.map((line) => <p key={line.lineId}>Línea heredada: {line.lineId} · evidencia en origen: {line.evidenceEventIds.join(', ')}</p>)}
+  </li>)}</ul></details>;
+}
+
 export function DramaticStructurePanel({
-  runId, lifecycle, active, refreshToken, confirmedEvents, historicalCut, onSelectCommit,
+  runId, lifecycle, active, refreshToken, confirmedEvents, historicalCut, onSelectCommit, derivedPreparation = false, sceneLabels = [],
 }: {
   runId: string;
   lifecycle: RunStageView['lifecycle'];
+  derivedPreparation?: boolean;
   active: boolean;
   refreshToken: string;
   confirmedEvents: ConfirmedEvent[];
+  sceneLabels?: readonly { id: string; label: string }[];
   historicalCut?: HistoricalCut;
   onSelectCommit?: (commitIndex: number) => void;
 }) {
@@ -80,8 +97,8 @@ export function DramaticStructurePanel({
     return participant !== undefined && !scenePlaces.includes(participant.placeId);
   });
   const historical = historicalCut !== undefined;
-  const canEdit = !historical && active && (lifecycle === 'running' || lifecycle === 'paused' || lifecycle === 'stopped') && state.kind === 'ready' && !saving;
-  const labels = new Map<string, string>();
+  const canEdit = !historical && active && structureLifecycleAllowsEdit(lifecycle, derivedPreparation) && state.kind === 'ready' && !saving;
+  const labels = new Map(sceneLabels.map((scene) => [scene.id, scene.label]));
   if (state.kind === 'ready') for (const event of state.events) {
     const value = sceneName(event);
     if (value !== undefined) labels.set(value.id, value.label);
@@ -100,7 +117,7 @@ export function DramaticStructurePanel({
       const result = await client.mutate(intent, controller.signal);
       if (result.kind === 'stored' || result.kind === 'existing') {
         setPending(null);
-        setMessage(result.kind === 'existing' ? `${bodyLabel} ya estaba confirmado; se recuperó el mismo recibo.` : `${bodyLabel} quedó confirmado en la historia estructural.`);
+        setMessage(result.kind === 'existing' ? `La operación «${bodyLabel}» ya estaba confirmada; se recuperó el mismo recibo.` : `La operación «${bodyLabel}» quedó confirmada en la historia estructural.`);
         setEpisodeTitle('');
         setSceneLabel('');
         setConsequences([]);
@@ -141,8 +158,9 @@ export function DramaticStructurePanel({
       {structure.episodes.length === 0 && <p>No hay episodios estructurados todavía. Las escenas heredadas aparecen aparte; la migración no les inventa episodio ni cierre.</p>}
       <ol className="dramatic-episodes">{structure.episodes.map((episode) => <li key={episode.episodeId}>
         <strong>{episode.ordinal}. {episode.title ?? `Episodio ${episode.ordinal}`}</strong> · {episode.lifecycle === 'open' ? 'abierto' : 'cerrado'}
-        <p className="muted">Apertura: commit {episode.openingCut.commitIndex} · secuencia {episode.openingCut.worldSeq}
-          {episode.closingCut === null ? ' · sin corte de cierre' : ` · cierre: commit ${episode.closingCut.commitIndex} · secuencia ${episode.closingCut.worldSeq}`}</p>
+        <EpisodeForkOrigins episode={episode} />
+        <p className="muted">{(episode.forkOrigins?.length ?? 0) > 0 ? 'Base local heredada: commit ' : 'Apertura: commit '}{episode.openingCut.commitIndex} · secuencia {episode.openingCut.worldSeq}
+          {episode.closingCut === null ? ' · sin corte de cierre' : ` · ${(episode.forkOrigins?.length ?? 0) > 0 && episode.closingCut.commitIndex === 0 ? 'cierre de base heredada' : 'cierre'}: commit ${episode.closingCut.commitIndex} · secuencia ${episode.closingCut.worldSeq}`}</p>
         {episode.sceneIds.length === 0 ? <p>Sin escenas registradas.</p> : <ul>{episode.sceneIds.map((id) => <li key={id}>{labels.get(id) ?? `Escena ${id}`}{id === structure.activeSceneId ? ' · abierta' : ''}</li>)}</ul>}
         {episode.acts.length > 0 && <p>Actos editoriales: {episode.acts.map((act) => act.title).join(' · ')}</p>}
         {episode.consequenceEventIds.length > 0 && <details><summary>Consecuencias vinculadas ({episode.consequenceEventIds.length})</summary><ul>{episode.consequenceEventIds.map((eventId) => <li key={eventId}><code>{eventId}</code></li>)}</ul></details>}
@@ -184,7 +202,7 @@ export function DramaticStructurePanel({
       </section>}
       {!historical && pending !== null && <div className="dramatic-pending"><p>{pending.bodyLabel} no tiene confirmación visible. El reintento usa la misma clave y contenido.</p><button type="button" disabled={saving} onClick={() => void submit(pending.mutation, pending.bodyLabel, pending)}>Reintentar misma operación</button><button type="button" disabled={saving} onClick={() => { setPending(null); setMessage('Operación local descartada; se vuelve a leer el estado durable.'); setStructureRefresh((value) => value + 1); }}>Descartar y recargar</button></div>}
       <details className="dramatic-event-log"><summary>Registro de cambios estructurales ({state.events.length})</summary><ol>{state.events.map((event) => <li key={event.operationId}><strong>Rev. {event.structureRevision}</strong> · {eventNames[event.kind]} · commit {event.commitIndex} · {new Date(event.recordedAt).toLocaleString()}{onSelectCommit !== undefined && <button type="button" onClick={() => onSelectCommit(event.commitIndex)}>Ver este corte</button>}</li>)}</ol></details>
-      {!historical && !canEdit && <p className="muted">La estructura se puede editar cuando la representación está en curso, en pausa o detenida y no hay trabajos actorales activos.</p>}
+      {!historical && !canEdit && <p className="muted">La estructura se puede editar en curso, en pausa, detenida o durante la preparación de una bifurcación, sin trabajos actorales activos.</p>}
     </>}
   </section>;
 }

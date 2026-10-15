@@ -352,3 +352,7 @@ El inspector histórico distingue mente del snapshot, reconocimiento del checkpo
 ## Estado del fork — corte 45
 
 La publicación y recuperación host ya existen, pero esta interfaz todavía no ofrece bifurcar. Debe añadir elección de corte, fuente/versiones, nombre/motivo, seguimiento/retry, audioDerivation, navegación al destino y presentación de forkOrigins para no atribuir aperturas/cierres heredados al nuevo run. El editor ordinario no puede borrar el origen ni la semilla de un Ready derivado; necesita un flujo de edición autorizado específico. [Brechas y evidencia](../auditoria/publicacion-de-bifurcaciones.md).
+
+## Integración de bifurcaciones — corte 46
+
+Launcher, API autenticada y panel de bifurcación ya están conectados. El retry tiene recibo durable en journal v36; la suspensión de fork precede al inventario de backup e incluye archivos de operaciones incompletas sin cambiar IDs de memoria. La interfaz conserva el corte/intento ante navegación y recarga, consulta sin reejecutar y protege la preparación heredada. La procedencia editorial y los controles Ready derivados son explícitos. [Contrato ejecutado, recorrido de navegador y límites](../auditoria/operacion-de-bifurcaciones.md). Las notas de cortes anteriores conservan su alcance histórico; restauración pública y aceptación integral siguen pendientes.

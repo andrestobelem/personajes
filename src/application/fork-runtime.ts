@@ -54,7 +54,7 @@ function sqliteArtifact(path:string){
 /** Mechanical host operation only. No Pi, provider, source ICM read or actor scheduling. */
 export function createForkRuntime(input:{host:ReturnType<typeof openLocalHost>;binaryPath:string;onProgress?:(progress:ForkProgress)=>void}){
  const root=input.host.privateDataRoot;if(!isAbsolute(root)||realpathSync(root)!==root||lstatSync(root).isSymbolicLink())throw new Error('FORK_ROOT_INVALID');
- const journal=input.host.journal;const pending=new Map<string,{controller:AbortController;promise:Promise<void>}>();let closed=false;
+ const journal=input.host.journal;const pending=new Map<string,{controller:AbortController;promise:Promise<void>}>();let closed=false;let admissionSuspended=false;
  function progress(event:ForkProgress){try{input.onProgress?.(event);}catch{/* Observers cannot control publication. */}}
  async function perform(job:ForkJob,signal:AbortSignal){
   let phase:'memory'|'artifacts'|'publish'='artifacts';
@@ -106,14 +106,18 @@ export function createForkRuntime(input:{host:ReturnType<typeof openLocalHost>;b
     code:phase==='memory'?'FORK_MEMORY_FAILED':phase==='artifacts'?'FORK_ARTIFACTS_INVALID':'FORK_PUBLICATION_FAILED'});
   }
  }
- function schedule(job:ForkJob){
-  if(closed||job.state!=='staging'||pending.has(job.operationId))return;
+ function schedule(candidate:ForkJob){
+  if(closed||admissionSuspended||pending.has(candidate.operationId))return;
+  // Receipts deliberately preserve old revisions. A delayed retry continuation
+  // must not reopen ICM after another worker has published the destination.
+  const job=journal.readForkJob({operationId:candidate.operationId,principalId:candidate.principalId});
+  if(job?.state!=='staging')return;
   const controller=new AbortController();const promise=Promise.resolve().then(()=>perform(job,controller.signal));
   pending.set(job.operationId,{controller,promise});void promise.finally(()=>pending.delete(job.operationId)).catch(()=>undefined);
  }
  return {
   begin(raw:unknown){
-   if(closed)throw new Error('FORK_RUNTIME_CLOSED');const request=BeginSchema.parse(raw);
+   if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');const request=BeginSchema.parse(raw);
    const existing=journal.findForkJob({principalId:request.principalId,idempotencyKey:request.idempotencyKey});
    if(existing!==undefined){
     if(existing.operationId!==request.operationId||existing.source.runId!==request.runId||existing.source.commitIndex!==request.commitIndex
@@ -130,8 +134,27 @@ export function createForkRuntime(input:{host:ReturnType<typeof openLocalHost>;b
    if(result.kind==='created'||result.kind==='existing')schedule(result.job);return result;
   },
   read(request:{operationId:string;principalId:string}){return journal.readForkJob({operationId:request.operationId,principalId:request.principalId});},
-  retry(request:{operationId:string;principalId:string;expectedRevision:number}){if(closed)throw new Error('FORK_RUNTIME_CLOSED');const job=journal.retryForkJob({operationId:request.operationId,principalId:request.principalId,expectedRevision:request.expectedRevision});if(job!==undefined){const active=pending.get(job.operationId);if(active!==undefined)void active.promise.then(()=>schedule(job)).catch(()=>undefined);else schedule(job);}return job;},
-  recover(){if(closed)throw new Error('FORK_RUNTIME_CLOSED');for(const job of journal.listStagingForkJobs())schedule(job);},
+  retry(request:{operationId:string;principalId:string;expectedRevision:number;idempotencyKey:string}){
+   if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');
+   const result=journal.retryForkJob({operationId:request.operationId,principalId:request.principalId,expectedRevision:request.expectedRevision,idempotencyKey:request.idempotencyKey});
+   if(result.kind==='updated'||result.kind==='existing'){
+    // A replay carries the original retry receipt, whose staging revision may now
+    // be obsolete. Only the current durable state can be scheduled.
+    const job=journal.readForkJob({operationId:request.operationId,principalId:request.principalId});
+    if(job?.state==='staging'){
+     const active=pending.get(job.operationId);
+     if(active!==undefined)void active.promise.then(()=>schedule(job)).catch(()=>undefined);else schedule(job);
+    }
+   }
+   return result;
+  },
+  recover(){if(closed)throw new Error('FORK_RUNTIME_CLOSED');if(admissionSuspended)throw new Error('FORK_ADMISSIONS_SUSPENDED');for(const job of journal.listStagingForkJobs())schedule(job);},
+  async suspendAdmissions():Promise<()=>void>{
+   if(closed||admissionSuspended)throw new Error('BACKUP_FORK_BUSY');admissionSuspended=true;
+   try{while(pending.size>0)await Promise.all([...pending.values()].map(item=>item.promise));}
+   catch(error){admissionSuspended=false;throw error;}
+   let released=false;return ()=>{if(released)return;released=true;admissionSuspended=false;};
+  },
   async waitForIdle(){while(pending.size>0)await Promise.all([...pending.values()].map(item=>item.promise));},
   async close(){closed=true;for(const item of pending.values())item.controller.abort();await Promise.all([...pending.values()].map(item=>item.promise));},
  };

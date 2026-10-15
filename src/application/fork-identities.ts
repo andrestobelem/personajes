@@ -8,7 +8,10 @@ export const ForkIdentityKindSchema = z.enum(['entity','door','channel','scene',
 const UuidSchema = z.string().uuid({version:'v4'});
 export const ForkIdentityManifestSchema = z.strictObject({
   kind:z.literal('fork-identities'), sourceRunId:RunIdSchema, targetRunId:RunIdSchema,
-  ids:z.array(z.strictObject({kind:ForkIdentityKindSchema,sourceId:UuidSchema,targetId:UuidSchema})),
+  ids:z.array(z.discriminatedUnion('kind',[
+    z.strictObject({kind:z.enum(['episode','act']),sourceId:z.string().uuid(),targetId:UuidSchema}),
+    z.strictObject({kind:ForkIdentityKindSchema.exclude(['episode','act']),sourceId:UuidSchema,targetId:UuidSchema}),
+  ])),
   handles:z.array(z.strictObject({actorId:CharacterIdSchema,sourceHandle:EntityHandleSchema,targetHandle:EntityHandleSchema})),
   continuities:z.array(z.strictObject({sourceId:z.string().min(1).max(120).regex(/^[a-z0-9-]+$/),targetId:z.string().min(1).max(120).regex(/^[a-z0-9-]+$/)})),
 }).superRefine((manifest,context)=>{
@@ -52,7 +55,7 @@ export function createForkIdentityRegistry(input:{sourceRunId:string;targetRunId
   }
   return {
     id(rawKind:z.infer<typeof ForkIdentityKindSchema>,rawId:string):string {
-      const kind=ForkIdentityKindSchema.parse(rawKind);const sourceId=UuidSchema.parse(rawId);
+      const kind=ForkIdentityKindSchema.parse(rawKind);const sourceId=(kind==='episode'||kind==='act'?z.string().uuid():UuidSchema).parse(rawId);
       const previous=idMap.get(`${kind}:${sourceId}`);if(previous)return previous;
       const targetId=fresh();if(targetId===sourceId)throw new Error('El generador conservó una identidad de origen');
       state.ids.push({kind,sourceId,targetId});idMap.set(`${kind}:${sourceId}`,targetId);return targetId;

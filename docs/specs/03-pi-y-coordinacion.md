@@ -110,3 +110,7 @@ La causa `directionCircumstance` sólo convoca mediante percepciones físicas ya
 ## Bifurcación y comienzo derivado — corte 45
 
 El fork mecánico no abre sesiones Pi ni llama modelos. No transporta historial de intérprete, jobs, inboxes o presupuesto consumido. Conserva el perfil seleccionado y el presupuesto configurado; start mantiene la semilla heredada en vez de inventar un episodio inicial. Entre escenas, inferencia y avance siguen necesitando una escena elegible; abrir unidades estructurales en un Ready derivado es una decisión explícita. El preflight y las nuevas vinculaciones de voz permanecen obligatorios. [Evidencia](../auditoria/publicacion-de-bifurcaciones.md).
+
+## Integración de bifurcaciones — corte 46
+
+Launcher, API autenticada y panel de bifurcación ya están conectados. El retry tiene recibo durable en journal v36; la suspensión de fork precede al inventario de backup e incluye archivos de operaciones incompletas sin cambiar IDs de memoria. La interfaz conserva el corte/intento ante navegación y recarga, consulta sin reejecutar y protege la preparación heredada. La procedencia editorial y los controles Ready derivados son explícitos. [Contrato ejecutado, recorrido de navegador y límites](../auditoria/operacion-de-bifurcaciones.md). Las notas de cortes anteriores conservan su alcance histórico; restauración pública y aceptación integral siguen pendientes.

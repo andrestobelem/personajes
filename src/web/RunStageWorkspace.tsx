@@ -13,6 +13,7 @@ import {
   type StageMapEntity,
 } from "./StageMap.tsx";
 import { StageConversation, StageJobs } from "./StageConversation.tsx";
+import { ForkPanel } from './ForkPanel.tsx';
 import { NarrationPanel } from './NarrationPanel.tsx';
 import { InspectorPanel } from "./InspectorPanel.tsx";
 import { HumanInteractionPanel } from "./HumanInteractionPanel.tsx";
@@ -134,11 +135,15 @@ export function RunStageWorkspace({
   active = true,
   knownLifecycle,
   api = client,
+  onOpenRun,
+  derivedPreparation = false,
 }: {
   runId: string;
   active?: boolean;
   knownLifecycle?: RunStageView["lifecycle"];
   api?: RunObservationClient;
+  onOpenRun?: (runId: string) => void;
+  derivedPreparation?: boolean;
 }) {
   const [streamState, setStreamState] = React.useState<
     "connecting" | "active" | "polling"
@@ -381,6 +386,7 @@ export function RunStageWorkspace({
           )}
         </div>
       </header>
+      <ForkPanel runId={runId} source={observation === null ? null : { runId: observation.stage.runId, commitIndex: observation.stage.commitIndex, worldRevision: observation.stage.worldRevision, worldSeq: observation.stage.worldSeq }} active={active} {...(onOpenRun === undefined ? {} : { onOpenRun })} />
       {message && (
         <p role="alert" className="stage-sync">
           {message}
@@ -408,20 +414,24 @@ export function RunStageWorkspace({
           {cut !== undefined && observation.stage.lifecycleAsOf === "current" && <HistoricalLifecycleNotice lifecycle={observation.stage.lifecycle} />}
           {cut === undefined ? (
             <DramaticStructurePanel
+              derivedPreparation={derivedPreparation}
               runId={runId}
               lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)}
               active={active}
               refreshToken={`${refresh}:${observation.stage.worldRevision}:${observation.stage.worldSeq}:present`}
               confirmedEvents={observation.events.map((event) => ({ eventId: event.eventId, summary: event.summary }))}
+              sceneLabels={observation.stage.scenes}
               onSelectCommit={viewCommit}
             />
           ) : (
             <DramaticStructurePanel
+              derivedPreparation={derivedPreparation}
               runId={runId}
               lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)}
               active={active}
               refreshToken={`${refresh}:${observation.stage.worldRevision}:${observation.stage.worldSeq}:history`}
               confirmedEvents={observation.events.map((event) => ({ eventId: event.eventId, summary: event.summary }))}
+              sceneLabels={observation.stage.scenes}
               historicalCut={{ worldRevision: observation.stage.worldRevision, worldSeq: observation.stage.worldSeq }}
               onSelectCommit={viewCommit}
             />
