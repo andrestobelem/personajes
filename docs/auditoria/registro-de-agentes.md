@@ -140,3 +140,11 @@ La raíz construyó el resolver, integró documentación y corrigió textos obso
 - `source_selector_review`: revisión independiente sin bloqueantes y seis pruebas focales con ICM real.
 
 La raíz integró, comprobó el recorrido gráfico con reinicio, corrigió el desborde visual, verificó la suite completa y actualizó documentos. No acredita inferencia externa, audio ni aceptación integral.
+
+## Corte 54 — edición de expedientes
+
+- `dossier_editor_backend_design`: auditoría del diseño, contratos, procedencia editorial opcional, normalización y servicio/rutas durables; corrección de replay e integración HTTP.
+- `dossier_editor_form`: controles completos y proyección editable compartida, pruebas de render/aislamiento/captura, revisión de selección visual.
+- `dossier_editor_integrity_review`: reproducción del fallo de replay, revisión de corrección, 18 pruebas focales con SQLite/ICM reales y observación de autoría heredada resuelta en GUI.
+
+La raíz integró workspace/cliente, revisiones y confirmación, ajustó presentación/autoría, ejecutó QA con reinicio, suite global y documentación. Sin inferencia externa ni síntesis.

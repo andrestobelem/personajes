@@ -86,6 +86,11 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
     return operatorJson(adaptation,200,{ETag:`"dossier-adaptation:${adaptation.adaptationId}:${adaptation.archiveHash}"`});
    }
   }
+  if(resource==='dossier-edits'&&request.query.size!==0)throw new Error('EDIT_QUERY_INVALID');
+  if(resource==='dossier-edits'&&request.kind==='write'&&request.method==='POST'&&request.path.length===2){
+   if(id==='preview'){const result=input.dossiers.editPreview(request.principalId,request.idempotencyKey,request.body);return operatorJson(result,201,{ETag:importEtag(result.importId,0),Location:`/api/v1/imports/${result.importId}`});}
+   if(id==='apply'){const body=z.strictObject({importId:z.uuid(),previewToken:z.uuid(),confirmDiffHash:HashSchema}).parse(request.body);const current=input.dossiers.get(request.principalId,body.importId);if(current.state!=='applied'&&request.ifMatch!==importEtag(current.importId,current.revision))throw new Error('EXCHANGE_IF_MATCH_REQUIRED');return operatorJson(input.dossiers.apply(request.principalId,body),201);}
+  }
   if(resource==='imports'){
    if(request.path.length===1&&request.kind==='write'&&request.method==='POST'){
     const result=input.dossiers.quarantine(request.principalId,request.idempotencyKey,request.body);
@@ -149,7 +154,7 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
   db.exec('BEGIN IMMEDIATE');try{const result=work();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}
  }
  const pending=new Map<string,Promise<z.infer<typeof OperatorResponseSchema>>>();
- return {name:'exchange',maxBodyBytes:22*1024*1024,close(){if(pending.size>0)throw new Error('EXCHANGE_OPERATIONS_ACTIVE');db.close();},matches:({path,method})=>['imports','exports','backups'].includes(path[0]??'')||(method==='GET'&&['dossier-adaptations','preparation-sources'].includes(path[0]??'')),async handle(request){
+ return {name:'exchange',maxBodyBytes:22*1024*1024,close(){if(pending.size>0)throw new Error('EXCHANGE_OPERATIONS_ACTIVE');db.close();},matches:({path,method})=>['imports','exports','backups','dossier-edits'].includes(path[0]??'')||(method==='GET'&&['dossier-adaptations','preparation-sources'].includes(path[0]??'')),async handle(request){
   try {
    if(request.kind==='read')return await dispatch(request);
    const requestHash=digest(canonical({method:request.method,path:request.path,body:request.body}));const kind=operationKind(request);
@@ -168,7 +173,7 @@ export function createExchangeRoutes(input:{journalPath:string;dossiers:ReturnTy
     const active=pending.get(identity);if(active!==undefined)return await active;
     // Only restore operations have a sealed service intent/idempotent preview.
     // Other interrupted mutations retain their conservative explicit failure.
-    const recoverable=request.method==='POST'&&request.path.length===3&&request.path[0]==='backups'&&['restore','restore-preview'].includes(request.path[2]??'');
+    const recoverable=request.method==='POST'&&request.path[0]==='dossier-edits'&&request.path.length===2&&['preview','apply'].includes(request.path[1]??'')||request.method==='POST'&&request.path.length===3&&request.path[0]==='backups'&&['restore','restore-preview'].includes(request.path[2]??'');
     if(!recoverable)throw new Error('EXCHANGE_OPERATION_INTERRUPTED');
    }else{
     receiptTransaction(()=>{

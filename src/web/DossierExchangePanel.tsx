@@ -1,4 +1,5 @@
 import React from 'react';
+import { DossierEditorWorkspace } from './DossierEditorWorkspace.tsx';
 import { BackupRestorePanel } from './BackupRestorePanel.tsx';
 import { BackupTransferPanel } from './BackupTransferPanel.tsx';
 import type { z } from 'zod';
@@ -46,7 +47,7 @@ export function DossierExchangePanel({catalog,onOpenRun,onHostRecovered,onOrigin
     await execute({kind:'import',intent:exchangeIntent('/api/v1/imports',body)});
   }
   const blocked=busy||pending!==undefined;
-  return <><BackupRestorePanel onBackupAvailable={setAvailableBackupId} {...(onOriginalRetained === undefined ? {} : {onOriginalRetained})} {...(onHostRecovered === undefined ? {} : {onHostRecovered})} {...(onOpenRun === undefined ? {} : {onOpenRun})} /><BackupTransferPanel {...(availableBackupId===undefined?{}:{initialBackupId:availableBackupId})} {...(onOpenRun===undefined?{}:{onOpenRun})}/><section className="dossier-exchange" aria-label="Intercambio de expedientes">
+  return <><DossierEditorWorkspace catalog={catalog}/><BackupRestorePanel onBackupAvailable={setAvailableBackupId} {...(onOriginalRetained === undefined ? {} : {onOriginalRetained})} {...(onHostRecovered === undefined ? {} : {onHostRecovered})} {...(onOpenRun === undefined ? {} : {onOpenRun})} /><BackupTransferPanel {...(availableBackupId===undefined?{}:{initialBackupId:availableBackupId})} {...(onOpenRun===undefined?{}:{onOpenRun})}/><section className="dossier-exchange" aria-label="Intercambio de expedientes">
     <h1>Importar y exportar expedientes</h1>
     <p>Conservá una copia portable o revisá un expediente importado antes de crear una adaptación. El original investigado se conserva.</p>
     <fieldset disabled={blocked}><legend>Exportar</legend><label>Personaje <select value={character} onChange={event=>setCharacter(event.target.value)}>{catalog.map(item=><option key={item.characterId} value={item.characterId}>{item.displayName}</option>)}</select></label>

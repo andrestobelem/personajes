@@ -158,3 +158,5 @@
 
 /* Documentary hashes and adaptation labels must fit the preparation panel. */
 #draft-character-preparation{min-width:0} .preparation-source{min-width:0;overflow-wrap:anywhere}.preparation-source select{max-width:100%;min-width:0}
+
+.dossier-editor-workspace{overflow-wrap:anywhere;min-width:0}.dossier-editor-workspace input:not([type=checkbox]),.dossier-editor-workspace textarea,.dossier-editor-workspace select{display:block;width:100%;max-width:100%;margin:6px 0 16px;padding:10px;border:1px solid #cfd5c7;border-radius:6px;background:#fbfcf8;color:#244438;font:inherit}.dossier-editor-workspace fieldset{min-width:0;margin:16px 0}.dossier-editor-workspace pre{max-height:400px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.dossier-editor-form textarea{min-height:80px}

@@ -2,9 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { exportDossier, importDossier } from '../adapters/catalog.ts';
-import { DossierAdaptationImportSchema, DossierArchiveSchema, DossierSchema, type Dossier } from '../domain/catalog.ts';
+import { DossierAdaptationImportSchema, DossierArchiveSchema, DossierSchema, parseDossierMarkdown, type Dossier } from '../domain/catalog.ts';
 import { CharacterIdSchema } from '../domain/values.ts';
 import { DossierImportViewSchema as ImportViewSchema,DossierImportPreviewMetadataSchema as PreviewSchema,DossierImportApplyRequestSchema,DossierAdaptationReadSchema,DossierAdaptationSummarySchema,DossierAdaptationPageSchema } from '../domain/dossier-exchange.ts';
+import { DossierEditRequestSchema } from '../domain/dossier-edit.ts';
+import { DossierSourceReferenceSchema, type DossierSource } from '../domain/dossier-source.ts';
+import { freezeCatalogDossierSource, validateFrozenDossierSource } from './dossier-source-repository.ts';
 import { exchangeIntegrity } from '../adapters/exchange-integrity.ts';
 
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -51,6 +54,44 @@ export function openDossierExchange(input:{journalPath:string;getDossier(charact
     integrity.seal('exchange_dossier_imports','import_id=?',[importId]);
     return view;
   }
+  function resolveEditorialParent(principalId:string,raw:unknown):DossierSource {
+    const reference=DossierSourceReferenceSchema.parse(raw);
+    let source:DossierSource;
+    if(reference.kind==='catalog-original') source=freezeCatalogDossierSource(input.getDossier(reference.characterId));
+    else {const saved=readSavedAdaptation({principalId,importId:reference.importId});source=validateFrozenDossierSource({kind:'saved-adaptation',characterId:saved.characterId,revision:saved.revision,contentHash:saved.contentHash,fullArchiveHash:saved.archiveHash,importId:saved.importId,adaptationId:saved.adaptationId,importedArchiveHash:saved.importedArchiveHash,frozenDossier:saved.adaptation.importedDossier});}
+    const projected={kind:source.kind,characterId:source.characterId,revision:source.revision,contentHash:source.contentHash,fullArchiveHash:source.fullArchiveHash,...(source.kind==='saved-adaptation'?{importId:source.importId,adaptationId:source.adaptationId}:{})};
+    if(JSON.stringify(DossierSourceReferenceSchema.parse(projected))!==JSON.stringify(reference))throw new Error('DOSSIER_SOURCE_SELECTION_CHANGED');
+    return source;
+  }
+  function editPreview(principalId:string,operationId:string,raw:unknown){
+    const request=DossierEditRequestSchema.parse(raw);IdSchema.parse(operationId);z.string().min(1).max(200).parse(principalId);
+    const requestHash=hash(JSON.stringify(request));
+    const previous=db.prepare('SELECT import_id,request_hash FROM exchange_dossier_imports WHERE principal_id=? AND operation_id=?').get(principalId,operationId);
+    if(previous){
+      integrity.verify('exchange_dossier_imports','principal_id=? AND operation_id=?',[principalId,operationId]);const old=z.strictObject({import_id:IdSchema,request_hash:z.string()}).parse(previous);if(old.request_hash!==requestHash)throw new Error('IMPORT_IDEMPOTENCY_REUSE');
+      for(const row of db.prepare('SELECT token,preview_json FROM exchange_dossier_previews WHERE principal_id=?').all(principalId)) {const stored=z.strictObject({token:IdSchema,preview_json:z.string()}).parse(row);integrity.verify('exchange_dossier_previews','token=? AND principal_id=?',[stored.token,principalId]);const p=PreviewSchema.parse(JSON.parse(stored.preview_json));if(p.importId===old.import_id&&p.editorial!==undefined){const archive=z.strictObject({archive_json:z.string()}).parse(db.prepare('SELECT archive_json FROM exchange_dossier_imports WHERE import_id=? AND principal_id=?').get(old.import_id,principalId));return {...p,before:p.editorial.parent.frozenDossier,after:DossierArchiveSchema.parse(JSON.parse(archive.archive_json)).dossier};}}
+      throw new Error('EDIT_PREVIEW_NOT_FOUND');
+    }
+    const parent=resolveEditorialParent(principalId,request.source);const before=parent.frozenDossier;
+    const sourceIds=new Set(request.fields.sourceRefs.map(source=>source.id));
+    if(sourceIds.size!==request.fields.sourceRefs.length)throw new Error('EDIT_SOURCE_REFERENCE_DUPLICATED');
+    if(request.fields.voiceRecipe.kind==='reviewed'&&request.fields.voiceRecipe.sourceRefs.some(id=>!sourceIds.has(id)))throw new Error('EDIT_VOICE_SOURCE_REFERENCE_MISSING');
+    if(request.fields.avatarRef.kind==='catalog-reference'&&request.fields.avatarRef.slug!==before.characterId)throw new Error('EDIT_AVATAR_IDENTITY_MISMATCH');
+    if(before.revision>=Number.MAX_SAFE_INTEGER)throw new Error('EDIT_REVISION_EXHAUSTED');
+    const contentHash=hash(request.fields.markdown);
+    const normalized=parseDossierMarkdown({characterId:before.characterId,...request.fields,contentHash});
+    const createdAt=new Date(now()).toISOString();
+    const after=DossierSchema.parse({...before,...request.fields,sections:normalized.sections,unknownSections:normalized.unknownSections,contentHash,adaptations:[...before.adaptations,{adaptationId:randomUUID(),basedOnHash:before.contentHash,reason:request.reason,createdAt,editorial:{kind:'operator-edit',parentArchiveHash:parent.fullArchiveHash,parentRevision:before.revision,parentContentHash:before.contentHash,authorPrincipalId:principalId}}]});
+    const canonical=exportDossier(after);const importId=randomUUID();
+    const view=ImportViewSchema.parse({importId,revision:0,kind:'dossier',state:'quarantined',characterId:after.characterId,sourceHash:after.contentHash,fileName:'edited-dossier.json'});
+    const differences={importId,sourceRevision:after.revision,targetRevision:before.revision,sourceHash:after.contentHash,targetHash:before.contentHash,fullBeforeHash:parent.fullArchiveHash,fullAfterHash:hash(canonical),characterId:before.characterId,editorial:{kind:'operator-edit',parent}};
+    const p=PreviewSchema.parse({...differences,previewToken:randomUUID(),expiresAt:now()+300000,diffHash:hash(JSON.stringify(differences))});
+    db.exec('BEGIN IMMEDIATE');try{
+      db.prepare('INSERT INTO exchange_dossier_imports(import_id,principal_id,operation_id,request_hash,view_json,archive_json) VALUES(?,?,?,?,?,?)').run(importId,principalId,operationId,requestHash,JSON.stringify(view),canonical);integrity.seal('exchange_dossier_imports','import_id=?',[importId]);
+      db.prepare('INSERT INTO exchange_dossier_previews(token,principal_id,preview_json) VALUES(?,?,?)').run(p.previewToken,principalId,JSON.stringify(p));integrity.seal('exchange_dossier_previews','token=?',[p.previewToken]);db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+    return {...p,before,after};
+  }
   function preview(principalId:string,raw:unknown){
     const view=get(principalId,raw);const row=z.strictObject({archive_json:z.string()}).parse(db.prepare('SELECT archive_json FROM exchange_dossier_imports WHERE import_id=?').get(view.importId));
     const source=DossierArchiveSchema.parse(JSON.parse(row.archive_json)).dossier;
@@ -71,9 +112,9 @@ export function openDossierExchange(input:{journalPath:string;getDossier(charact
     if(request.importId!==undefined&&request.importId!==p.importId)throw new Error('IMPORT_PREVIEW_TARGET_MISMATCH');
     if(p.diffHash!==request.confirmDiffHash)throw new Error('IMPORT_DIFF_CONFIRMATION_REQUIRED');
     const prior=db.prepare('SELECT adaptation_json FROM exchange_dossier_adaptations WHERE import_id=? AND principal_id=?').get(p.importId,principalId);
-    if(prior){integrity.verify('exchange_dossier_adaptations','import_id=? AND principal_id=?',[p.importId,principalId]);return DossierAdaptationImportSchema.parse(JSON.parse(z.strictObject({adaptation_json:z.string()}).parse(prior).adaptation_json));}
+    if(prior)return readSavedAdaptation({principalId,importId:p.importId}).adaptation;
     if(p.expiresAt<=now())throw new Error('IMPORT_PREVIEW_EXPIRED');
-    const current=DossierSchema.parse(input.getDossier(p.characterId));
+    const current=p.editorial===undefined?DossierSchema.parse(input.getDossier(p.characterId)):resolveEditorialParent(principalId,p.editorial.parent.kind==='catalog-original'?{kind:'catalog-original',characterId:p.editorial.parent.characterId,revision:p.editorial.parent.revision,contentHash:p.editorial.parent.contentHash,fullArchiveHash:p.editorial.parent.fullArchiveHash}:{kind:'saved-adaptation',characterId:p.editorial.parent.characterId,revision:p.editorial.parent.revision,contentHash:p.editorial.parent.contentHash,fullArchiveHash:p.editorial.parent.fullArchiveHash,importId:p.editorial.parent.importId,adaptationId:p.editorial.parent.adaptationId}).frozenDossier;
     if(current.characterId!==p.characterId||current.contentHash!==p.targetHash||current.revision!==p.targetRevision||hash(exportDossier(current))!==p.fullBeforeHash)throw new Error('IMPORT_TARGET_DIVERGED');
     const source=z.strictObject({archive_json:z.string()}).parse(db.prepare('SELECT archive_json FROM exchange_dossier_imports WHERE import_id=?').get(p.importId));
     integrity.verify('exchange_dossier_imports','import_id=? AND principal_id=?',[p.importId,principalId]);
@@ -149,5 +190,5 @@ export function openDossierExchange(input:{journalPath:string;getDossier(charact
     if(!row)throw new Error('EXPORT_NOT_FOUND');const archive=z.strictObject({archive_json:z.string()}).parse(row).archive_json;
     return {bytes:Buffer.from(archive),sha256:hash(archive),filename:'personajes-dossier.json'};
   }
-  return Object.freeze({quarantine,get,preview,apply,listAdaptations,readAdaptation,readSavedAdaptation,exportArchive,download,close:()=>db.close()});
+  return Object.freeze({quarantine,get,preview,editPreview,apply,listAdaptations,readAdaptation,readSavedAdaptation,exportArchive,download,close:()=>db.close()});
 }

@@ -158,3 +158,7 @@ El journal v39 implementa promoción de selfReference/selfConcept/values/disposi
 ## Fuente documental exacta — fundamento del corte 52
 
 La referencia de fuente discrimina catalog-original/saved-adaptation y liga personaje, revisión, contentHash y fullArchiveHash; adaptación añade importId/adaptationId. La fuente resuelta conserva frozenDossier e importedArchiveHash cuando corresponde. El schema opcional de draft/prepared valida consistencia estructural; el hash completo y linaje requieren verificador host. Mismo Markdown no prueba misma metadata. La integración C52 de guardado y gates, y el selector C53, acreditan estas fronteras mediante resolución host y snapshot exacto; no se atribuye esa garantía al schema solo. [Estado y límites](../auditoria/fuentes-de-preparacion.md).
+
+## Adaptación editorial — corte 54
+
+DossierEditableFields limita la edición a los nueve campos documentales; identidad operativa, revisión, hashes y ascendencia son de host. Una entrada DossierAdaptation puede incluir editorial opcional con parentArchiveHash/parentRevision/parentContentHash/authorPrincipalId. La edición agrega esa procedencia con motivo/fecha/ID del host, conserva revisión de entrada y la importación materializada incrementa una revisión. Entradas externas son declaraciones, no autenticación de su autor ni firma parental. El original y las fuentes preparadas anteriores no se reescriben. [Contrato y evidencia](../auditoria/edicion-de-expedientes.md).

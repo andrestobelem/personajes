@@ -132,6 +132,7 @@ export const DossierAvatarReferenceSchema = z.discriminatedUnion('kind', [
 export const DossierAdaptationSchema = z.strictObject({
   adaptationId: z.string().uuid(),
   basedOnHash: HashSchema,
+  editorial: z.strictObject({kind:z.literal('operator-edit'),parentArchiveHash:HashSchema,parentRevision:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),parentContentHash:HashSchema,authorPrincipalId:z.string().min(1).max(200)}).optional(),
   reason: z.string().min(1).max(4_000),
   createdAt: z.string().datetime({ offset: true }),
 });

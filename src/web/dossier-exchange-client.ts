@@ -8,7 +8,7 @@ export type ExchangeIntent = Readonly<{path:string;key:string;bodyJson:string;et
 const ExchangeRejectionSchema=z.strictObject({kind:z.literal('exchange-rejected'),message:z.string(),status:z.number().int()});
 export const exchangeRejection=(error:unknown)=>ExchangeRejectionSchema.safeParse(error).data;
 export function exchangeIntent(path:string,body:unknown,etag?:string):ExchangeIntent {
-  if(!/^\/api\/v1\/(imports|exports)(\/[^?#]+)?$/.test(path))throw new Error('Destino de intercambio inválido.');
+  if(!/^\/api\/v1\/(imports|exports|dossier-edits)(\/[^?#]+)?$/.test(path))throw new Error('Destino de intercambio inválido.');
   return Object.freeze({path,key:crypto.randomUUID(),bodyJson:JSON.stringify(body),...(etag===undefined?{}:{etag})});
 }
 export async function executeExchange<T>(intent:ExchangeIntent,schema:z.ZodType<T>):Promise<T> {
