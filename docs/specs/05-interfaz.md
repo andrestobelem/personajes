@@ -348,3 +348,7 @@ La preparación tiene editor de audio, modelo explícito, comportamiento TTS, fo
 ## Archivo privado histórico — corte 43
 
 El inspector histórico distingue mente del snapshot, reconocimiento del checkpoint y archivo de experiencias admitidas; pagina de a 50, conserva procedencia/hash y no lo presenta como búsqueda ICM. Cambiar corte o personaje invalida consultas pendientes; una respuesta actual no puede renderizarse como histórica aun con igual secuencia. Un corte sin registro declara indisponibilidad. Ver [recorrido de navegador](../auditoria/cortes-privados.md).
+
+## Estado del fork — corte 45
+
+La publicación y recuperación host ya existen, pero esta interfaz todavía no ofrece bifurcar. Debe añadir elección de corte, fuente/versiones, nombre/motivo, seguimiento/retry, audioDerivation, navegación al destino y presentación de forkOrigins para no atribuir aperturas/cierres heredados al nuevo run. El editor ordinario no puede borrar el origen ni la semilla de un Ready derivado; necesita un flujo de edición autorizado específico. [Brechas y evidencia](../auditoria/publicacion-de-bifurcaciones.md).

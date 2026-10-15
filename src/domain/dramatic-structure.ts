@@ -1,5 +1,6 @@
 /** Browser-safe contracts for episodic and scene structure. Persistence/authority live in the journal and host. */
 import { z } from 'zod';
+import { ForkSourceSchema } from './fork-origin.ts';
 import {
   CharacterIdSchema, EventIdSchema, HashSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
 } from './values.ts';
@@ -43,6 +44,12 @@ export const DramaticEpisodeViewSchema = z.strictObject({
   openLines: z.array(DramaticLineEvidenceSchema).max(10_000),
   sceneIds: z.array(SceneIdSchema).max(10_000),
   acts: z.array(DramaticActViewSchema).max(1_000),
+  forkOrigins: z.array(z.strictObject({
+    source: ForkSourceSchema, sourceStructureHash: HashSchema, episodeId: EpisodeIdSchema,
+    openingCut: DramaticCutSchema, closingCut: DramaticCutSchema.nullable(),
+    consequenceEventIds: z.array(EventIdSchema).max(10_000),
+    openLines: z.array(DramaticLineEvidenceSchema).max(10_000),
+  })).optional(),
 });
 
 /** Explicitly derived scenes from pre-v29 runs; migration never invents episodes or closures. */

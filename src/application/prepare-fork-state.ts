@@ -55,6 +55,7 @@ export function prepareForkState(raw:unknown){
   const actors=snapshot.entities.filter(entity=>entity.kind==='character');
   if(request.cuts.length!==actors.length||new Set(request.cuts.map(cut=>cut.actorId)).size!==actors.length)throw new Error('Lote privado incompleto');
   const identities=createForkIdentityRegistry({sourceRunId:source.runId,targetRunId:request.targetRunId,...(request.restoredIdentities===undefined?{}:{restored:request.restoredIdentities})});
+  identities.continuity(configuration.continuity.continuityId);
   const admittedIds=new Set<string>();
   for(const cut of request.cuts)for(const item of cut.experiences){
     if(admittedIds.has(item.envelope.experienceId))throw new Error('ExperienceId ambiguo entre personajes');

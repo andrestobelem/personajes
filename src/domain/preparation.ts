@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { ExperienceSchema } from './experience.ts';
+import { ForkSourceSchema } from './fork-origin.ts';
 import {
   CharacterIdSchema, ExperienceIdSchema, FictionalInstantSchema, HashSchema,
-  JobIdSchema, RevisionSchema, RunIdSchema, SourceRefIdSchema, WorldSeqSchema,
+  JobIdSchema, OperationIdSchema, RevisionSchema, RunIdSchema, SourceRefIdSchema, WorldSeqSchema,
 } from './values.ts';
 
 export const ContinuityIdSchema = z.string().min(1).max(120)
@@ -299,8 +300,17 @@ export const PreparationDraftSchema = z.strictObject({
 });
 export type PreparationDraft = z.infer<typeof PreparationDraftSchema>;
 
+export const PreparedCharacterForkOriginSchema = z.strictObject({
+  kind:z.literal('fork'),
+  source:ForkSourceSchema,
+  sourcePreparedHash:HashSchema,
+  sourceContinuity:ContinuityReferenceSchema,
+  principalId:z.string().min(1).max(200),recordedAt:z.string().datetime({offset:true}),operationId:OperationIdSchema,
+});
+
 const PreparedCharacterObjectSchema = z.strictObject({
   kind: z.literal('prepared-character'),
+  forkOrigin:PreparedCharacterForkOriginSchema.optional(),
   schemaVersion: z.literal(1),
   characterId: CharacterIdSchema,
   dossierRevision: RevisionSchema,

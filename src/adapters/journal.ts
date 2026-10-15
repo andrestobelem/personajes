@@ -1,3 +1,8 @@
+import { ForkJobSchema, ForkJobFailureCodeSchema, ForkArtifactManifestSchema } from '../domain/fork-job.ts';
+import { ForkPublicationPackageSchema } from '../application/fork-package.ts';
+import { ForkDramaticSeedSchema, prepareForkDramaticSeed } from '../application/fork-dramatic-seed.ts';
+import { prepareForkState } from '../application/prepare-fork-state.ts';
+import { prepareForkConfiguration } from '../application/fork-configuration.ts';
 import { ActorStateCutSchema, ActorStateCutRequestSchema, ActorStateCutReadResultSchema } from '../domain/actor-state-cut.ts';
 import {CircumstanceOptionsRequestSchema,CircumstanceOptionsSchema,CircumstanceWriteSchema,CircumstanceMutationResultSchema} from '../domain/direction-circumstances.ts';
 import {resolveWorldCircumstance} from '../domain/world-circumstances.ts';
@@ -8,7 +13,7 @@ import { readPiSessionCheckpointPrefix, verifyPiSessionCheckpointChain } from '.
 import { z } from 'zod';
 import { StoredPiProfileSchema, PersistedInferenceProfileSchema, LEGACY_INFERENCE_PROFILE, resolveStoredPiProfile, resolveReadyInferenceProfile } from '../domain/inference-profile.ts';
 import { validateContinuistaReviewContext, validateContinuistaContextReview } from '../domain/continuista-review.ts';
-import { ReadyRunConfigurationSchema, readyConfigurationAtSnapshot, validateRunConfiguration } from '../application/production-preflight.ts';
+import { ReadyRunConfigurationSchema, readyConfigurationAtSnapshot, validateRunConfiguration, validateReadyConfiguration } from '../application/production-preflight.ts';
 import { fingerprintInferenceProfile } from '../application/pi-access-check.ts';
 import { ExperienceSchema, FrozenExperienceSchema } from '../domain/experience.ts';
 import { IcmMemoryIdSchema, MemoryProjectionReceiptSchema } from '../domain/memory-projection.ts';
@@ -514,7 +519,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1842,6 +1847,34 @@ export function openJournal(input: { path: string }) {
     }
   }
 
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=35').get()) {
+    try { database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE fork_jobs(
+        operation_id TEXT PRIMARY KEY,principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+        target_run_id TEXT NOT NULL UNIQUE,state TEXT NOT NULL CHECK(state IN('staging','ready','failed')),
+        request_hash TEXT NOT NULL,job_json TEXT NOT NULL,job_hash TEXT NOT NULL,
+        package_json TEXT NOT NULL,package_hash TEXT NOT NULL,artifacts_json TEXT,artifacts_hash TEXT,
+        UNIQUE(principal_id,idempotency_key)
+      );
+      CREATE TABLE fork_job_history(
+        operation_id TEXT NOT NULL REFERENCES fork_jobs(operation_id) ON DELETE RESTRICT,
+        revision INTEGER NOT NULL CHECK(revision>=0),payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        PRIMARY KEY(operation_id,revision)
+      );
+      CREATE TABLE fork_projection_receipts(
+        operation_id TEXT NOT NULL REFERENCES fork_jobs(operation_id) ON DELETE RESTRICT,
+        experience_id TEXT NOT NULL,actor_id TEXT NOT NULL,memory_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL,
+        PRIMARY KEY(operation_id,experience_id),UNIQUE(operation_id,actor_id,memory_id)
+      );
+      CREATE TABLE fork_dramatic_seeds(
+        run_id TEXT PRIMARY KEY REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL
+      );
+      INSERT INTO schema_version VALUES(35);COMMIT;
+    `); } catch(error) {try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
+  }
+
   const pendingInitialActorCuts = new Set<string>();
   const ActorStateCutManifestSchema = z.strictObject({
     source: ActorStateCutSchema.shape.source,
@@ -1983,17 +2016,12 @@ export function openJournal(input: { path: string }) {
     runId:RunIdSchema,commitIndex:RevisionSchema,worldRevision:RevisionSchema,worldSeq:WorldSeqSchema,
   });
   const ForkSourceReadResultSchema = z.discriminatedUnion('kind',[
-    z.strictObject({kind:z.literal('found'),snapshot:WorldSnapshotSchema,configuration:ReadyRunConfigurationSchema,cuts:z.array(ActorStateCutSchema)}),
+    z.strictObject({kind:z.literal('found'),snapshot:WorldSnapshotSchema,configuration:ReadyRunConfigurationSchema,cuts:z.array(ActorStateCutSchema),structure:DramaticStructureViewSchema}),
     z.strictObject({kind:z.literal('missing')}),
     z.strictObject({kind:z.literal('unavailable'),reason:z.enum(['invalid-cut','checkpoint-not-recorded','configuration-not-ready'])}),
   ]);
 
-  /** Host-only, coherent historical source. Never reconstructs private state from current memory. */
-  function readForkSource(input: unknown): z.infer<typeof ForkSourceReadResultSchema> {
-    const request = ForkSourceRequestSchema.parse(input);
-    database.exec('BEGIN');
-    try {
-      const read = (): z.infer<typeof ForkSourceReadResultSchema> => {
+  function readForkSourceWithinTransaction(request:z.infer<typeof ForkSourceRequestSchema>):z.infer<typeof ForkSourceReadResultSchema> {
         const value = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         if (value === undefined) return {kind:'missing'};
         const run = parseWorldRun(value);
@@ -2019,16 +2047,157 @@ export function openJournal(input: { path: string }) {
           if (result.kind !== 'found') return {kind:'unavailable',reason:result.kind==='unavailable' && result.reason==='checkpoint-not-recorded' ? 'checkpoint-not-recorded' : 'invalid-cut'};
           cuts.push(result.cut);
         }
-        return {kind:'found',snapshot:exact.snapshot,configuration:configuration.data,cuts};
-      };
-      const result = read();
-      database.exec('COMMIT');
-      return result;
-    } catch {
-      try { database.exec('ROLLBACK'); } catch { /* A read failure must never publish a partial source. */ }
-      return {kind:'unavailable',reason:'invalid-cut'};
-    }
+        const dramatic = readDramaticStructureAtCut(run,request.worldRevision,request.worldSeq);
+        if (dramatic === undefined || dramatic.commitIndex !== request.commitIndex) return {kind:'unavailable',reason:'invalid-cut'};
+        return {kind:'found',snapshot:exact.snapshot,configuration:configuration.data,cuts,structure:dramatic.structure};
   }
+
+  /** Host-only coherent read. No mutable memory or external ICM reads. */
+  function readForkSource(input: unknown): z.infer<typeof ForkSourceReadResultSchema> {
+    const request=ForkSourceRequestSchema.parse(input);database.exec('BEGIN');
+    try {const result=readForkSourceWithinTransaction(request);database.exec('COMMIT');return result;}
+    catch {try{database.exec('ROLLBACK');}catch{/* Read transaction only. */}return {kind:'unavailable',reason:'invalid-cut'};}
+  }
+
+  const ForkJobLookupSchema=z.strictObject({operationId:z.string().uuid(),principalId:z.string().trim().min(1).max(200)});
+  function deriveForkAudio(packet:z.infer<typeof ForkPublicationPackageSchema>):z.infer<typeof ForkJobSchema>['audioDerivation'] {
+    const audio=packet.configuration.audio;
+    return {kind:'initial-ready-configuration',sourceConfigurationHash:packet.state.source.configurationHash,effectiveHistory:'not-reconstructed',
+      bindingState:[...audio.speakerSlots.map(item=>item.slot),audio.narratorSlot,...audio.soundEffectSlots.map(item=>item.slot)].some(slot=>slot.kind==='enabled-unbound')?'unbound':'not-required'};
+  }
+  function forkJobRecord(request:z.infer<typeof ForkJobLookupSchema>) {
+    const value=database.prepare('SELECT * FROM fork_jobs WHERE operation_id=? AND principal_id=?').get(request.operationId,request.principalId);
+    if(value===undefined)return undefined;
+    const row=z.strictObject({operation_id:z.string().uuid(),principal_id:z.string(),idempotency_key:z.string().uuid(),target_run_id:RunIdSchema,
+      state:z.enum(['staging','ready','failed']),request_hash:HashSchema,job_json:z.string(),job_hash:HashSchema,
+      package_json:z.string(),package_hash:HashSchema,artifacts_json:z.string().nullable(),artifacts_hash:HashSchema.nullable()}).parse(value);
+    const job=ForkJobSchema.parse(parseStoredJson(row.job_json));const packet=ForkPublicationPackageSchema.parse(parseStoredJson(row.package_json));
+    if(canonicalJson(job)!==row.job_json||sha256(row.job_json)!==row.job_hash||canonicalJson(packet)!==row.package_json||sha256(row.package_json)!==row.package_hash
+      ||job.operationId!==row.operation_id||job.principalId!==row.principal_id||job.idempotencyKey!==row.idempotency_key||job.targetRunId!==row.target_run_id
+      ||hashJson({source:job.source,name:job.name,reason:job.reason}).hash!==row.request_hash
+      ||canonicalJson(job.audioDerivation)!==canonicalJson(deriveForkAudio(packet))
+      ||job.state!==row.state||packet.state.targetRunId!==job.targetRunId||canonicalJson(job.source)!==canonicalJson(packet.state.source))throw new Error('Job de fork alterado');
+    const history=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(database.prepare('SELECT payload_json,payload_hash FROM fork_job_history WHERE operation_id=? AND revision=?').get(job.operationId,job.revision));
+    if(history.payload_json!==row.job_json||history.payload_hash!==row.job_hash)throw new Error('Historia de fork inconsistente');
+    if(row.artifacts_json!==null){const manifest=ForkArtifactManifestSchema.parse(parseStoredJson(row.artifacts_json));if(canonicalJson(manifest)!==row.artifacts_json||sha256(row.artifacts_json)!==row.artifacts_hash||manifest.packageHash!==row.package_hash||manifest.operationId!==job.operationId||manifest.targetRunId!==job.targetRunId)throw new Error('Manifiesto de fork alterado');}
+    else if(row.artifacts_hash!==null||job.state==='ready')throw new Error('Fork Ready sin manifiesto');
+    return {row,job,packet};
+  }
+  function appendForkJob(job:z.infer<typeof ForkJobSchema>){const payload=hashJson(job);
+    database.prepare('UPDATE fork_jobs SET state=?,job_json=?,job_hash=? WHERE operation_id=?').run(job.state,payload.json,payload.hash,job.operationId);
+    database.prepare('INSERT INTO fork_job_history VALUES(?,?,?,?)').run(job.operationId,job.revision,payload.json,payload.hash);return job;
+  }
+  function validateForkPackageSource(packet:z.infer<typeof ForkPublicationPackageSchema>,identity:{operationId:string;principalId:string;name:string}){
+    const source=readForkSourceWithinTransaction({runId:packet.state.source.runId,commitIndex:packet.state.source.commitIndex,worldRevision:packet.state.source.worldRevision,worldSeq:packet.state.source.worldSeq});
+    if(source.kind!=='found')throw new Error('Fuente exacta de fork no disponible');
+    const restored=prepareForkState({snapshot:source.snapshot,configuration:source.configuration,cuts:source.cuts,targetRunId:packet.state.targetRunId,restoredIdentities:packet.state.identities});
+    const dramatic=prepareForkDramaticSeed({structure:source.structure,state:restored});
+    if(canonicalJson(dramatic.state)!==canonicalJson(packet.state)||canonicalJson(dramatic.seed)!==canonicalJson(packet.dramaticSeed))throw new Error('Estado derivado no coincide con la fuente');
+    const origin=packet.configuration.forkOrigin;if(origin===undefined||origin.operationId!==identity.operationId||origin.principalId!==identity.principalId)throw new Error('Procedencia de fork ajena');
+    const rebuilt=prepareForkConfiguration({sourceConfiguration:source.configuration,state:packet.state,name:identity.name,principalId:identity.principalId,operationId:identity.operationId,recordedAt:origin.recordedAt});
+    if(validateReadyConfiguration(packet.configuration).length!==0)throw new Error('Configuración derivada no está completa');
+    if(canonicalJson(rebuilt.configuration)!==canonicalJson(packet.configuration)||canonicalJson(rebuilt.continuityFence)!==canonicalJson(packet.continuityFence))throw new Error('Configuración de fork no deriva de la fuente');
+  }
+  function beginForkJob(input:unknown){
+    const request=z.strictObject({...ForkJobLookupSchema.shape,idempotencyKey:z.string().uuid(),name:z.string().trim().min(1).max(120),reason:z.string().trim().min(1).max(4000),package:ForkPublicationPackageSchema}).parse(input);
+    const requestHash=hashJson({source:request.package.state.source,name:request.name,reason:request.reason}).hash;
+    return transact(()=>{
+      const existing=database.prepare('SELECT operation_id,principal_id,request_hash FROM fork_jobs WHERE (principal_id=? AND idempotency_key=?) OR operation_id=?').all(request.principalId,request.idempotencyKey,request.operationId);
+      if(existing.length!==0){
+        if(existing.length!==1)return {kind:'idempotencyConflict' as const};
+        const prior=z.strictObject({operation_id:z.string().uuid(),principal_id:z.string(),request_hash:HashSchema}).parse(existing[0]);
+        if(prior.principal_id!==request.principalId||prior.request_hash!==requestHash)return {kind:'idempotencyConflict' as const};
+        const record=forkJobRecord({operationId:prior.operation_id,principalId:prior.principal_id});if(record===undefined)throw new Error('Fork existente desapareció');
+        if(record.job.operationId!==request.operationId||record.job.idempotencyKey!==request.idempotencyKey)return {kind:'idempotencyConflict' as const};
+        return {kind:'existing' as const,job:record.job};
+      }
+      const conflicting=['run_draft_operations','pi_oauth_job_operations','pi_access_job_operations','run_preflight_job_operations','run_control_operations','structure_operations'].some(table=>database.prepare(`SELECT 1 FROM ${table} WHERE principal_id=? AND idempotency_key=?`).get(request.principalId,request.idempotencyKey)!==undefined);
+      if(conflicting)return {kind:'idempotencyConflict' as const};
+      validateForkPackageSource(request.package,request);
+      if(database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(request.package.state.targetRunId)!==undefined||database.prepare('SELECT 1 FROM run_configuration_drafts WHERE run_id=?').get(request.package.state.targetRunId)!==undefined)throw new Error('Destino de fork existente');
+      const now=Date.now();const job=ForkJobSchema.parse({operationId:request.operationId,principalId:request.principalId,idempotencyKey:request.idempotencyKey,targetRunId:request.package.state.targetRunId,
+        source:request.package.state.source,name:request.name,reason:request.reason,
+        audioDerivation:deriveForkAudio(request.package),state:'staging',revision:0,createdAt:now,updatedAt:now});
+      const payload=hashJson(job);const packet=hashJson(request.package);
+      database.prepare('INSERT INTO fork_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(job.operationId,job.principalId,job.idempotencyKey,job.targetRunId,job.state,requestHash,payload.json,payload.hash,packet.json,packet.hash,null,null);
+      database.prepare('INSERT INTO fork_job_history VALUES(?,?,?,?)').run(job.operationId,job.revision,payload.json,payload.hash);
+      return {kind:'created' as const,job};
+    });
+  }
+  function readForkJob(input:unknown){return forkJobRecord(ForkJobLookupSchema.parse(input))?.job;}
+  function findForkJob(input:unknown){const request=z.strictObject({principalId:ForkJobLookupSchema.shape.principalId,idempotencyKey:z.string().uuid()}).parse(input);
+    const row=database.prepare('SELECT operation_id FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(request.principalId,request.idempotencyKey);
+    return row===undefined?undefined:readForkJob({principalId:request.principalId,operationId:z.object({operation_id:z.string().uuid()}).parse(row).operation_id});
+  }
+  function readForkPackage(input:unknown){return forkJobRecord(ForkJobLookupSchema.parse(input))?.packet;}
+  function listStagingForkJobs(){return database.prepare("SELECT operation_id,principal_id FROM fork_jobs WHERE state='staging' ORDER BY operation_id").all().map(value=>{
+    const row=z.strictObject({operation_id:z.string().uuid(),principal_id:z.string()}).parse(value);const record=forkJobRecord({operationId:row.operation_id,principalId:row.principal_id});if(record===undefined)throw new Error('Fork staging desapareció');return record.job;
+  });}
+  function frozenForkExperience(record:NonNullable<ReturnType<typeof forkJobRecord>>,receipt:z.infer<typeof MemoryProjectionReceiptSchema>){
+    const frozen=record.packet.state.actors.find(actor=>actor.actorId===receipt.actorId)?.experiences.find(item=>item.envelope.experienceId===receipt.experienceId);
+    if(frozen===undefined||receipt.runId!==record.job.targetRunId||receipt.worldSeq!==frozen.envelope.worldSeq||receipt.canonicalPayload!==frozen.canonicalPayload||receipt.payloadHash!==frozen.payloadHash)throw new Error('Receipt ICM de fork ajeno o alterado');
+    const verified=freezeExperience(frozen.envelope);if(canonicalJson(verified)!==canonicalJson(frozen))throw new Error('Experiencia staged alterada');return frozen;
+  }
+  function forkProjectionReceipts(record:NonNullable<ReturnType<typeof forkJobRecord>>){return database.prepare('SELECT payload_json,payload_hash,experience_id,actor_id,memory_id FROM fork_projection_receipts WHERE operation_id=? ORDER BY actor_id,experience_id').all(record.job.operationId).map(value=>{
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema,experience_id:ExperienceIdSchema,actor_id:CharacterIdSchema,memory_id:IcmMemoryIdSchema}).parse(value);
+    const receipt=MemoryProjectionReceiptSchema.parse(parseStoredJson(row.payload_json));
+    if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(receipt)!==row.payload_json||receipt.experienceId!==row.experience_id||receipt.actorId!==row.actor_id||receipt.memoryId!==row.memory_id)throw new Error('Receipt staged de fork alterado');
+    frozenForkExperience(record,receipt);return receipt;
+  });}
+  function recordForkProjection(input:unknown){const request=z.strictObject({...ForkJobLookupSchema.shape,receipt:MemoryProjectionReceiptSchema}).parse(input);return transact(()=>{
+    const record=forkJobRecord(request);if(record===undefined)throw new Error('Fork ausente');frozenForkExperience(record,request.receipt);
+    const prior=forkProjectionReceipts(record).find(receipt=>receipt.experienceId===request.receipt.experienceId);
+    if(prior!==undefined){if(canonicalJson(prior)!==canonicalJson(request.receipt))throw new Error('Receipt fork no admite sustitución');return prior;}
+    if(record.job.state!=='staging')throw new Error('Fork no está en staging');const payload=hashJson(request.receipt);
+    database.prepare('INSERT INTO fork_projection_receipts VALUES(?,?,?,?,?,?)').run(record.job.operationId,request.receipt.experienceId,request.receipt.actorId,request.receipt.memoryId,payload.json,payload.hash);return request.receipt;
+  });}
+  function readForkProjectionReceipts(input:unknown){const record=forkJobRecord(ForkJobLookupSchema.parse(input));return record===undefined?[]:forkProjectionReceipts(record);}
+  function readForkProjectionReceipt(input:unknown){const request=z.strictObject({operationId:z.string().uuid(),memoryId:IcmMemoryIdSchema,runId:RunIdSchema,actorId:CharacterIdSchema,throughWorldSeq:WorldSeqSchema}).parse(input);
+    const row=database.prepare('SELECT principal_id FROM fork_jobs WHERE operation_id=?').get(request.operationId);if(row===undefined)return undefined;
+    const record=forkJobRecord({operationId:request.operationId,principalId:z.object({principal_id:z.string()}).parse(row).principal_id});if(record===undefined||record.job.targetRunId!==request.runId)return undefined;
+    return forkProjectionReceipts(record).find(receipt=>receipt.memoryId===request.memoryId&&receipt.runId===request.runId&&receipt.actorId===request.actorId&&receipt.worldSeq<=request.throughWorldSeq);
+  }
+  function failForkJob(input:unknown){const request=z.strictObject({...ForkJobLookupSchema.shape,expectedRevision:RevisionSchema,code:ForkJobFailureCodeSchema}).parse(input);return transact(()=>{
+    const record=forkJobRecord(request);if(record===undefined)return undefined;if(record.job.state!=='staging')return record.job;if(record.job.revision!==request.expectedRevision)throw new Error('CAS de fork obsoleto');
+    return appendForkJob(ForkJobSchema.parse({...record.job,state:'failed',code:request.code,revision:record.job.revision+1,updatedAt:Date.now()}));
+  });}
+  function retryForkJob(input:unknown){const request=z.strictObject({...ForkJobLookupSchema.shape,expectedRevision:RevisionSchema}).parse(input);return transact(()=>{
+    const record=forkJobRecord(request);if(record===undefined)return undefined;if(record.job.state!=='failed')return record.job;if(record.job.revision!==request.expectedRevision)throw new Error('CAS de fork obsoleto');
+    const {code,...previous}=record.job;void code;return appendForkJob(ForkJobSchema.parse({...previous,state:'staging',revision:record.job.revision+1,updatedAt:Date.now()}));
+  });}
+  function publishForkJob(input:unknown){const request=z.strictObject({...ForkJobLookupSchema.shape,expectedRevision:RevisionSchema,artifacts:ForkArtifactManifestSchema}).parse(input);return transact(()=>{
+    const record=forkJobRecord(request);if(record===undefined)throw new Error('Fork ausente');if(record.job.state==='ready')return record.job;
+    if(record.job.state!=='staging'||record.job.revision!==request.expectedRevision)throw new Error('CAS de fork no publicable');
+    const {packet,job}=record;validateForkPackageSource(packet,job);const manifest=request.artifacts;
+    const expectedActors=packet.state.actors.map(actor=>actor.actorId).sort();
+    if(manifest.operationId!==job.operationId||manifest.targetRunId!==job.targetRunId||manifest.packageHash!==record.row.package_hash
+      ||canonicalJson(manifest.actors.map(actor=>actor.actorId).sort())!==canonicalJson(expectedActors))throw new Error('Manifiesto de artefactos incompleto o ajeno');
+    const receipts=forkProjectionReceipts(record);const expectedExperiences=packet.state.actors.flatMap(actor=>actor.experiences);
+    if(receipts.length!==expectedExperiences.length||expectedExperiences.some(frozen=>!receipts.some(receipt=>receipt.experienceId===frozen.envelope.experienceId&&receipt.actorId===frozen.envelope.actorId&&receipt.runId===frozen.envelope.runId&&receipt.payloadHash===frozen.payloadHash&&receipt.canonicalPayload===frozen.canonicalPayload)))throw new Error('Proyección ICM incompleta');
+    if(database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(job.targetRunId)!==undefined||database.prepare('SELECT 1 FROM run_configuration_drafts WHERE run_id=?').get(job.targetRunId)!==undefined)throw new Error('Destino de fork existente');
+    registerWorldRunWithinTransaction({initialSnapshot:packet.state.snapshot,configurationRevision:packet.configuration.configRevision,
+      configuration:packet.configuration,continuityFence:packet.continuityFence,lifecycle:'ready'},false,true);
+    for(const actor of packet.state.actors){
+      if(actor.knowledge.kind==='recorded'){const payload=hashJson(actor.knowledge.value);database.prepare('INSERT INTO actor_knowledge VALUES(?,?,?,?,?,?)').run(job.targetRunId,actor.actorId,actor.knowledge.revision,actor.knowledge.atWorldSeq,payload.json,payload.hash);}
+      for(const frozen of actor.experiences){recordExperienceWithinTransaction(frozen);const receipt=receipts.find(item=>item.experienceId===frozen.envelope.experienceId);if(receipt===undefined)throw new Error('Receipt ICM desapareció');
+        database.prepare("INSERT INTO memory_receipts(experience_id,memory_id,claim_token,state,recorded_at) VALUES(?,?,?,'projected',?)").run(receipt.experienceId,receipt.memoryId,randomUUID(),Date.now());
+        database.prepare('DELETE FROM memory_outbox WHERE experience_id=?').run(receipt.experienceId);
+      }
+    }
+    const seedPayload=hashJson(packet.dramaticSeed);database.prepare('INSERT INTO fork_dramatic_seeds VALUES(?,?,?)').run(job.targetRunId,seedPayload.json,seedPayload.hash);
+    for(const episode of packet.dramaticSeed.structure.episodes){const opening=hashJson(episode.openingCut);const closing=episode.closingCut===null?undefined:hashJson(episode.closingCut);
+      database.prepare('INSERT INTO episodes VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(job.targetRunId,episode.episodeId,episode.ordinal,episode.title,episode.lifecycle,opening.json,opening.hash,closing?.json??null,closing?.hash??null,canonicalJson(episode.consequenceEventIds),canonicalJson(episode.openLines));
+      episode.sceneIds.forEach((sceneId,index)=>database.prepare('INSERT INTO episode_scenes VALUES(?,?,?,?)').run(job.targetRunId,episode.episodeId,sceneId,index+1));
+      for(const act of episode.acts){database.prepare('INSERT INTO acts VALUES(?,?,?,?,?)').run(job.targetRunId,episode.episodeId,act.actId,act.ordinal,act.title);act.sceneIds.forEach((sceneId,index)=>database.prepare('INSERT INTO act_scenes VALUES(?,?,?,?,?)').run(job.targetRunId,episode.episodeId,act.actId,sceneId,index+1));}
+    }
+    const recordedAt=new Date().toISOString();const evidence={kind:'operator-choice',operatorId:job.principalId,recordedAt};
+    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+    const configured=Object.fromEntries(fields.flatMap(field=>packet.configuration[field]===undefined?[]:[[field,{kind:'configured',value:packet.configuration[field],evidence:field==='name'?evidence:{kind:'host-derived',derivationRef:`fork:${job.operationId}`,recordedAt}}]]));
+    const draft=RunConfigurationDraftSchema.parse({...createEmptyRunConfigurationDraft({runId:job.targetRunId,revision:0}),...configured});
+    database.prepare('INSERT INTO run_configuration_drafts VALUES(?,?,?,?)').run(job.targetRunId,0,recordedAt,recordedAt);appendRunDraftHistory({draft,principalId:job.principalId,recordedAt});
+    const artifacts=hashJson(manifest);database.prepare('UPDATE fork_jobs SET artifacts_json=?,artifacts_hash=? WHERE operation_id=?').run(artifacts.json,artifacts.hash,job.operationId);
+    return appendForkJob(ForkJobSchema.parse({...job,state:'ready',revision:job.revision+1,updatedAt:Date.now(),publishedAt:Date.now()}));
+  });}
 
   function transact<T>(operation: () => T): T {
     database.exec('BEGIN IMMEDIATE');
@@ -2115,7 +2284,8 @@ export function openJournal(input: { path: string }) {
     if(changed.changes!==1)throw new Error('CAS OAuth cambió en transacción');database.prepare('INSERT INTO pi_oauth_job_history VALUES(?,?,?,?)').run(job.jobId,job.revision,payload.json,payload.hash);return job;
   }
   function replayPiOAuthOperation(input:{principalId:string;idempotencyKey:string;kind:'login'|'logout'|'cancel';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_control_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined)return {kind:'idempotencyConflict'} satisfies {kind:'idempotencyConflict'};
@@ -2178,7 +2348,8 @@ export function openJournal(input: { path: string }) {
     return job;
   }
   function replayPiAccessOperation(input:{principalId:string;idempotencyKey:string;kind:'start'|'cancel';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_control_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined)return {kind:'idempotencyConflict'} satisfies {kind:'idempotencyConflict'};
@@ -2256,7 +2427,8 @@ export function openJournal(input: { path: string }) {
     return job;
   }
   function replayRunPreflightOperation(input:{principalId:string;idempotencyKey:string;kind:'start'|'cancel';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_control_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined)
@@ -2311,7 +2483,8 @@ export function openJournal(input: { path: string }) {
   }
 
   function replayRunDraftOperation(input:{principalId:string;idempotencyKey:string;kind:'create'|'update'|'validate';requestHash:string}){
-    if(database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+    if(database.prepare('SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
+      ||database.prepare('SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined
       ||database.prepare('SELECT 1 FROM run_control_operations WHERE principal_id=? AND idempotency_key=?').get(input.principalId,input.idempotencyKey)!==undefined)return RunDraftMutationResultSchema.parse({kind:'idempotencyConflict'});
@@ -3947,15 +4120,17 @@ export function openJournal(input: { path: string }) {
 
   }
 
-  function registerWorldRunWithinTransaction(input:unknown,replaceEditable=false):'stored'|'existing' {
+  function registerWorldRunWithinTransaction(input:unknown,replaceEditable=false,forkImport=false):'stored'|'existing' {
       const registration = WorldRunRegistrationSchema.parse(input);
       const snapshot = WorldSnapshotSchema.parse(registration.initialSnapshot);
       const fence = WorldContinuityFenceSchema.parse(registration.continuityFence);
       if (fence.atWorldSeq !== snapshot.seq) throw new Error('El continuity fence debe corresponder al corte inicial');
       const scene = snapshot.scenes.find((item) => item.id === snapshot.activeSceneId);
-      if (scene === undefined) throw new Error('El escenario inicial no tiene escena activa');
+      if (scene === undefined && !forkImport) throw new Error('El escenario inicial no tiene escena activa');
+      if(!forkImport&&ReadyRunConfigurationSchema.safeParse(registration.configuration).data?.forkOrigin!==undefined)throw new Error('Origen derivado requiere publicación de fork');
+      if(forkImport && (registration.lifecycle!=='ready'||!ReadyRunConfigurationSchema.parse(registration.configuration).forkOrigin))throw new Error('Importación requiere configuración derivada Ready');
       const preparedActors = snapshot.entities.flatMap((entity) => entity.kind === 'character'
-        && entity.preparation.kind === 'prepared' && scene.participantIds.includes(entity.characterId)
+        && entity.preparation.kind === 'prepared' && (forkImport || scene?.participantIds.includes(entity.characterId))
         ? [{ actorId: entity.characterId, continuityId: entity.preparation.continuityId, identityVersion: entity.preparation.identityVersion }]
         : []);
       if (preparedActors.length !== fence.contexts.length) throw new Error('El continuity fence debe cubrir cada actor preparado de la escena');
@@ -3979,6 +4154,7 @@ export function openJournal(input: { path: string }) {
           if (existing.row.config_revision === registration.configurationRevision
             && existing.row.configuration_hash === configurationHash && existing.row.initial_snapshot_hash === snapshotHash
             && hashJson(existing.fence).json === fenceJson) return 'existing';
+          if(forkImport)throw new Error('El destino de fork ya existe');
           if(!replaceEditable||(existing.row.lifecycle!=='draft'&&existing.row.lifecycle!=='ready'))throw new Error('Run existente requiere una nueva lineage/configuración versionada');
           database.prepare(`UPDATE world_runs SET config_revision=?,configuration_json=?,configuration_hash=?,continuity_fence_json=?,lifecycle='ready',
             world_revision=?,structure_revision=0,last_seq=?,commit_index=0,initial_snapshot_json=?,initial_snapshot_hash=?,snapshot_json=?,snapshot_hash=?,updated_at=? WHERE run_id=? AND lifecycle IN('draft','ready')`)
@@ -4020,6 +4196,7 @@ export function openJournal(input: { path: string }) {
             ) VALUES(?,?,?,?,?,?)
           `).run(snapshot.runId, context.actorId, registration.configurationRevision,
             context.continuityId, context.identityVersion, context.preparedContextHash);
+          if(forkImport)continue;
           const knowledge = emptyActorKnowledge({ runId: snapshot.runId, actorId: context.actorId });
           const knowledgePayload = hashJson(knowledge);
           database.prepare(`
@@ -4118,7 +4295,19 @@ export function openJournal(input: { path: string }) {
     });
   }
 
+  function readForkDramaticSeed(run:ReturnType<typeof parseWorldRun>) {
+    const value=database.prepare('SELECT payload_json,payload_hash FROM fork_dramatic_seeds WHERE run_id=?').get(run.row.run_id);
+    if(value===undefined){if(ReadyRunConfigurationSchema.safeParse(run.configuration).data?.forkOrigin!==undefined)throw new Error('Fork sin base dramática');return undefined;}
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(value);
+    const seed=ForkDramaticSeedSchema.parse(parseStoredJson(row.payload_json));
+    const origin=ReadyRunConfigurationSchema.parse(run.configuration).forkOrigin;
+    if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(seed)!==row.payload_json||seed.structure.runId!==run.row.run_id
+      ||origin===undefined||canonicalJson(origin.source)!==canonicalJson(seed.source))throw new Error('Base dramática alterada');
+    return seed;
+  }
+
   function readDramaticStructureForRun(run: ReturnType<typeof parseWorldRun>) {
+    const seed=readForkDramaticSeed(run);
     const eventRows = database.prepare('SELECT * FROM structure_events WHERE run_id=? ORDER BY structure_revision').all(run.row.run_id);
     const events = eventRows.map(structureEventRow);
     if (events.length !== run.row.structure_revision || (events.at(-1)?.structureRevision ?? 0) !== run.row.structure_revision) {
@@ -4155,6 +4344,7 @@ export function openJournal(input: { path: string }) {
         throw new Error('Consecuencias estructurales de episodio no canónicas');
       }
       return DramaticEpisodeViewSchema.parse({
+        ...(seed?.structure.episodes.find(episode=>episode.episodeId===row.episode_id)?.forkOrigins===undefined?{}:{forkOrigins:seed.structure.episodes.find(episode=>episode.episodeId===row.episode_id)?.forkOrigins}),
         episodeId:row.episode_id,ordinal:row.ordinal,title:row.title,lifecycle:row.lifecycle,
         openingCut,closingCut,consequenceEventIds,openLines,sceneIds:sceneRows,acts,
       });
@@ -4175,7 +4365,8 @@ export function openJournal(input: { path: string }) {
       .all(run.row.run_id,cut.commitIndex);
     const events=rows.map(structureEventRow);
     if(events.some((event,index)=>event.structureRevision!==index+1))throw new Error('El corte estructural no es continuo');
-    const episodes:Array<z.infer<typeof DramaticEpisodeViewSchema>>=[];
+    const seed=readForkDramaticSeed(run);
+    const episodes:Array<z.infer<typeof DramaticEpisodeViewSchema>>=seed===undefined?[]:structuredClone(seed.structure.episodes);
     const findEpisode=(episodeId:string)=>episodes.find((episode)=>episode.episodeId===episodeId);
     for(const event of events){
       const eventCut=DramaticCutSchema.parse({worldRevision:event.worldRevision,worldSeq:event.worldSeq,
@@ -4269,6 +4460,7 @@ export function openJournal(input: { path: string }) {
 
   function structuralOperationCrossExists(principalId:string,idempotencyKey:string) {
     return [
+      'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
       'SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?',
@@ -4436,7 +4628,7 @@ export function openJournal(input: { path: string }) {
       if(run.row.world_revision!==request.expectedWorldRevision||run.row.structure_revision!==request.expectedStructureRevision){
         return record(DramaticStructureMutationResultSchema.parse({kind:'conflict',worldRevision:run.row.world_revision,structureRevision:run.row.structure_revision}));
       }
-      if(!['running','paused','stopped'].includes(run.row.lifecycle))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
+      if(!['running','paused','stopped'].includes(run.row.lifecycle)&&!(run.row.lifecycle==='ready'&&readForkDramaticSeed(run)!==undefined))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
       if(database.prepare("SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND state IN('queued','running','blocked') LIMIT 1").get(request.runId)!==undefined){
         return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'actorJobsActive'}));
       }
@@ -4880,6 +5072,8 @@ export function openJournal(input: { path: string }) {
 
     readActorStateCut,
     readForkSource,
+    beginForkJob,readForkJob,findForkJob,readForkPackage,listStagingForkJobs,
+    recordForkProjection,readForkProjectionReceipt,readForkProjectionReceipts,failForkJob,retryForkJob,publishForkJob,
     registerWorldRun(input:unknown):'stored'|'existing'{return transact(()=>registerWorldRunWithinTransaction(input));},
 
     setWorldLifecycle(input: unknown): 'updated' | 'stale' {
@@ -4916,7 +5110,8 @@ export function openJournal(input: { path: string }) {
       const request = RunLifecycleCommandLookupSchema.parse(input);
       const requestHash = hashJson({ runId: request.runId, command: request.command, preflightJobId: request.preflightJobId ?? null }).hash;
       const crossOperationExists = [
-        'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
+        'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
         'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
         'SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?',
         'SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?',
@@ -4943,7 +5138,8 @@ export function openJournal(input: { path: string }) {
       const requestHash = hashJson({ runId: request.runId, command: request.command, preflightJobId: request.preflightJobId ?? null }).hash;
       return transact(() => {
         const crossOperationExists = [
-          'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
+          'SELECT 1 FROM fork_jobs WHERE principal_id=? AND idempotency_key=?',
+      'SELECT 1 FROM run_draft_operations WHERE principal_id=? AND idempotency_key=?',
           'SELECT 1 FROM pi_oauth_job_operations WHERE principal_id=? AND idempotency_key=?',
           'SELECT 1 FROM pi_access_job_operations WHERE principal_id=? AND idempotency_key=?',
           'SELECT 1 FROM run_preflight_job_operations WHERE principal_id=? AND idempotency_key=?',
@@ -5020,7 +5216,7 @@ export function openJournal(input: { path: string }) {
           }
         }
         const now = Date.now();
-        if(request.command.kind==='start'){
+        if(request.command.kind==='start'&&readForkDramaticSeed(run)===undefined){
           openInitialEpisodeAtStart(run,request.principalId,randomUUID(),now);
           const refreshed=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
           if(refreshed===undefined)throw new Error('Run desapareció al abrir el episodio inicial');
@@ -6438,6 +6634,8 @@ export function openJournal(input: { path: string }) {
         if(entry===undefined)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'missing'})});
         const worldValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         const world=worldValue===undefined?undefined:parseWorldRun(worldValue);
+        if(world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined))
+          return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'fork-published'})});
         if(world!==undefined){const lifecycle=world.row.lifecycle;
           if(lifecycle!=='draft'&&lifecycle!=='ready')return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'invalidLifecycle',lifecycle})});}
         if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
@@ -6464,6 +6662,8 @@ export function openJournal(input: { path: string }) {
         if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
         const worldValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);const world=worldValue===undefined?undefined:parseWorldRun(worldValue);
         if(world!==undefined&&world.row.lifecycle!=='draft'&&world.row.lifecycle!=='ready')return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'invalidLifecycle',lifecycle:world.row.lifecycle})});
+        if(world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined))
+          return recordRunDraftOperation({...operation,recordedAt,result:RunDraftValidationResultSchema.parse({kind:'readonly',reason:'fork-published'})});
         const validated=validateRunConfiguration({draft:entry.draft});
         let result:z.infer<typeof RunDraftValidationResultSchema>;
         if(validated.kind!=='ready')result=RunDraftValidationResultSchema.parse({kind:validated.kind,runId:request.runId,revision:entry.draft.revision,issues:validated.issues});

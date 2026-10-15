@@ -18,6 +18,9 @@ _Evitar_: investigación del corpus como si fuera una representación ya ocurrid
 **Bifurcación**: Nueva representación que parte de un momento confirmado de otra, conserva su procedencia y continúa con historia y memorias independientes. No incorpora información aprendida después del momento elegido.
 _Evitar_: copiar el presente como si fuera el pasado.
 
+**Base dramática heredada**: Episodios, actos y escenas cuyo estado se conserva al bifurcar una representación, distinguiendo lo que ocurrió en el origen de lo que suceda en la nueva obra.
+_Evitar_: tratar aperturas y cierres heredados como acontecimientos nuevos.
+
 **Situación de la representación**: Circunstancias de fecha, lugar, relaciones y condiciones materiales desde las que se desarrolla la acción.
 
 **Identidad**: Continuidad reconocible de valores, disposiciones, contradicciones y formas de relacionarse de un personaje. Puede evolucionar mediante experiencias significativas.

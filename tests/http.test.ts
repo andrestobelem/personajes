@@ -845,3 +845,34 @@ test('el puerto durable valida scope, hash y resultado sin guardar el body recib
     kind: 'found', request, response: { status: 202, body: { kind: 'job-accepted' }, headers: { Location: '/api/v1/jobs/job-id' } },
   }).kind, 'found');
 });
+
+test('HTTP rechaza editar o validar una preparación de fork publicada con conflicto explícito', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'personajes-http-fork-readonly-'));
+  const journal = openJournal({ path: join(directory, 'journal.sqlite') });
+  t.after(() => { journal.close(); rmSync(directory, { recursive: true, force: true }); });
+  // El journal real verifica la guarda de autoridad; aquí se verifica su traducción HTTP.
+  const { origin } = await startServer(t, { runConfigurationDrafts: {
+    ...journal,
+    updateRunConfigurationDraft: () => ({ kind: 'readonly', reason: 'fork-published' }),
+    validateRunConfigurationDraft: () => ({ kind: 'readonly', reason: 'fork-published' }),
+  } });
+  const session = await createSession(origin);
+  const runId = '00000000-0000-4000-8000-000000000503';
+  const configuration = createEmptyRunConfigurationDraft({ runId, revision: 0 });
+  for (const operation of [
+    { method: 'PUT', path: 'configuration', body: { configuration } },
+    { method: 'POST', path: 'validate', body: {} },
+  ]) {
+    const response = await fetch(`${origin}/api/v1/runs/${runId}/${operation.path}`, {
+      method: operation.method,
+      headers: {
+        ...securePrivateHeaders(origin, session.cookie), 'Content-Type': 'application/json',
+        'X-CSRF-Token': session.csrfToken, 'Idempotency-Key': '6dbd18b8-7056-4db2-8a74-890d1a0d0599',
+        'If-Match': `"run-config:${runId}:c0"`,
+      },
+      body: JSON.stringify(operation.body),
+    });
+    assert.equal(response.status, 409, await response.clone().text());
+    assert.equal(problemCode(await response.json()), 'FORK_PREPARATION_READ_ONLY');
+  }
+});

@@ -1,15 +1,13 @@
 import { z } from 'zod';
 import { ActorKnowledgeSchema } from './world-schema.ts';
 import { FrozenExperienceSchema } from './experience.ts';
-import { CharacterIdSchema, HashSchema, RevisionSchema, RunIdSchema, WorldSeqSchema } from './values.ts';
+import { ForkSourceSchema } from './fork-origin.ts';
+import { CharacterIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema } from './values.ts';
 
 /** Private state actually admitted by the end of one durable world transaction. */
 export const ActorStateCutSchema = z.strictObject({
   kind: z.literal('actor-state-cut'),
-  source: z.strictObject({
-    runId: RunIdSchema, commitIndex: RevisionSchema, worldRevision: RevisionSchema, worldSeq: WorldSeqSchema,
-    snapshotHash: HashSchema, configurationRevision: RevisionSchema, configurationHash: HashSchema,
-  }),
+  source: ForkSourceSchema,
   actorId: CharacterIdSchema,
   recordedAt: z.string().datetime({ offset: true }),
   knowledge: z.discriminatedUnion('kind', [

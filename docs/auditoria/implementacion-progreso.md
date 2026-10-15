@@ -395,3 +395,7 @@ El tramo `queued → job durable → Pi → propuesta → Continuista → commit
 ## Corte 44 — fuente exacta y preparación de bifurcación
 
 Implementados lector de fuente exacta de SQLite, remapeo tipado de mundo/conocimiento, registro de identidades restaurable y recuerdos con procedencia. Se verificó proyección a ICM real separado sin modificar origen. [Evidencia y brechas](preparacion-de-bifurcacion.md). TypeScript, build y 737 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux. Falta configuración Ready derivada, job durable, publicación y API/GUI del fork; el objetivo integral y la aceptación de los 77 requisitos siguen activos y pendientes.
+
+## Corte 45 — publicación durable de bifurcaciones
+
+Implementados configuración Ready derivada, semilla dramática con procedencia y job durable v35. El runtime interno prepara SQLite ICM separados, verifica recuerdos y archivos, publica el destino en una transacción final y recupera interrupciones sin duplicar memoria ni alterar la fuente. La preparación heredada rechaza edición y validación ordinarias con conflicto explícito. [Evidencia, revisión y límites](publicacion-de-bifurcaciones.md). TypeScript y build aprobados; **785 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux**. La revisión independiente comprobó las correcciones de idempotencia, autoridad y evidencia. Falta componer este runtime en el launcher, API/GUI del fork y restauración desde backup; los ocho pasos del objetivo y la aceptación integral de los 77 requisitos siguen activos y pendientes.

@@ -61,6 +61,7 @@ export const RunDraftValidationResultSchema = z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('conflict'),currentRevision:RevisionSchema}),
   z.strictObject({kind:z.literal('missing')}),
   z.strictObject({kind:z.literal('invalidLifecycle'),lifecycle:z.enum(['running','paused','stopped','closed'])}),
+  z.strictObject({kind:z.literal('readonly'),reason:z.literal('fork-published')}),
   z.strictObject({kind:z.literal('idempotencyConflict')}),
 ]);
 
@@ -74,6 +75,7 @@ export const RunDraftMutationResultSchema = z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('conflict'),currentRevision:RevisionSchema}),
   z.strictObject({kind:z.literal('missing')}),
   z.strictObject({kind:z.literal('invalidLifecycle'),lifecycle:z.enum(['running','paused','stopped','closed'])}),
+  z.strictObject({kind:z.literal('readonly'),reason:z.literal('fork-published')}),
   z.strictObject({kind:z.literal('idempotencyConflict')}),
 ]);
 

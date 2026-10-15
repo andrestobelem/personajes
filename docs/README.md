@@ -98,3 +98,5 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 - [Cortes privados exactos: implementación y evidencia](auditoria/cortes-privados.md), [ADR 0010](adr/0010-cortes-privados-exactos.md), [entrevista](auditoria/dialogo-cortes-privados.md) y [respuestas](auditoria/cortes-privados-respuestas.md).
 
 - [Preparación de bifurcación: fuente exacta, identidades y recuerdos](auditoria/preparacion-de-bifurcacion.md): transformación interna e ICM separado; publicación durable pendiente.
+
+- [Publicación durable de bifurcaciones](auditoria/publicacion-de-bifurcaciones.md), [ADR 0011](adr/0011-publicacion-de-fork-y-base-dramatica.md), [entrevista](auditoria/dialogo-publicacion-fork.md) y [respuestas](auditoria/publicacion-fork-respuestas.md): núcleo host con recuperación; composición/API/GUI pendientes.

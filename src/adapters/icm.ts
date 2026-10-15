@@ -118,6 +118,8 @@ export interface IcmMemoryAdapter {
   readonly projector: IcmExperienceProjector;
   readonly diagnostics: IcmForensicReader;
   checkHealth(options?: { signal?: AbortSignal }): Promise<{ version: typeof ICM_VERSION }>;
+  /** Host lifecycle only; creates an empty SQLite store without inventing an experience. */
+  initialize(options?: { signal?: AbortSignal }): Promise<{ kind: 'initialized' | 'existing' }>;
 }
 
 export function isIcmAdapterFailure(value: unknown): value is IcmAdapterFailure {
@@ -168,8 +170,12 @@ export async function createIcmMemoryAdapter(input: CreateIcmMemoryAdapterInput)
   let isVersionChecked = false;
   let healthCheck: Promise<{ version: typeof ICM_VERSION }> | undefined;
 
-  const runCli = (args: readonly string[], maxOutputBytes: number, signal?: AbortSignal): Promise<string> =>
-    runBoundedProcess({
+  const runCli = async (args: readonly string[], maxOutputBytes: number, signal?: AbortSignal): Promise<string> => {
+    ensurePrivateDirectory(homeDirectory, privateRoot);
+    ensurePrivateDirectory(tempDirectory, privateRoot);
+    writeControlledConfig(configPath, actorDirectory, privateRoot);
+    validateDatabaseFiles(databasePath, actorDirectory, privateRoot);
+    return runBoundedProcess({
       binaryPath,
       args,
       cwd: actorDirectory,
@@ -178,6 +184,7 @@ export async function createIcmMemoryAdapter(input: CreateIcmMemoryAdapterInput)
       maxOutputBytes,
       ...(signal === undefined ? {} : { signal }),
     });
+  };
 
   const checkHealth = async (options?: { signal?: AbortSignal }): Promise<{ version: typeof ICM_VERSION }> => {
     if (isVersionChecked) return { version: ICM_VERSION };
@@ -196,6 +203,25 @@ export async function createIcmMemoryAdapter(input: CreateIcmMemoryAdapterInput)
     } finally {
       if (healthCheck === current) healthCheck = undefined;
     }
+  };
+
+  const initialize: IcmMemoryAdapter['initialize'] = async (options) => {
+    if (options?.signal?.aborted) throw icmFailure('PROCESS_ABORTED', 'La inicialización ICM fue cancelada antes de iniciar.');
+    await checkHealth(options);
+    if (options?.signal?.aborted) throw icmFailure('PROCESS_ABORTED', 'La inicialización ICM fue cancelada antes de crear la base.');
+    const exists = ensureDatabaseFile(databasePath, actorDirectory, privateRoot, false);
+    // A canceled first initialization can leave the controlled empty placeholder.
+    // Let the supported CLI create its schema on retry, without a synthetic memory.
+    const initialized = exists && lstatSync(databasePath).size > 0;
+    if (!exists) ensureDatabaseFile(databasePath, actorDirectory, privateRoot, true);
+    await runCli([
+      '--db', databasePath,
+      '--no-embeddings',
+      ...(initialized ? ['--read-only'] : []),
+      'stats',
+    ], limits.normalOutputBytes, options?.signal);
+    ensureDatabaseFile(databasePath, actorDirectory, privateRoot, false);
+    return { kind: initialized ? 'existing' : 'initialized' };
   };
 
   const actor: IcmActorMemoryReader = Object.freeze({
@@ -308,6 +334,7 @@ export async function createIcmMemoryAdapter(input: CreateIcmMemoryAdapterInput)
     projector,
     diagnostics,
     checkHealth,
+    initialize,
   });
 }
 
@@ -439,6 +466,7 @@ function topicForExperience(experience: Experience): string {
 }
 
 function writeControlledConfig(configPath: string, actorDirectory: string, privateRoot: string): void {
+  ensurePrivateDirectory(actorDirectory, privateRoot);
   const content = [
     '[store.backup]',
     'enabled = false',
@@ -473,7 +501,7 @@ function writeControlledConfig(configPath: string, actorDirectory: string, priva
       throw icmFailure('CONFIG_INVALID', 'No se pudo reabrir la configuración privada de ICM.');
     }
   }
-  if (status.isSymbolicLink() || !status.isFile()) {
+  if (status.isSymbolicLink() || !status.isFile() || status.nlink !== 1) {
     throw icmFailure('CONFIG_INVALID', 'La configuración ICM debe ser un archivo privado regular.');
   }
   const realConfigPath = realpathSync(configPath);
@@ -493,7 +521,13 @@ function writeControlledConfig(configPath: string, actorDirectory: string, priva
 
 function ensurePrivateRoot(path: string): string {
   try {
+    try {
+      if (lstatSync(path).isSymbolicLink()) throw new Error('linked-root');
+    } catch (error: unknown) {
+      if (nodeErrorCode(error) !== 'ENOENT') throw error;
+    }
     mkdirSync(path, { recursive: true, mode: 0o700 });
+    if (lstatSync(path).isSymbolicLink()) throw new Error('linked-root');
     const root = realpathSync(path);
     if (!lstatSync(root).isDirectory()) throw new Error('not-directory');
     chmodSync(root, 0o700);
@@ -505,26 +539,33 @@ function ensurePrivateRoot(path: string): string {
 
 function ensurePrivateDirectory(path: string, boundary: string): string {
   try {
-    mkdirSync(path, { recursive: true, mode: 0o700 });
-    const canonicalPath = realpathSync(path);
-    if (!isPathInside(boundary, canonicalPath) || !lstatSync(canonicalPath).isDirectory()) {
-      throw new Error('outside-boundary');
+    if (!isPathInside(boundary, path)) throw new Error('outside-boundary');
+    let current = boundary;
+    for (const segment of relative(boundary, path).split(sep).filter(Boolean)) {
+      current = join(current, segment);
+      let status: ReturnType<typeof lstatSync>;
+      try {
+        status = lstatSync(current);
+      } catch (error: unknown) {
+        if (nodeErrorCode(error) !== 'ENOENT') throw error;
+        try { mkdirSync(current, { mode: 0o700 }); }
+        catch (creationError: unknown) { if (nodeErrorCode(creationError) !== 'EEXIST') throw creationError; }
+        status = lstatSync(current);
+      }
+      if (status.isSymbolicLink() || !status.isDirectory() || realpathSync(current) !== current) {
+        throw new Error('linked-directory');
+      }
+      chmodSync(current, 0o700);
     }
-    chmodSync(canonicalPath, 0o700);
-    return canonicalPath;
+    return current;
   } catch {
     throw icmFailure('ACTOR_PATH_INVALID', 'Una ruta privada de ICM salió de la raíz controlada por el host.');
   }
 }
 
 function ensureDatabaseFile(path: string, actorDirectory: string, privateRoot: string, create: boolean): boolean {
-  let status: ReturnType<typeof lstatSync> | undefined;
-  try {
-    status = lstatSync(path);
-  } catch (error: unknown) {
-    if (nodeErrorCode(error) !== 'ENOENT') throw icmFailure('DATABASE_PATH_INVALID', 'No se pudo validar la base SQLite de ICM.');
-  }
-  if (status === undefined) {
+  ensurePrivateDirectory(actorDirectory, privateRoot);
+  if (!validateDatabaseFiles(path, actorDirectory, privateRoot)) {
     if (!create) return false;
     try {
       const descriptor = openSync(path, 'wx', 0o600);
@@ -534,19 +575,34 @@ function ensureDatabaseFile(path: string, actorDirectory: string, privateRoot: s
     }
     return ensureDatabaseFile(path, actorDirectory, privateRoot, false);
   }
-  if (status.isSymbolicLink() || !status.isFile()) {
-    throw icmFailure('DATABASE_PATH_INVALID', 'La base SQLite debe ser un archivo regular, no un symlink.');
-  }
   try {
-    const canonicalPath = realpathSync(path);
-    if (!isPathInside(actorDirectory, canonicalPath) || !isPathInside(privateRoot, canonicalPath)) {
-      throw new Error('outside-boundary');
-    }
-    chmodSync(canonicalPath, 0o600);
+    chmodSync(path, 0o600);
   } catch {
     throw icmFailure('DATABASE_PATH_INVALID', 'La base SQLite salió del ámbito privado de la identidad.');
   }
   return true;
+}
+
+/** Validate the whole SQLite family before any chmod or CLI can touch its files. */
+function validateDatabaseFiles(path: string, actorDirectory: string, privateRoot: string): boolean {
+  let mainExists = false;
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`, `${path}-journal`]) {
+    try {
+      const status = lstatSync(candidate);
+      if (status.isSymbolicLink() || !status.isFile() || status.nlink !== 1) {
+        throw icmFailure('DATABASE_PATH_INVALID', 'SQLite ICM requiere archivos regulares privados sin enlaces compartidos.');
+      }
+      const canonicalPath = realpathSync(candidate);
+      if (!isPathInside(actorDirectory, canonicalPath) || !isPathInside(privateRoot, canonicalPath)) {
+        throw icmFailure('DATABASE_PATH_INVALID', 'Un archivo SQLite ICM sale del ámbito privado de la identidad.');
+      }
+      if (candidate === path) mainExists = true;
+    } catch (error: unknown) {
+      if (isIcmAdapterFailure(error)) throw error;
+      if (nodeErrorCode(error) !== 'ENOENT') throw icmFailure('DATABASE_PATH_INVALID', 'No se pudo validar un archivo SQLite privado de ICM.');
+    }
+  }
+  return mainExists;
 }
 
 function resolveExecutable(path: string): string {

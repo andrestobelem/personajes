@@ -1,0 +1,209 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {test} from 'node:test';
+import {setup,canonical} from './fixtures/continuista.ts';
+import {prepareForkState} from '../src/application/prepare-fork-state.ts';
+import {prepareForkDramaticSeed} from '../src/application/fork-dramatic-seed.ts';
+import {prepareForkConfiguration} from '../src/application/fork-configuration.ts';
+import {ForkPublicationPackageSchema} from '../src/application/fork-package.ts';
+import {hashContinuistaValue} from '../src/domain/continuista-review.ts';
+import {freezeExperience} from '../src/application/experience-envelope.ts';
+import {ReadyRunConfigurationSchema} from '../src/application/production-preflight.ts';
+import {openJournal} from '../src/adapters/journal.ts';
+
+async function fixture(options:{memories?:number;drama?:boolean;empty?:boolean}={}){
+ const f=await setup();let journal=f.journal;let configuration=f.configuration;
+ if((options.memories??1)>1||options.drama||options.empty){
+  journal=openJournal({path:join(f.directory,'fork-source-isolated.sqlite')});
+  configuration=ReadyRunConfigurationSchema.parse({...configuration,worldSnapshot:{...configuration.worldSnapshot,
+    entities:configuration.worldSnapshot.entities.map(actor=>actor.kind==='character'&&actor.mind.experiences.length>0
+      ?{...actor,mind:{...actor.mind,experiences:Array.from({length:options.empty?0:options.memories??1},(_,index)=>freezeExperience({...actor.mind.experiences[0],experienceId:randomUUID(),content:`Recuerdo sintético ${index}.`}).envelope)}}:actor)}});
+  const prepared=configuration.roster.preparedCharacters[0];assert.ok(prepared);
+  journal.registerWorldRun({initialSnapshot:configuration.worldSnapshot,configuration,configurationRevision:configuration.configRevision,lifecycle:'running',continuityFence:{kind:'prepared-contexts',atWorldSeq:configuration.worldSnapshot.seq,contexts:[{actorId:prepared.characterId,continuityId:prepared.continuity.continuityId,continuityRevision:prepared.continuity.revision,continuityContentHash:prepared.continuity.contentHash,identityVersion:prepared.identityVersion,preparedContextHash:hashContinuistaValue(prepared)}]}});
+ }
+ const world=configuration.worldSnapshot;let sourceCommitIndex=0;let sourceRevision:number=world.revision;const episodeId=randomUUID();const nextSceneId=randomUUID();
+ if(options.drama){
+  const apply=(command:unknown)=>{const result=journal.applyDramaticStructureCommand({runId:world.runId,principalId:'fork-test',operationId:randomUUID(),idempotencyKey:randomUUID(),expectedWorldRevision:sourceRevision,expectedStructureRevision:sourceCommitIndex,command});assert.equal(result.kind,'stored');sourceRevision+=1;sourceCommitIndex+=1;};
+  apply({kind:'closeScene',sceneId:world.activeSceneId,reason:'Cerrar escena inicial de prueba.'});
+  apply({kind:'openEpisode',episodeId,title:'Episodio heredado'});
+  apply({kind:'openScene',scene:{id:nextSceneId,label:'Escena del episodio',participantIds:[configuration.roster.activeCharacterIds[0]],placeIds:['sala']}});
+  apply({kind:'setEpisodeActs',episodeId,acts:[{actId:randomUUID(),title:'Acto heredado',sceneIds:[nextSceneId]}]});
+  apply({kind:'closeScene',sceneId:nextSceneId,reason:'Corte entre escenas del episodio abierto.'});
+ }
+ function packet(operationId=randomUUID(),targetRunId=randomUUID()){
+  const source=journal.readForkSource({runId:world.runId,commitIndex:sourceCommitIndex,worldRevision:sourceRevision,worldSeq:world.seq});assert.equal(source.kind,'found');if(source.kind!=='found')assert.fail();
+  const transformed=prepareForkState({snapshot:source.snapshot,configuration:source.configuration,cuts:source.cuts,targetRunId});
+  const {state,seed}=prepareForkDramaticSeed({structure:source.structure,state:transformed});
+  const configuration=prepareForkConfiguration({sourceConfiguration:source.configuration,state,name:'Derivación sintética',principalId:'fork-test',recordedAt:'2026-10-16T00:00:00Z',operationId});
+  return ForkPublicationPackageSchema.parse({kind:'fork-publication-package',state,...configuration,dramaticSeed:seed});
+ }
+ const operationId=randomUUID();const payload=packet(operationId);
+ const request={operationId,principalId:'fork-test',idempotencyKey:randomUUID(),name:'Derivación sintética',reason:'Prueba de bifurcación durable.',package:payload};
+ const lookup={operationId,principalId:request.principalId};
+ const artifacts={kind:'fork-artifacts',operationId,targetRunId:payload.state.targetRunId,packageHash:hashContinuistaValue(payload),actors:payload.state.actors.map(actor=>({actorId:actor.actorId,sha256:'a'.repeat(64),byteLength:1}))};
+ const receipts=payload.state.actors.flatMap(actor=>actor.experiences).map((frozen,index)=>({memoryId:`01ARZ3NDEKTSV4RRFFQ69G5F${String(index).padStart(2,'0')}`,experienceId:frozen.envelope.experienceId,runId:frozen.envelope.runId,actorId:frozen.envelope.actorId,worldSeq:frozen.envelope.worldSeq,canonicalPayload:frozen.canonicalPayload,payloadHash:frozen.payloadHash}));
+ return {...f,journal,configuration,episodeId,nextSceneId,packet,payload,request,lookup,artifacts,receipts,
+  close(){if(journal!==f.journal)journal.close();f.close();},
+  stage(){const result=journal.beginForkJob(request);assert.equal(result.kind,'created');if(result.kind!=='created')assert.fail();return result.job;},
+  project(){for(const receipt of receipts)assert.deepEqual(journal.recordForkProjection({...lookup,receipt}),receipt);},
+  mutate(fn:(db:DatabaseSync)=>void){const db=new DatabaseSync(join(f.directory,(options.memories??1)>1||options.drama||options.empty?'fork-source-isolated.sqlite':'journal.sqlite'));try{fn(db);}finally{db.close();}},
+ };
+}
+
+test('staging permanece invisible y replay conserva primer paquete e identidades, incluso tras reinicio',async()=>{
+ const f=await fixture();try{
+  const job=f.stage();assert.equal(job.state,'staging');assert.equal(f.journal.loadWorld({runId:job.targetRunId}),undefined);
+  assert.deepEqual(f.journal.readForkPackage(f.lookup),f.payload);assert.deepEqual(f.journal.findForkJob({principalId:f.request.principalId,idempotencyKey:f.request.idempotencyKey}),job);
+  const replacement=f.packet(f.request.operationId);const replay=f.journal.beginForkJob({...f.request,package:replacement});
+  assert.deepEqual(replay,{kind:'existing',job});assert.deepEqual(f.journal.readForkPackage(f.lookup),f.payload);
+  const otherOperation=randomUUID();assert.deepEqual(f.journal.beginForkJob({...f.request,operationId:otherOperation,package:f.packet(otherOperation)}),{kind:'idempotencyConflict'});
+  assert.deepEqual(f.journal.beginForkJob({...f.request,reason:'Otro motivo'}),{kind:'idempotencyConflict'});
+  assert.equal(f.journal.readForkJob({...f.lookup,principalId:'otro-operador'}),undefined);
+  const reopened=openJournal({path:join(f.directory,'journal.sqlite')});try{assert.deepEqual(reopened.readForkJob(f.lookup),job);assert.deepEqual(reopened.listStagingForkJobs(),[job]);}finally{reopened.close();}
+ }finally{f.close();}
+});
+
+test('receipts staged exigen scope y payload exactos y no adelantan revisión del job',async()=>{
+ const f=await fixture();try{
+  const job=f.stage();const receipt=f.receipts[0];assert.ok(receipt);
+  assert.throws(()=>f.journal.recordForkProjection({...f.lookup,receipt:{...receipt,runId:randomUUID()}}),/ajeno/);
+  f.project();assert.deepEqual(f.journal.readForkJob(f.lookup),job);assert.deepEqual(f.journal.readForkProjectionReceipts(f.lookup),f.receipts);
+  assert.deepEqual(f.journal.recordForkProjection({...f.lookup,receipt}),receipt);
+  assert.throws(()=>f.journal.recordForkProjection({...f.lookup,receipt:{...receipt,memoryId:'01ARZ3NDEKTSV4RRFFQ69G5FZZ'}}),/sustitución/);
+  assert.deepEqual(f.journal.readForkProjectionReceipt({operationId:job.operationId,memoryId:receipt.memoryId,runId:receipt.runId,actorId:receipt.actorId,throughWorldSeq:receipt.worldSeq}),receipt);
+  assert.equal(f.journal.readForkProjectionReceipt({operationId:job.operationId,memoryId:receipt.memoryId,runId:randomUUID(),actorId:receipt.actorId,throughWorldSeq:receipt.worldSeq}),undefined);
+ }finally{f.close();}
+});
+
+test('fallo y retry conservan paquete, IDs y proyecciones aceptadas sin publicar target',async()=>{
+ const f=await fixture();try{
+  const staged=f.stage();f.project();const failed=f.journal.failForkJob({...f.lookup,expectedRevision:staged.revision,code:'FORK_INTERRUPTED'});assert.equal(failed?.state,'failed');assert.equal(f.journal.loadWorld({runId:staged.targetRunId}),undefined);
+  assert.deepEqual(f.journal.listStagingForkJobs(),[]);const retried=f.journal.retryForkJob({...f.lookup,expectedRevision:failed?.revision});assert.equal(retried?.state,'staging');assert.equal(retried?.targetRunId,staged.targetRunId);assert.equal(retried?.revision,2);
+  assert.deepEqual(f.journal.readForkPackage(f.lookup),f.payload);assert.deepEqual(f.journal.readForkProjectionReceipts(f.lookup),f.receipts);
+ }finally{f.close();}
+});
+
+test('publicación exige todos los artefactos y todos los receipts y preserva estado privado sin heredar ejecución',async()=>{
+ const f=await fixture();try{
+  const staged=f.stage();assert.throws(()=>f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts}),/ICM incompleta/);
+  f.project();assert.throws(()=>f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:{...f.artifacts,actors:f.artifacts.actors.slice(1)}}),/artefactos/);
+  const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});assert.equal(ready.state,'ready');
+  assert.deepEqual(f.journal.loadWorld({runId:ready.targetRunId}),f.payload.state.snapshot);
+  assert.equal(f.journal.readWorldLifecycle({runId:ready.targetRunId})?.lifecycle,'ready');
+  assert.equal(f.journal.listRunConfigurationDrafts({}).some(draft=>draft.runId===ready.targetRunId),true);
+  for(const actor of f.payload.state.actors){const cut=f.journal.readActorStateCut({runId:ready.targetRunId,actorId:actor.actorId,commitIndex:0,worldRevision:0,worldSeq:f.payload.state.snapshot.seq});assert.equal(cut.kind,'found');if(cut.kind==='found'){assert.deepEqual(cut.cut.experiences,actor.experiences);assert.deepEqual(cut.cut.knowledge,actor.knowledge);}}
+  assert.deepEqual(f.journal.readDramaticStructure({runId:ready.targetRunId}),f.payload.dramaticSeed.structure);
+  assert.deepEqual(f.journal.readDramaticStructureAtCut({runId:ready.targetRunId,worldRevision:0,worldSeq:f.payload.state.snapshot.seq})?.structure,f.payload.dramaticSeed.structure);
+  f.mutate(db=>{for(const table of ['world_events','world_commits','structure_events','world_perceptions','actor_turn_jobs','actor_pi_sessions','request_reservations'])assert.equal(db.prepare(`SELECT COUNT(*) count FROM ${table} WHERE run_id=?`).get(ready.targetRunId)?.count,0);assert.equal(db.prepare('SELECT COUNT(*) count FROM memory_outbox o JOIN experiences e ON e.experience_id=o.experience_id WHERE e.run_id=?').get(ready.targetRunId)?.count,0);assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);});
+  assert.deepEqual(f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts}),ready);
+ }finally{f.close();}
+});
+
+test('fallo de checkpoint inicial revierte publicación entera y deja staging recuperable',async()=>{
+ const f=await fixture();try{
+  const staged=f.stage();f.project();f.mutate(db=>db.exec(`CREATE TRIGGER fail_fork_cut BEFORE INSERT ON actor_state_cut_batches WHEN NEW.run_id='${staged.targetRunId}' BEGIN SELECT RAISE(ABORT,'forced-fork-cut'); END`));
+  assert.throws(()=>f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts}),/forced-fork-cut/);
+  assert.equal(f.journal.loadWorld({runId:staged.targetRunId}),undefined);assert.deepEqual(f.journal.readForkJob(f.lookup),staged);assert.equal(f.journal.readRunConfigurationDraft({runId:staged.targetRunId}),undefined);
+  f.mutate(db=>db.exec('DROP TRIGGER fail_fork_cut'));assert.equal(f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts}).state,'ready');
+ }finally{f.close();}
+});
+
+test('varias memorias se publican con receipts independientes y no comparten claim_token',async()=>{
+ const f=await fixture({memories:3});try{
+  const job=f.stage();assert.equal(f.receipts.length,3);f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:job.revision,artifacts:f.artifacts});assert.equal(ready.state,'ready');
+  f.mutate(db=>assert.equal(db.prepare('SELECT COUNT(DISTINCT r.claim_token) count FROM memory_receipts r JOIN experiences e ON e.experience_id=r.experience_id WHERE e.run_id=?').get(job.targetRunId)?.count,3));
+ }finally{f.close();}
+});
+
+test('publicación entre escenas hereda episodio y actos y permite edición explícita sin inventar aperturas',async()=>{
+ const f=await fixture({drama:true});try{
+  const job=f.stage();f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:job.revision,artifacts:f.artifacts});assert.equal(ready.state,'ready');
+  const inherited=f.journal.readDramaticStructure({runId:job.targetRunId});assert.ok(inherited);assert.equal(inherited.activeSceneId,null);assert.equal(inherited.episodes[0]?.acts[0]?.title,'Acto heredado');assert.equal(inherited.episodes[0]?.forkOrigins?.[0]?.episodeId,f.episodeId);
+  assert.deepEqual(f.journal.readDramaticStructureAtCut({runId:job.targetRunId,worldRevision:0,worldSeq:f.payload.state.snapshot.seq})?.structure,inherited);
+  const sceneId=randomUUID();const opened=f.journal.applyDramaticStructureCommand({runId:job.targetRunId,principalId:'fork-test',operationId:randomUUID(),idempotencyKey:randomUUID(),expectedWorldRevision:0,expectedStructureRevision:0,
+    command:{kind:'openScene',scene:{id:sceneId,label:'Escena elegida después de bifurcar',participantIds:[f.configuration.roster.activeCharacterIds[0]],placeIds:['sala']}}});assert.equal(opened.kind,'stored');
+  const current=f.journal.readDramaticStructure({runId:job.targetRunId});assert.equal(current?.activeSceneId,sceneId);assert.deepEqual(current?.episodes[0]?.forkOrigins,inherited.episodes[0]?.forkOrigins);
+  const historical=f.journal.readDramaticStructureAtCut({runId:job.targetRunId,worldRevision:0,worldSeq:f.payload.state.snapshot.seq});assert.deepEqual(historical?.structure,inherited);
+  f.mutate(db=>assert.equal(db.prepare('SELECT COUNT(*) count FROM structure_events WHERE run_id=?').get(job.targetRunId)?.count,1));
+ }finally{f.close();}
+});
+
+for(const tamper of ['package','job','receipt','seed'] as const)test(`journal rechaza ${tamper} alterado y no publica un destino parcial`,async()=>{
+ const f=await fixture();try{
+  const job=f.stage();f.project();
+  if(tamper==='seed')assert.equal(f.journal.publishForkJob({...f.lookup,expectedRevision:job.revision,artifacts:f.artifacts}).state,'ready');
+  f.mutate(db=>{
+   if(tamper==='package')db.prepare('UPDATE fork_jobs SET package_hash=? WHERE operation_id=?').run('f'.repeat(64),job.operationId);
+   if(tamper==='job')db.prepare('UPDATE fork_jobs SET job_hash=? WHERE operation_id=?').run('f'.repeat(64),job.operationId);
+   if(tamper==='receipt')db.prepare('UPDATE fork_projection_receipts SET payload_hash=? WHERE operation_id=?').run('f'.repeat(64),job.operationId);
+   if(tamper==='seed')db.prepare('UPDATE fork_dramatic_seeds SET payload_hash=? WHERE run_id=?').run('f'.repeat(64),job.targetRunId);
+  });
+  if(tamper==='seed')assert.throws(()=>f.journal.readDramaticStructure({runId:job.targetRunId}),/alterada/);
+  else {assert.throws(()=>f.journal.publishForkJob({...f.lookup,expectedRevision:job.revision,artifacts:f.artifacts}),/alterado|alterada/);assert.equal(f.journal.loadWorld({runId:job.targetRunId}),undefined);}
+ }finally{f.close();}
+});
+
+test('fork Ready sobrevive reinicio y puede ser fuente exacta de otro fork sin copiar ejecución',async()=>{
+ const f=await fixture({drama:true});try{
+  const staged=f.stage();f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});
+  const reopened=openJournal({path:join(f.directory,'fork-source-isolated.sqlite')});try{
+   assert.deepEqual(reopened.readForkJob(f.lookup),ready);
+   const source=reopened.readForkSource({runId:ready.targetRunId,commitIndex:0,worldRevision:0,worldSeq:f.payload.state.snapshot.seq});assert.equal(source.kind,'found');if(source.kind!=='found')assert.fail();
+   const remapped=prepareForkState({snapshot:source.snapshot,configuration:source.configuration,cuts:source.cuts,targetRunId:randomUUID()});const {state,seed}=prepareForkDramaticSeed({structure:source.structure,state:remapped});
+   const operationId=randomUUID();const config=prepareForkConfiguration({sourceConfiguration:source.configuration,state,name:'Derivación segunda',principalId:'fork-test',recordedAt:'2026-10-16T00:00:00Z',operationId});
+   const packet=ForkPublicationPackageSchema.parse({kind:'fork-publication-package',state,...config,dramaticSeed:seed});
+   const begun=reopened.beginForkJob({operationId,principalId:'fork-test',idempotencyKey:randomUUID(),name:'Derivación segunda',reason:'Bifurcar la bifurcación.',package:packet});assert.equal(begun.kind,'created');
+   assert.equal(packet.dramaticSeed.structure.episodes[0]?.forkOrigins?.length,2);assert.equal(reopened.loadWorld({runId:state.targetRunId}),undefined);
+  }finally{reopened.close();}
+ }finally{f.close();}
+});
+
+test('CAS obsoleto, manifiesto ajeno y namespace de idempotencia no alteran staging',async()=>{
+ const f=await fixture();try{
+  const job=f.stage();f.project();assert.throws(()=>f.journal.publishForkJob({...f.lookup,expectedRevision:1,artifacts:f.artifacts}),/CAS/);
+  assert.throws(()=>f.journal.publishForkJob({...f.lookup,expectedRevision:job.revision,artifacts:{...f.artifacts,packageHash:'f'.repeat(64)}}),/artefactos/);
+  assert.throws(()=>f.journal.failForkJob({...f.lookup,expectedRevision:1,code:'FORK_INTERRUPTED'}),/CAS/);
+  assert.equal(f.journal.createRunConfigurationDraft({principalId:f.request.principalId,idempotencyKey:f.request.idempotencyKey,patch:{}}).kind,'idempotencyConflict');
+  assert.deepEqual(f.journal.readForkJob(f.lookup),job);assert.equal(f.journal.loadWorld({runId:job.targetRunId}),undefined);
+ }finally{f.close();}
+});
+
+for(const empty of [true,false])test(`preparación publicada ${empty?'sin experiencias':'con experiencias'} es readonly por PATCH y VALIDATE y conserva su autoridad`,async()=>{
+ const f=await fixture({empty});try{
+  const staged=f.stage();f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});
+  const getRows=()=>{let result:unknown;f.mutate(db=>{result=['world_runs','world_commits','episodes','episode_scenes','acts','act_scenes','fork_dramatic_seeds','actor_knowledge','experiences','actor_state_cut_batches','actor_state_cuts','run_configuration_drafts','run_configuration_draft_history'].map(table=>({table,rows:db.prepare(`SELECT * FROM ${table} WHERE run_id=? ORDER BY rowid`).all(ready.targetRunId)}));});return result;};
+  const before=getRows();
+  const patch={principalId:'fork-test',idempotencyKey:randomUUID(),runId:ready.targetRunId,expectedRevision:0,
+    patch:{name:{kind:'configured',value:'No debe sobreescribir el fork',evidence:{kind:'operator-choice',operatorId:'fork-test',recordedAt:'2026-10-16T00:00:00Z'}}}};
+  const readonly={kind:'readonly',reason:'fork-published'};
+  assert.deepEqual(f.journal.updateRunConfigurationDraft(patch),readonly);
+  assert.deepEqual(f.journal.updateRunConfigurationDraft(patch),readonly,'replay de rechazo mantiene identidad');
+  const validation={principalId:'fork-test',idempotencyKey:randomUUID(),runId:ready.targetRunId,expectedRevision:0};
+  assert.deepEqual(f.journal.validateRunConfigurationDraft(validation),readonly);assert.deepEqual(f.journal.validateRunConfigurationDraft(validation),readonly);
+  assert.deepEqual(getRows(),before);assert.equal(f.journal.readWorldLifecycle({runId:ready.targetRunId})?.lifecycle,'ready');
+  assert.deepEqual(f.journal.readDramaticStructure({runId:ready.targetRunId}),f.payload.dramaticSeed.structure);
+  assert.deepEqual(f.journal.readForkJob(f.lookup),ready);
+ }finally{f.close();}
+});
+
+for(const forged of ['sourceConfigurationHash','bindingState'] as const)test(`audioDerivation ${forged} no se acepta aunque job e historia estén coherentemente rehasheados`,async()=>{
+ const f=await fixture();try{
+  const job=f.stage();const audioDerivation={...job.audioDerivation,...(forged==='sourceConfigurationHash'?{sourceConfigurationHash:'f'.repeat(64)}:{bindingState:'unbound'})};
+  const altered={...job,audioDerivation};const payload=canonical(altered);const hash=hashContinuistaValue(altered);
+  f.mutate(db=>{db.prepare('UPDATE fork_jobs SET job_json=?,job_hash=? WHERE operation_id=?').run(payload,hash,job.operationId);db.prepare('UPDATE fork_job_history SET payload_json=?,payload_hash=? WHERE operation_id=? AND revision=?').run(payload,hash,job.operationId,job.revision);});
+  assert.throws(()=>f.journal.readForkJob(f.lookup),/alterado/);assert.equal(f.journal.loadWorld({runId:job.targetRunId}),undefined);
+ }finally{f.close();}
+});
+
+test('preparación derivada atribuye nombre al operador y valores heredados al host y al job exacto',async()=>{
+ const f=await fixture();try{
+  const staged=f.stage();f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});
+  const draft=f.journal.readRunConfigurationDraft({runId:ready.targetRunId});assert.ok(draft);
+  assert.equal(draft.name.kind,'configured');if(draft.name.kind==='configured')assert.equal(draft.name.evidence.kind,'operator-choice');
+  for(const field of ['fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const){
+   const section:{kind:string;evidence?:{kind:string;derivationRef?:string}}|undefined=draft[field];assert.ok(section);assert.equal(section.kind,'configured');assert.equal(section.evidence?.kind,'host-derived');assert.equal(section.evidence?.derivationRef,`fork:${staged.operationId}`);
+  }
+ }finally{f.close();}
+});

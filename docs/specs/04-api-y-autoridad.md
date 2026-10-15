@@ -286,3 +286,7 @@ POST `/runs/{id}/preflight` está conectado al broker durable, exige Ready guard
 ## Archivo privado histórico — corte 43
 
 La consulta existente del inspector acepta memoryOffset entero no negativo y memoryLimit entre 1 y 100, conservando el opt-in privado de sesión/corrida. La respuesta histórica distingue checkpoint verificado y no disponible, e incluye fuente, fecha de registro, experiences congeladas y paginación; no ejecuta recall semántico. No existe aún ruta productiva de bifurcación. Ver [contrato y evidencia](../auditoria/cortes-privados.md).
+
+## Frontera de publicación interna — corte 45
+
+ForkJob conserva propietario, operación, clave, fuente exacta y revisiones. El servicio host implementa begin/read/retry/recover, con estados staging/ready/failed y códigos seguros; estas funciones no constituyen todavía rutas HTTP. El futuro cliente sólo elegirá corte y datos de la operación: no podrá aportar paquetes privados, recibos ni artefactos para afirmar Ready. audioDerivation identifica la configuración Ready inicial de origen y la falta de reconstrucción sonora efectiva histórica. Composición, CSRF, ETags, notificaciones y GUI quedan pendientes. [Contrato ejecutado](../auditoria/publicacion-de-bifurcaciones.md).

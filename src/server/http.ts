@@ -2095,6 +2095,9 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         if (result.kind === 'invalidLifecycle') {
           fail({ status: 409, kind: 'conflict', code: 'INVALID_LIFECYCLE', message: 'La configuración no se puede editar con el ciclo de vida actual.' });
         }
+        if (result.kind === 'readonly') {
+          fail({ status: 409, kind: 'conflict', code: 'FORK_PREPARATION_READ_ONLY', message: 'La preparación heredada es de sólo lectura; usá los controles específicos de Dirección.' });
+        }
         if (result.kind === 'conflict') {
           const current = await options.runConfigurationDrafts.readRunConfigurationDraftState({ runId });
           const currentRevision = current === undefined ? result.currentRevision : RunDraftStateSchema.parse(current).revision;
@@ -2131,6 +2134,9 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         }
         if (result.kind === 'invalidLifecycle') {
           fail({ status: 409, kind: 'conflict', code: 'INVALID_LIFECYCLE', message: 'La configuración no se puede validar con el ciclo de vida actual.' });
+        }
+        if (result.kind === 'readonly') {
+          fail({ status: 409, kind: 'conflict', code: 'FORK_PREPARATION_READ_ONLY', message: 'La preparación heredada es de sólo lectura; usá los controles específicos de Dirección.' });
         }
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra operación de borrador.' });

@@ -1,3 +1,4 @@
+import { RunForkOriginSchema } from '../domain/fork-origin.ts';
 import { routineIsAvailable, routineCalendarDiagnostics, dayNightCalendarDiagnostics } from '../domain/routine-calendar.ts';
 import { PreflightSnapshotFenceSchema as RunSnapshotFenceSchema, PreflightCheckSchema, PreflightReportSchema, type PreflightCheck, type PreflightReport } from '../domain/preflight-report.ts';
 import { isDeepStrictEqual } from 'node:util';
@@ -59,6 +60,7 @@ export const ReadyRunConfigurationSchema = z.strictObject({
   schemaVersion: z.literal(1),
   runId: RunIdSchema,
   configRevision: RevisionSchema,
+  forkOrigin: RunForkOriginSchema.optional(),
   name: z.string().trim().min(1).max(120),
   fictionalAt: FictionalInstantSchema,
   continuity: ContinuityContextSchema,
@@ -394,7 +396,7 @@ export function resolveConfiguredSessionMode(input: {
 
   const storedConfiguration = input.readWorldConfiguration({ runId: resolvedMode.runId });
   const configuration = ReadyRunConfigurationSchema.safeParse(storedConfiguration);
-  if (!configuration.success || validateReadyConfiguration(configuration.data).length > 0) return null;
+  if (!configuration.success || configuration.data.runId!==resolvedMode.runId || validateReadyConfiguration(configuration.data).length > 0) return null;
 
   if (resolvedMode.kind === 'interlocutor') {
     const participantId = resolvedMode.participantId;
@@ -425,6 +427,7 @@ function validateReadyCandidate(input: {
   spanishVariety: SpanishVarietyForActing;
   budget: RunBudget;
   issues: RunConfigurationValidationIssue[];
+  continuation?: true;
 }): void {
   const { world, continuity, roster, humanParticipants, audio, spanishVariety, narrationMode, issues } = input;
   const add = (code: RunConfigurationValidationIssue['code'], field: string, detail: string) => addIssue(issues, { code, field, detail });
@@ -455,12 +458,12 @@ function validateReadyCandidate(input: {
   }
 
   const scene = world.scenes.find((candidate) => candidate.id === world.activeSceneId);
-  if (scene === undefined || scene.lifecycle.kind !== 'open') {
-    add('scene-not-open', 'worldSnapshot.activeSceneId', 'La puesta requiere una escena inicial abierta.');
-    return;
+  if ((scene === undefined || scene.lifecycle.kind !== 'open')
+    && !(input.continuation && world.activeSceneId===null && world.scenes.every(item=>item.lifecycle.kind==='closed'))) {
+    add('scene-not-open', 'worldSnapshot.activeSceneId', 'La puesta requiere escena abierta o una continuación derivada entre escenas cerradas.');
   }
-  validateHumanParticipants({ profiles: humanParticipants, world, issues });
-  if (scene.participantIds.length === 0) add('scene-has-no-participant', 'worldSnapshot.scenes.active.participantIds', 'La escena inicial necesita al menos un participante; no se añade interlocutor automáticamente.');
+  validateHumanParticipants({ profiles: humanParticipants, world, issues, ...(input.continuation?{allowHistoricalScene:true as const}:{}) });
+  if (scene!==undefined && scene.participantIds.length === 0) add('scene-has-no-participant', 'worldSnapshot.scenes.active.participantIds', 'La escena inicial necesita al menos un participante; no se añade interlocutor automáticamente.');
   const worldActors = new Map<string, WorldCharacter>();
   for (const entity of world.entities) {
     if (entity.kind === 'character') worldActors.set(entity.characterId, entity);
@@ -482,16 +485,16 @@ function validateReadyCandidate(input: {
     }
     validateCapabilities({ prepared, actor, issues });
   }
-  for (const characterId of scene.participantIds) {
-    if (!activeIds.has(characterId)) add('participant-not-active', `worldSnapshot.scenes.${scene.id}.participantIds.${characterId}`, 'Cada participante inicial debe estar incluido en el reparto activo de esta corrida.');
+  for (const characterId of scene?.participantIds??[]) {
+    if (!activeIds.has(characterId)) add('participant-not-active', `worldSnapshot.scenes.${scene?.id}.participantIds.${characterId}`, 'Cada participante inicial debe estar incluido en el reparto activo de esta corrida.');
     const actor = worldActors.get(characterId);
-    if (actor === undefined || actor.presence.kind !== 'present' || actor.presence.sceneId !== scene.id || !scene.placeIds.includes(actor.placeId)) {
-      add('participant-not-present', `worldSnapshot.scenes.${scene.id}.participantIds.${characterId}`, 'El participante debe estar presente en la escena inicial y en uno de sus lugares.');
+    if (scene===undefined || actor === undefined || actor.presence.kind !== 'present' || actor.presence.sceneId !== scene.id || !scene.placeIds.includes(actor.placeId)) {
+      add('participant-not-present', `worldSnapshot.scenes.${scene?.id}.participantIds.${characterId}`, 'El participante debe estar presente en la escena inicial y en uno de sus lugares.');
     }
   }
 
-  const scenePlaceIds = new Set(scene.placeIds);
-  if (scenePlaceIds.size === 0 || scene.placeIds.some((placeId) => !world.places.some((place) => place.id === placeId))) {
+  const scenePlaceIds = new Set(input.continuation?world.places.map(place=>place.id):scene?.placeIds??[]);
+  if (scene!==undefined && (scene.placeIds.length===0 || scene.placeIds.some((placeId) => !world.places.some((place) => place.id === placeId)))) {
     add('place-missing', `worldSnapshot.scenes.${scene.id}.placeIds`, 'La escena debe referir lugares operativos del mapa.');
   }
   const channelIds = new Set(world.channels.map((channel) => channel.id));
@@ -511,6 +514,7 @@ function validateReadyCandidate(input: {
 }
 
 function validateHumanParticipants(input: {
+  allowHistoricalScene?: true;
   profiles: HumanParticipantProfiles;
   world: WorldSnapshot;
   issues: RunConfigurationValidationIssue[];
@@ -543,7 +547,7 @@ function validateHumanParticipants(input: {
       const presence = profile.presence;
       const sceneId = presence.sceneId;
       const scene = input.world.scenes.find((candidate) => candidate.id === sceneId);
-      if (scene === undefined || scene.id !== input.world.activeSceneId || scene.lifecycle.kind !== 'open'
+      if (scene === undefined || (!input.allowHistoricalScene && (scene.id !== input.world.activeSceneId || scene.lifecycle.kind !== 'open'))
         || !scene.placeIds.includes(place.id)) {
         addIssue(input.issues, {
           code: 'human-participant-invalid', field: `${field}.presence.sceneId`,
@@ -562,7 +566,7 @@ export function readyConfigurationAtSnapshot(configuration: ReadyRunConfiguratio
     participantAvailability:buildParticipantAvailability(world)});
 }
 
-function validateReadyConfiguration(configuration: ReadyRunConfiguration): RunConfigurationValidationIssue[] {
+export function validateReadyConfiguration(configuration: ReadyRunConfiguration): RunConfigurationValidationIssue[] {
   const issues: RunConfigurationValidationIssue[] = [];
   validateReadyCandidate({
     runId: configuration.runId,
@@ -576,6 +580,7 @@ function validateReadyConfiguration(configuration: ReadyRunConfiguration): RunCo
     dramaticLine: configuration.dramaticLine,
     spanishVariety: configuration.spanishVariety,
     budget: configuration.budget,
+    ...(configuration.forkOrigin===undefined?{}:{continuation:true as const}),
     issues,
   });
   const expectedFences = configuration.roster.preparedCharacters.map((prepared) => ({
@@ -601,7 +606,7 @@ function validateReadyConfiguration(configuration: ReadyRunConfiguration): RunCo
   return issues;
 }
 
-function buildParticipantAvailability(world: WorldSnapshot): ParticipantAvailability[] {
+export function buildParticipantAvailability(world: WorldSnapshot): ParticipantAvailability[] {
   const scene = world.scenes.find((candidate) => candidate.id === world.activeSceneId);
   if (scene === undefined) return [];
   return scene.participantIds.map((characterId) => {

@@ -1,0 +1,7 @@
+# ADR 0011 — Publicar bifurcaciones después de conciliar sus archivos
+
+El journal y las bases ICM no comparten una transacción. Se adopta un trabajo durable con paquete e identidades congelados, memorias preparadas en staging, recibos persistidos y traslado de un directorio identificado por operación; sólo después una transacción del journal publica el destino Ready y su corte privado inicial. Esto admite archivos aún no publicados tras una interrupción, a cambio de evitar una representación visible con memoria parcial; la recuperación verifica y reutiliza los mismos artefactos y correspondencias.
+
+La estructura editorial del corte se importa como una base con episodios, actos y escenas remapeados, revisión local cero y referencias explícitas a sus fuentes. No se crean eventos locales de apertura o cierre para simular historia heredada. El inicio conserva esa base, incluso entre escenas; las aperturas posteriores son decisiones explícitas. Se preserva la configuración sonora declarada en el Ready inicial de origen, con diagnóstico de que no reconstruye versiones efectivas históricas y con bindings nuevos pendientes de validación; no se consulta la configuración sonora mutable para completar el pasado.
+
+La [entrevista real](../auditoria/dialogo-publicacion-fork.md) y sus [respuestas](../auditoria/publicacion-fork-respuestas.md) distinguen requisitos de estas decisiones técnicas delegadas. [Implementación, pruebas y brechas](../auditoria/publicacion-de-bifurcaciones.md).

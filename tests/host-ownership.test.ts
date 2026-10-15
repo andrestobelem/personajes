@@ -80,7 +80,7 @@ function childRecoverAtBarrier(input: { root: string; nonce: string; readyPath: 
 
 function childAcquireAfterBarrier(input: { root: string; readyPath: string; startPath: string; acquiredPath: string; finishPath: string }) {
   const moduleUrl = pathToFileURL(join(process.cwd(), 'src/adapters/host-ownership.ts')).href;
-  const script = `import { existsSync, writeFileSync } from 'node:fs';
+  const script = `import { existsSync, writeFileSync, renameSync } from 'node:fs';
     import { acquireHostOwnership, inspectHostOwnership, isHostOwnershipFailure } from ${JSON.stringify(moduleUrl)};
     writeFileSync(${JSON.stringify(input.readyPath)}, 'ready');
     const deadline = Date.now() + 10_000;
@@ -103,7 +103,9 @@ function childAcquireAfterBarrier(input: { root: string; readyPath: string; star
       let inspected = false;
       for (let attempt = 0; attempt < 2_000; attempt += 1) {
         try {
-          writeFileSync(${JSON.stringify(input.acquiredPath)}, inspectHostOwnership({ privateDataRoot: ${JSON.stringify(input.root)} }).nonce);
+          const nonce = inspectHostOwnership({ privateDataRoot: ${JSON.stringify(input.root)} }).nonce;
+          writeFileSync(${JSON.stringify(input.acquiredPath + '.pending')}, nonce);
+          renameSync(${JSON.stringify(input.acquiredPath + '.pending')}, ${JSON.stringify(input.acquiredPath)});
           inspected = true;
           break;
         } catch (error) {

@@ -22,7 +22,7 @@ Un solo host escritor controla cada `privateData`. Antes de abrir workers se adq
 
 ## Schema de journal
 
-El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v34; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El fork durable sigue siendo futuro.
+El inventario siguiente reúne el contrato lógico requerido por el producto y no describe una única base SQLite literal. La implementación actual llega a v35; las tablas concretas de estructura dramática y Dirección se distinguen del resto en “Evolución del journal local”. El núcleo durable de fork está implementado en v35; su operación integral sigue pendiente.
 
 Migraciones numeradas con `schema_version`; JSON versionado validado en lectura/escritura. Tablas requeridas:
 
@@ -66,7 +66,7 @@ La migración v30 añade `direction_revision` a `world_runs`, `direction_events`
 
 ### Contrato requerido para forks y continuidad (evolución posterior a v29)
 
-Falta implementar fork/restauración por corte. Debe usar un job durable staging/ready/failed y conservar inmutable la fuente, tal como se define a continuación. El contrato de episodios y escenas ya está implementado en v29: snapshots/commits históricos conservan sus hashes y las escenas preexistentes permanecen sin episodio asignado. v29 no incluye un comando para asociar una escena heredada a un episodio; si el producto lo requiere, esa operación debe diseñarse y probarse de forma explícita.
+El corte 45 implementa el núcleo host de fork por corte con job durable staging/ready/failed y fuente inmutable. Su composición, API/GUI y restauración por corte siguen pendientes; el contrato integral se define a continuación. El contrato de episodios y escenas ya está implementado en v29: snapshots/commits históricos conservan sus hashes y las escenas preexistentes permanecen sin episodio asignado. v29 no incluye un comando para asociar una escena heredada a un episodio; si el producto lo requiere, esa operación debe diseñarse y probarse de forma explícita.
 
 Cada apertura/cierre estructural se escribe en la misma transacción SQLite que el nuevo snapshot y su fila `world_commits`: incrementa `world_revision` y `commit_index`, pero no `worldSeq`, el reloj ficticio, `world_events`, percepciones, outbox ni memoria ICM. `structure_events` conserva el comando idempotente, actor administrativo, tipo y corte. `readDramaticStructureAtCut` valida el snapshot/hash y reproduce sólo eventos estructurales hasta el commit que corresponde al par confirmado `worldRevision` + `worldSeq`; el estado actual nunca se usa como sustituto del pasado. El historial de eventos acepta el mismo límite de commit y no convierte estructura editorial en conocimiento de un personaje. Sin escena activa, acción actoral e intervención humana fallan con causa explícita; no se crean convocatorias ni avance de rutinas. Abrir una escena/episodio permite continuar y conserva la continuidad corriente.
 
@@ -193,3 +193,7 @@ La implementación registra lotes y cortes privados por commit en la misma trans
 ## Preparación interna del fork — corte 44
 
 El paquete prepared-fork-state reúne mundo remapeado, estados privados y manifiesto restaurable desde una fuente exacta completa. Cada memoria propia materializada conserva forkOrigin con ID/hash del payload y commit/revisión/secuencia/hash del snapshot padre; se recalcula el envelope congelado. Los antecedentes externos curados siguen scoped a su origen. Mantener worldSeq conserva validez del estado adquirido; revision de snapshot destino comienza en cero. No se inventan eventos locales para sus referencias históricas. La publicación del target Ready y el job durable siguen pendientes. [Evidencia y brechas](../auditoria/preparacion-de-bifurcacion.md).
+
+## Publicación interna del fork — v35
+
+La implementación agrega fork_jobs, fork_job_history, fork_projection_receipts y fork_dramatic_seeds. Congela un paquete verificable, prepara bases ICM propias y persiste recibos antes de trasladar un directorio identificado por operación. Sólo la transacción final publica configuración, estado, conocimiento, archivo de experiencias/recibos, semilla editorial y checkpoint privado cero; hasta entonces no hay corrida visible en world_runs. Un cierre del servicio conserva staging para recuperar identidades y recibos exactos. Ready no aprueba ejecución. El núcleo host no está todavía compuesto en launcher/API/GUI ni restore. [Evidencia, revisión y límites](../auditoria/publicacion-de-bifurcaciones.md).

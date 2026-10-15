@@ -1,6 +1,6 @@
 # ADR 0007 — Cierres dramáticos y bifurcación de continuidad
 
-Estado: decisión adoptada; estructura básica implementada en journal v29, API autenticada y panel inicial. Director automático implementado con observaciones y evidencia por corte; fork durable, GUI completa y aceptación integral siguen pendientes.
+Estado: decisión adoptada; estructura básica implementada en journal v29, API autenticada y panel inicial. Director automático implementado con observaciones y evidencia por corte; núcleo de fork durable implementado en v35; composición, API/GUI completas y aceptación integral siguen pendientes.
 
 ## Contexto
 
@@ -46,3 +46,7 @@ El journal v34 registra cortes privados exactos para nuevas confirmaciones, prer
 ## Avance del corte 44
 
 La [preparación interna de bifurcación](../auditoria/preparacion-de-bifurcacion.md) ya lee una fuente exacta completa, remapea mundo/conocimiento y materializa recuerdos con procedencia, con un gate ICM real separado. No publica el destino ni sustituye el contrato de job durable, configuración Ready, API y GUI. La nueva historia comienza en revisión cero conservando la secuencia causal del estado importado; así no se invalida el catálogo de objetos aparecidos.
+
+## Avance del corte 45
+
+Publicación host y recuperación implementadas en v35 con bases ICM independientes y semilla editorial importada, según [ADR 0011](0011-publicacion-de-fork-y-base-dramatica.md). No se fabrican eventos locales para la estructura heredada. [Evidencia y brechas de producto](../auditoria/publicacion-de-bifurcaciones.md); el launcher y la operación API/GUI aún no están compuestos.

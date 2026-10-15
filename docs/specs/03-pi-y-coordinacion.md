@@ -106,3 +106,7 @@ P02/P04–08/P10/P11/P16–20/P22. P18 requiere SDK y cuenta/proveedor reales: d
 ### Actuación ante una circunstancia
 
 La causa `directionCircumstance` sólo convoca mediante percepciones físicas ya confirmadas y entregadas. La Experience de tipo percepción conserva el detalle sensorial y su evento; no contiene hablante, autor administrativo, comando, catálogo ni motivo. El inbox usa lugar opaco, modalidad y detalle. La instancia Pi propia puede proponer actuar, esperar o ignorar la ocasión; el Continuista revisa la propuesta exacta y Escenario decide su efecto. Los turnos y las cuotas siguen los mismos límites, epochs y cortes que el resto de causas. En pausa puede entregarse un hecho confirmado sin convocar inferencia.
+
+## Bifurcación y comienzo derivado — corte 45
+
+El fork mecánico no abre sesiones Pi ni llama modelos. No transporta historial de intérprete, jobs, inboxes o presupuesto consumido. Conserva el perfil seleccionado y el presupuesto configurado; start mantiene la semilla heredada en vez de inventar un episodio inicial. Entre escenas, inferencia y avance siguen necesitando una escena elegible; abrir unidades estructurales en un Ready derivado es una decisión explícita. El preflight y las nuevas vinculaciones de voz permanecen obligatorios. [Evidencia](../auditoria/publicacion-de-bifurcaciones.md).

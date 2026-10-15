@@ -4,7 +4,7 @@ import { CharacterIdSchema, EntityHandleSchema, RunIdSchema } from '../domain/va
 
 function compareText(left:string,right:string){return left<right?-1:left>right?1:0;}
 
-export const ForkIdentityKindSchema = z.enum(['entity','door','channel','scene','offer','event','perception','goal','experience']);
+export const ForkIdentityKindSchema = z.enum(['entity','door','channel','scene','offer','event','perception','goal','experience','episode','act']);
 const UuidSchema = z.string().uuid({version:'v4'});
 export const ForkIdentityManifestSchema = z.strictObject({
   kind:z.literal('fork-identities'), sourceRunId:RunIdSchema, targetRunId:RunIdSchema,
