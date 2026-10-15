@@ -197,3 +197,30 @@ test('assessment detecta cambio ICM real en WAL y conserva bytes de ambas famili
     } finally { keeper.close(); }
   } finally { await f.close(); }
 });
+
+test('assessment compara historia de configuración como estado operativo y bloquea una fila agregada sin evento nuevo', async () => {
+  const f = await fixture();
+  try {
+    const { kind, schemaVersion, runId, revision, ...patch } = draftFixture(); void kind; void schemaVersion; void runId; void revision;
+    const draft = f.host.journal.createRunConfigurationDraft({ principalId: 'recovery-history-test', idempotencyKey: randomUUID(), patch }); assert.ok(draft.kind === 'created');
+    const ready = f.host.journal.validateRunConfigurationDraft({ principalId: 'recovery-history-test', idempotencyKey: randomUUID(), runId: draft.draft.runId, expectedRevision: 0 }); assert.ok(ready.kind === 'ready');
+    const bundle = await f.backup();
+    assert.ok(assess(f, bundle).kind === 'compatible');
+    f.mutate(db => {
+      const worldBefore = db.prepare('SELECT snapshot_json,snapshot_hash FROM world_runs').all();
+      const eventsBefore = db.prepare('SELECT * FROM world_events').all();
+      // Explicit corruption fixture: append an unadmitted history record, without
+      // altering any world snapshot, event or the append-only trigger definitions.
+      const inserted = db.prepare(`INSERT INTO run_configuration_revisions
+        SELECT run_id,commit_index+1,config_revision+1,configuration_json,configuration_hash,
+          continuity_fence_json,configuration_hash,snapshot_hash,configuration_hash
+        FROM world_runs WHERE run_id=?`).run(ready.runId);
+      assert.equal(inserted.changes, 1);
+      assert.deepEqual(db.prepare('SELECT snapshot_json,snapshot_hash FROM world_runs').all(), worldBefore);
+      assert.deepEqual(db.prepare('SELECT * FROM world_events').all(), eventsBefore);
+    });
+    const before = bytes(f.root); const result = assess(f, bundle);
+    assert.ok(result.kind === 'blocked'); assert.equal(result.code, 'RECOVERY_STATE_DIVERGED');
+    assert.deepEqual(bytes(f.root), before);
+  } finally { await f.close(); }
+});

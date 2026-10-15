@@ -155,3 +155,6 @@ _Evitar_: recuperación como sinónimo de bifurcación o de reinicio de la histo
 
 **Admisión de un respaldo externo**: Incorporación identificada y verificada de un respaldo recibido para consultarlo o continuar su obra como una representación nueva, conservando su procedencia y los datos existentes.
 _Evitar_: verificar integridad como sinónimo de autenticar al autor o admitir como sinónimo de sobrescribir.
+
+**Promoción de identidad**: Consolidación explícita de rasgos de un personaje a partir de su experiencia, que orienta su interpretación futura conservando las versiones anteriores, la memoria vivida y la atribución subjetiva de sus creencias.
+_Evitar_: promoción como cambio retroactivo de acontecimientos o confirmación de canon.

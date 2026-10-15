@@ -26,7 +26,7 @@ async function fixture() {
   { path: `forks/${fork}/staging/runs/${run}/fork-owner.json`, data: Buffer.from('{"owner":true}') },
  ];
  for (const entry of entries) { await mkdir(dirname(join(bundleRoot, entry.path)), { recursive: true, mode: 0o700 }); await writeFile(join(bundleRoot, entry.path), entry.data, { mode: 0o600 }); }
- const manifest = BackupManifestSchema.parse({ format: 'personajes-backup', version: 1, backupId: randomUUID(), lineageId: randomUUID(), createdAt: 123, journalVersion: 37, fences: [], files: entries.map(entry => ({ path: entry.path, bytes: entry.data.length, sha256: sha(entry.data) })) });
+ const manifest = BackupManifestSchema.parse({ format: 'personajes-backup', version: 1, backupId: randomUUID(), lineageId: randomUUID(), createdAt: 123, journalVersion: 38, fences: [], files: entries.map(entry => ({ path: entry.path, bytes: entry.data.length, sha256: sha(entry.data) })) });
  const raw = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`); await writeFile(join(bundleRoot, 'manifest.json'), raw);
  const archivePath = join(root, 'export.pba'); const stageRoot = join(root, 'import');
  return { root, bundleRoot, manifest, raw, manifestHash: sha(raw), archivePath, stageRoot, entries, cleanup: () => rm(root, { recursive: true, force: true }) };

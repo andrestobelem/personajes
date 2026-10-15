@@ -22,7 +22,7 @@ export const ExternalBackupValidationRequestSchema = z.strictObject({
   }).default({ timeoutMs: 30_000, maxSourceBytes: 64 * 1024 * 1024, maxTotalSourceBytes: 64 * 1024 * 1024, maxStdoutBytes: 16 * 1024 }),
 });
 export const ExternalBackupValidationResultSchema = z.strictObject({
-  journalVersion: z.literal(37), sources: z.array(z.strictObject({
+  journalVersion: z.literal(38), sources: z.array(z.strictObject({
     runId: z.uuid(), path: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/), bytes: z.number().int().nonnegative().max(64 * 1024 * 1024),
   })).max(100_000),
 });

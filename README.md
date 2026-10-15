@@ -32,3 +32,5 @@ El launcher puede componer los workers de representación con `PERSONAJES_ICM_BI
 ## Trabajo sobre el repositorio
 
 Las instrucciones de mantenimiento están en [AGENTS.md](AGENTS.md). Las skills instaladas y sus fuentes se documentan en [skills instaladas](docs/auditoria/skills-instaladas.md). Las imágenes y el artículo conservan sus propios créditos y condiciones; la licencia del código no se extiende automáticamente a esos materiales.
+
+La [promoción futura de identidad](docs/auditoria/promocion-identidad.md) cuenta con fundamentos de lectura histórica por commit en journal v38 y compilación del contexto/evidencia propios. La transformación pura prepara una revisión; todavía no aplica promociones ni reemplaza el workflow Pi y gráfico pendiente.

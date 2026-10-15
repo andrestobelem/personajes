@@ -1,0 +1,49 @@
+# Diálogo sobre Configurador y promoción futura de identidad — corte 50
+
+Intercambio real entre `/root/restore_interviewer` y `/root/restore_custodian`, coordinado por el integrador según [grill-with-docs](../../.agents/skills/grill-with-docs/SKILL.md), [grilling](../../.agents/skills/grilling/SKILL.md), [domain-modeling](../../.agents/skills/domain-modeling/SKILL.md) y el [procedimiento delegado](../diseno/procedimiento-grill-with-docs.md). Las recomendaciones de agentes no son elecciones expresas del usuario ni acreditan implementación.
+
+Se contrastaron [PRD](../PRD.md) CAT-08/P22, [constitución](../constitucion.md), [S01](../specs/01-dominio-y-catalogo.md), [S02](../specs/02-persistencia-e-icm.md), [S03](../specs/03-pi-y-coordinacion.md), [S04](../specs/04-api-y-autoridad.md), [S05](../specs/05-interfaz.md), `src/domain/configurator.ts`, `configurator-context.ts` y `configurator-tools.ts`.
+
+## Estado comprobado al comenzar
+
+El Configurador tiene schemas de contexto, propuesta y consentimiento y una tool que conserva un candidato sólo en memoria. No constituye todavía despacho durable, consentimiento autenticado ni aplicación futura. La validación de `committed-character-state` comprueba revisión y secuencia, pero no acota `commitIndex` por un anchor completo del scope; `AdministrativeRunScope` no lo contiene. Se necesita evidencia de un corte privado exacto, no sólo metadatos y hash aportados por cliente.
+
+## Ronda 1 — evolución vivida, evidencia y alcance
+
+**Pregunta efectivamente enviada.** CAT-08/P22 exige promoción persistente futura en la misma corrida sin borrar historia. ¿Puede consolidarse la desconfianza de Max causada por un rumor sin convertir la supuesta traición de 99 en canon? ¿Qué evidencia prueba experiencia propia frente a eventos globales, biblioteca, saber ajeno o futuro? ¿Qué cambia en identidad, voz, metas o capacidades y qué instancias se invalidan?
+
+**Respuesta del custodio.** Identidad, memoria, historia y perspectiva son requisitos del concepto. CAT-08/P22 y S01/S05 conservan evolución vivida inmediata y distinguen promoción al núcleo con evidencia, diff y versión. Si no se cambian hechos pasados, permanecen la misma corrida y continuidad; corregir el pasado exige bifurcación.
+
+La evidencia subjetiva debe incluir actor y anchor completo —run, commitIndex, worldRevision, secuencia, hash de snapshot, configuración y preparación— y payload/hash de checkpoint registrado. Un evento vivido requiere experiencia o percepción propia y su recepción antes del corte; un evento global confirmado no demuestra que Max lo conozca. El estado mental propio puede demostrar creencia, deseo o relación, sin probar la verdad del mundo. Biblioteca documental queda como referencia separada; nunca prueba automática de saber ni rectificación del rumor. Evidencia ajena, futura o sin fuente se bloquea. Puede promoverse una disposición atribuida a Max, como desconfiar de 99 desde ese rumor, sin afirmar que 99 traicionó.
+
+**Rectificación explícita del custodio.** Su primera respuesta mencionó biografía como parte del core, pero el schema real sólo incluye `selfReference`, `selfConcept`, `values`, `dispositions` y `contradictions`. Se corrigió antes de integrar: biografía vive en expediente/antecedentes. La propuesta de este corte afecta esos cinco campos; no incorpora voz, metas, inventario o capacidades por implicación ni inventa permisos desde texto de identidad.
+
+Sólo el actor destinatario obtiene preparación y sesión/epoch nuevos; sus recuerdos, historia y sesión anterior forense se conservan. Los roles cuyos contextos quedan obsoletos por revisión de configuración deben perder autoridad para efectos tardíos, sin modificar datos de otros actores. La nueva versión no obliga al personaje a obedecer ni altera canon global.
+
+## Ronda 2 — consentimiento, frontera coherente y carreras
+
+**Pregunta efectivamente enviada.** ¿La propuesta durable puede crearse en Ready, paused o stopped con fuente congelada, presupuesto y sesión Configurador propios; y aplicarse sólo tras diff y consentimiento autenticado ligado a hashes y CAS? ¿Qué sucede si cambia la preparación, memoria, configuración o un claim entre revisión y aplicación? ¿Pueden descartarse pendientes para obtener una frontera idle? ¿Cómo se conservan resultado y consentimiento frente a cancelación y crash?
+
+**Respuesta del custodio.** Consentir en GUI es una acción del producto prevista por S05, no una aprobación humana extra para implementar el flujo. El job del Configurador no fabrica un pulso actoral: es una operación administrativa explícita, con presupuesto de la corrida, perfil seleccionado y sesión separada. El candidato debe persistirse antes de responder; el texto final del modelo no aplica nada. Diff, vacíos y evidencias se muestran con autorización privada; el principal proviene del host. El consentimiento vincula versiones y hashes de contexto, propuesta y destino. Una base cambiada vuelve obsoleta la propuesta; no se hace rebase ni inferencia silenciosos.
+
+Ready/paused/stopped en frontera coherente es una propuesta compatible. Pausar conserva propuestas confirmadas pendientes: exigir ausencia de claims no permite descartarlas. Hay que drenar writers fuera de transacciones de red y conservar diagnósticos al abortar generaciones sin aceptación. Una propuesta con autoridad de commit o un pulso pendiente viejo bloquea hasta resolverse o cancelarse explícitamente con recibo. Entregas y memoria pendientes deben drenarse o bloquear la promoción. La evidencia procede del corte registrado exacto y no de ICM más reciente.
+
+La nueva sesión del actor recompila preparación y estado/memoria propios; el JSONL viejo queda íntegro, forense y asociado a su configuración histórica, sin adoptar su tail. Aplicar deja gates/preflight/contextos anteriores obsoletos y exige revalidar antes de reanudar. Una respuesta tardía del Configurador cancelado no publica candidato ni consentimiento; el consumo de presupuesto real o incierto se conserva. Se prefiere aprobación y promoción en una transacción. Si hay dos fases, la intención aprobada queda ligada al hash y la misma operación se retoma tras crash. El replay posterior al commit devuelve el recibo original antes de evaluar el CAS ya obsoleto; no genera otra versión. GET consulta el presente por separado.
+
+## Ronda 3 — historia, bifurcaciones, backup e interfaz
+
+**Pregunta efectivamente enviada.** ¿La promoción registra un commit administrativo con configuración y contexto nuevos, sin fabricar un evento ficticio ni avanzar el reloj? ¿Los lectores históricos y forks antes y después conservan la versión exacta incluso con la misma secuencia de eventos? ¿Puede aplicarse mediante flujo dedicado a un fork Ready sin abrir su editor ordinario? ¿Cómo se separan adaptación de biblioteca, datos públicos y evidencia privada, y qué pruebas faltan?
+
+**Respuesta del custodio.** Se recomienda un commit administrativo explícito: avanzan worldRevision, commitIndex, configuración, preparedHash e identityVersion, sin worldevent, percepción, secuencia ni tiempo ficticio nuevos. Los checkpoints capturan configuración/preparación anteriores y nuevas con el mismo estado mental y experiencias. Inspector, replay y fuente de fork deben leer la configuración vigente exacta del corte; una lectura anterior no puede incorporar identidad futura. Un fork posterior incorpora la preparación nueva y la misma historia autorizada.
+
+El flujo dedicado puede promover identidad en un fork Ready bajo las mismas fronteras, sin habilitar edición general del draft ni alterar su semilla o procedencia. El archivo heredado puede aportar evidencia con atribución al origen; no se inventa una experiencia local nueva para justificarla. Adaptación de biblioteca sigue siendo una operación separada. Editar una propuesta aprobada crea otra versión/hash que requiere su propio consentimiento; no la sobrescribe.
+
+La historia pública sólo presenta datos seguros de versión, actor, momento, corte y estado. El motivo puede contener secretos y no es automáticamente público. Diff, evidencia y razonamiento editorial se mantienen en lectura privada autorizada, sin paths ni thinking. Los backups conservan jobs, propuestas, consentimiento, promoción, configuraciones y sesiones forenses. Las tablas y versiones nuevas deben incorporarse explícitamente al catálogo de validación externa del corte 49 y a la comparación de recuperación del corte 48; no pueden ignorarse como si no fueran estado operativo.
+
+Las pruebas deben cubrir antes y después con igual secuencia y distinto commit; callbacks tardíos, claims obsoletos y presupuesto incierto; atomicidad y replay; fork Ready; backup externo con el esquema nuevo; y GUI propuesta Pi→espera→diff privado→consentimiento→promoción futura→reinicio→preflight→contexto nuevo con memoria anterior. SDK Pi real con transporte controlado verifica integración, pero no acredita P22 live ni calidad interpretativa o acceso real al perfil. Esas aceptaciones deben permanecer pendientes si no se ejecutan.
+
+## Resultado y límites
+
+Se recomienda promover únicamente los cinco campos actuales de identidad estable dentro de la misma corrida y continuidad, con evidencia privada exacta, propuesta durable, diff y consentimiento autenticado; frontera coherente, versión futura y sesión propia recompilada; historia, memorias, estados mentales y configuración histórica conservados. La propuesta no sustituye decisiones de los personajes ni convierte creencias en canon.
+
+No se detectaron preferencias humanas imprescindibles para ese alcance. Modificar biografía, permisos o canon por este flujo requeriría otro diseño, no ampliar implícitamente el schema. Este documento registra tres rondas efectivamente intercambiadas y una rectificación explícita; no acredita promoción ejecutada ni completa la aceptación de CAT-08/P22.

@@ -14,7 +14,7 @@ import type {OperatorRequest} from '../src/server/operator-extension.ts';
 import {RestorePreviewSchema} from '../src/domain/backup.ts';
 async function fixture(legacy=false){
  const root=realpathSync(mkdtempSync(join(tmpdir(),'personajes-exchange-kinds-'))),journalPath=join(root,'world.sqlite');
- const db=new DatabaseSync(journalPath);db.exec('CREATE TABLE schema_version(version INTEGER);INSERT INTO schema_version VALUES(37);CREATE TABLE world_runs(run_id TEXT,commit_index INTEGER,world_revision INTEGER,last_seq INTEGER,snapshot_hash TEXT)');
+ const db=new DatabaseSync(journalPath);db.exec('CREATE TABLE schema_version(version INTEGER);INSERT INTO schema_version VALUES(38);CREATE TABLE world_runs(run_id TEXT,commit_index INTEGER,world_revision INTEGER,last_seq INTEGER,snapshot_hash TEXT)');
  if(legacy)db.exec('CREATE TABLE exchange_http_operations(principal_id TEXT NOT NULL,operation_id TEXT NOT NULL,request_hash TEXT NOT NULL,response_json TEXT,PRIMARY KEY(principal_id,operation_id))');
  const catalog=await loadCatalog({repositoryRoot:process.cwd()});const dossier=await readDossier({catalog,characterId:'maxwell-smart'});
  const dossiers=openDossierExchange({journalPath,getDossier:()=>dossier});const backups=openBackupService({privateDataRoot:root,quiesce:{async acquire(){return {artifacts:[],release(){}};}}});

@@ -100,7 +100,7 @@ test('configuración legada válida del journal sin Ready es explícitamente no 
 
 test('migración real de fuente legada no inventa checkpoint para habilitar fork',async()=>{
   const f=await setup();try{
-    inspect(f,db=>db.exec('DROP TABLE actor_state_cuts; DROP TABLE actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DELETE FROM schema_version WHERE version IN(34,35,36,37)'));
+    inspect(f,db=>db.exec('DROP TABLE actor_state_cuts; DROP TABLE actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(34,35,36,37,38)'));
     const reopened=openJournal({path:join(f.directory,'journal.sqlite')});try{
       assert.deepEqual(reopened.readForkSource(initialRequest(f)),{kind:'unavailable',reason:'checkpoint-not-recorded'});
       inspect(f,db=>assert.equal(db.prepare('SELECT COUNT(*) count FROM actor_state_cut_batches').get()?.count,0));

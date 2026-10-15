@@ -91,3 +91,15 @@ La raíz integró, verificó 946 pruebas aprobadas/una omitida por plataforma, b
 | `actor_cut_integrity_review` | Revisión independiente de backend, hallazgo reproducible postefecto y comprobación de su corrección con 26 pruebas focales. |
 
 La raíz integró el launcher, el restore externo y los paneles, verificó el recorrido gráfico y mantuvo pendientes la aceptación integral y la puesta con proveedor. Los resultados globales y sus límites se registran en la [auditoría del corte](backups-externos.md).
+
+## Corte 50 — fundamentos de identidad futura
+
+| Agente | Responsabilidad y evidencia |
+|---|---|
+| `restore_interviewer` y `restore_custodian` | Tres rondas reales, rectificación del alcance de identidad, respuestas, auditoría y ADR 0015. |
+| `actor_cut_inspector` | Auditoría de brecha, compiler host de evidencia propia, contratos exactos, contradicciones y fixture SQLite. |
+| `actor_cut_journal` | Historial completo de configuración por commit en v38; resolución de cortes/forks, baseline y guardas append-only. |
+| `actor_cut_migration_tests` | Mantenimiento de migraciones y schema externo 38, triggers confiables y comparación de estado en recuperación. |
+| `actor_cut_integrity_review` | Revisión independiente; detectó duplicados en fence y errores de procedencia/expediente, contrastados y corregidos. |
+
+La raíz preparó la transformación pura de identidad y sus pruebas, integró contratos y documentación y ejecutó la verificación global. No se ejecutó promoción, nueva sesión/epoch ni inferencia del Configurador. [Evidencia y límites](promocion-identidad.md).

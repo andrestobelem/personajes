@@ -78,7 +78,7 @@ async function fixture(memory = false) {
 test('helper aislado valida journal real y escribe fuente congelada exacta sin tocar bundle ni crear sidecars', async () => {
   const f = await fixture();
   try {
-    const before = inventory(f.bundleRoot); const result = await validateExternalBackup(f.request()); assert.equal(result.journalVersion, 37); assert.equal(result.sources.length, 1);
+    const before = inventory(f.bundleRoot); const result = await validateExternalBackup(f.request()); assert.equal(result.journalVersion, 38); assert.equal(result.sources.length, 1);
     const source = result.sources[0]; assert.ok(source); const bytes = readFileSync(source.path); assert.equal(hash(bytes), source.sha256); assert.equal(bytes.length, source.bytes);
     const data = ForkSourceDataSchema.parse(JSON.parse(bytes.toString('utf8'))); assert.equal(data.snapshot.runId, f.world.runId); assert.equal(data.snapshot.seq, f.world.seq);
     assert.ok(data.cuts.some(cut => cut.experiences.some(experience => experience.payloadHash === f.frozen.payloadHash)));
@@ -132,11 +132,24 @@ test('helper limita tiempo y fuente JSON por separado sin publicar resultados pa
 test('helper rechaza versión antigua declarada y archivo no inventariado sin adoptarlos como fuente', async () => {
   const f = await fixture();
   try {
-    f.declareVersion(36);
-    await assert.rejects(validateExternalBackup(f.request()), /EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED/);
     f.declareVersion(37);
+    await assert.rejects(validateExternalBackup(f.request()), /EXTERNAL_BACKUP_JOURNAL_VERSION_UNSUPPORTED/);
+    f.declareVersion(38);
     writeFileSync(join(f.bundleRoot, 'world.sqlite-wal'), 'WAL no admitido'); const before = inventory(f.bundleRoot);
     await assert.rejects(validateExternalBackup(f.request(join(f.directory, 'sidecar'))), /EXTERNAL_BACKUP_UNKNOWN_FILE/); assert.deepEqual(inventory(f.bundleRoot), before);
     assert.equal(existsSync(join(f.directory, 'sidecar/sources')), false);
+  } finally { await f.close(); }
+});
+
+for (const damage of ['missing', 'changed']) test(`helper rechaza trigger append-only de configuración ${damage} aunque el manifest declare hashes nuevos`, async () => {
+  const f = await fixture();
+  try {
+    f.mutate('world.sqlite', db => {
+      db.exec('DROP TRIGGER run_configuration_revisions_no_update');
+      if (damage === 'changed') db.exec('CREATE TRIGGER run_configuration_revisions_no_update BEFORE UPDATE ON run_configuration_revisions BEGIN SELECT 1; END');
+    });
+    const before = inventory(f.bundleRoot);
+    await assert.rejects(validateExternalBackup(f.request()), /EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID/);
+    assert.deepEqual(inventory(f.bundleRoot), before);
   } finally { await f.close(); }
 });

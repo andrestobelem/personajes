@@ -118,3 +118,9 @@ Launcher, API autenticada y panel de bifurcación ya están conectados. El retry
 ## Restauración desde backup — corte 47
 
 Restaurar como bifurcación desde un backup local registrado ya está conectado al launcher, API y GUI. La revisión/confirmación tiene operación estable y principal privado; la recuperación retoma sólo intenciones confirmadas. Journal v37 conserva la fuente respaldada y la publicación no consulta al padre vivo. Validación y migraciones actúan sobre copias privadas para mantener el bundle intacto. [Contrato, pruebas y recorrido gráfico](../auditoria/restauracion-como-bifurcacion.md). Recuperación offline del host completo, admisión de otra lineage y aceptación integral siguen pendientes.
+
+## Configurador: evidencia exacta y activación pendiente — corte 50
+
+El contexto de evolución tiene scope administrativo propio sin exigir un pulso de actuación, anchor completo y checkpoint privado del actor. El compilador verifica perfil/configuración/preparación y experiencia admitida; IDs de evidencia deterministas y hashes vinculan la propuesta al corte exacto. No se usa la secuencia sola como identidad del contexto. Una propuesta debe citar experiencia admitida; un evento global o un estado vacío no acreditan un cambio vivido. Resolver una contradicción requiere motivo y evidencia propia explícitos, conservando su antecedente.
+
+El resultado de `prepareIdentityPromotion` es un plan puro, no un receipt de ejecución: no abre Pi, no hace inferencia, no actualiza ICM ni modifica el journal. Para ejecutar faltan job Pi durable separado, presupuesto/cancelación, consentimiento autenticado, CAS de frontera y epochs de sesiones. Cambiar el hash de preparación en una fila o reutilizar una sesión previa no satisface esas etapas. La aceptación P22 live sigue pendiente. [Contrato y límites](../auditoria/promocion-identidad.md).

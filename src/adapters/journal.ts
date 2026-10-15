@@ -520,7 +520,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -1898,37 +1898,135 @@ export function openJournal(input: { path: string }) {
     `);}catch(error){try{database.exec('ROLLBACK');}catch{/* Atomic migration. */}database.close();throw error;}
   }
 
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=38').get()) {
+    try { database.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE run_configuration_revisions(
+        run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+        effective_commit_index INTEGER NOT NULL CHECK(effective_commit_index>=0),
+        configuration_revision INTEGER NOT NULL CHECK(configuration_revision>=0),
+        configuration_json TEXT NOT NULL,configuration_hash TEXT NOT NULL,
+        continuity_fence_json TEXT NOT NULL,continuity_fence_hash TEXT NOT NULL,
+        activation_snapshot_hash TEXT NOT NULL,record_hash TEXT NOT NULL,
+        PRIMARY KEY(run_id,effective_commit_index),UNIQUE(run_id,configuration_revision)
+      );
+      CREATE TRIGGER run_configuration_revisions_no_update BEFORE UPDATE ON run_configuration_revisions
+        BEGIN SELECT RAISE(ABORT,'CONFIGURATION_HISTORY_APPEND_ONLY');END;
+      CREATE TRIGGER run_configuration_revisions_no_delete BEFORE DELETE ON run_configuration_revisions
+        BEGIN SELECT RAISE(ABORT,'CONFIGURATION_HISTORY_APPEND_ONLY');END;
+      INSERT INTO schema_version VALUES(38);COMMIT;
+    `); } catch(error) { try {database.exec('ROLLBACK');} catch {/* Atomic migration. */} database.close();throw error; }
+  }
+
   const pendingInitialActorCuts = new Set<string>();
   const ActorStateCutManifestSchema = z.strictObject({
     source: ActorStateCutSchema.shape.source,
     actors: z.array(z.strictObject({ actorId: CharacterIdSchema, cutHash: HashSchema })),
   });
 
-  function exactActorCutSource(run: ReturnType<typeof parseWorldRun>, commitIndex: number) {
-    if (commitIndex === 0) {
-      if (canonicalJson(run.initialSnapshot) !== run.row.initial_snapshot_json || sha256(run.row.initial_snapshot_json) !== run.row.initial_snapshot_hash)
+  const ConfigurationRevisionRowSchema=z.strictObject({
+    run_id:RunIdSchema,effective_commit_index:counter,configuration_revision:RevisionSchema,
+    configuration_json:z.string(),configuration_hash:HashSchema,
+    continuity_fence_json:z.string(),continuity_fence_hash:HashSchema,
+    activation_snapshot_hash:HashSchema,record_hash:HashSchema,
+  });
+  const ConfigurationAtCommitRequestSchema=z.strictObject({runId:RunIdSchema,commitIndex:counter});
+  const ConfigurationAtCommitReadResultSchema=z.discriminatedUnion('kind',[
+    z.strictObject({kind:z.literal('found'),configuration:z.unknown(),configurationRevision:RevisionSchema,configurationHash:HashSchema,
+      effectiveCommitIndex:counter,provenance:z.enum(['original','revision']),continuityFence:WorldContinuityFenceSchema}),
+    z.strictObject({kind:z.literal('missing')}),
+    z.strictObject({kind:z.literal('unavailable'),reason:z.literal('invalid-configuration')}),
+  ]);
+
+  function snapshotAtExactConfigurationCommit(run:ReturnType<typeof parseWorldRun>,commitIndex:number) {
+    if(commitIndex===0){
+      if(canonicalJson(run.initialSnapshot)!==run.row.initial_snapshot_json||sha256(run.row.initial_snapshot_json)!==run.row.initial_snapshot_hash)
         throw new Error('Snapshot inicial del corte privado inválido');
-      return { snapshot: run.initialSnapshot, source: {
-      runId: run.row.run_id, commitIndex: 0, worldRevision: run.initialSnapshot.revision,
-      worldSeq: run.initialSnapshot.seq, snapshotHash: run.row.initial_snapshot_hash,
-      configurationRevision: run.row.config_revision, configurationHash: run.row.configuration_hash,
-    } }; }
-    const value = database.prepare('SELECT snapshot_json,snapshot_hash,world_revision,last_seq FROM world_commits WHERE run_id=? AND commit_index=?')
-      .get(run.row.run_id, commitIndex);
-    if (value === undefined) throw new Error('Commit del corte privado inexistente');
-    const row = z.strictObject({snapshot_json:z.string(),snapshot_hash:HashSchema,world_revision:RevisionSchema,last_seq:WorldSeqSchema}).parse(value);
-    const snapshot = WorldSnapshotSchema.parse(parseStoredJson(row.snapshot_json));
-    if (canonicalJson(snapshot) !== row.snapshot_json || sha256(row.snapshot_json) !== row.snapshot_hash
-      || snapshot.runId !== run.row.run_id || snapshot.revision !== row.world_revision || snapshot.seq !== row.last_seq)
+      return {snapshot:run.initialSnapshot,snapshotHash:run.row.initial_snapshot_hash};
+    }
+    const value=database.prepare('SELECT snapshot_json,snapshot_hash,world_revision,last_seq FROM world_commits WHERE run_id=? AND commit_index=?').get(run.row.run_id,commitIndex);
+    if(value===undefined)throw new Error('Commit del corte privado inexistente');
+    const row=z.strictObject({snapshot_json:z.string(),snapshot_hash:HashSchema,world_revision:RevisionSchema,last_seq:WorldSeqSchema}).parse(value);
+    const snapshot=WorldSnapshotSchema.parse(parseStoredJson(row.snapshot_json));
+    if(canonicalJson(snapshot)!==row.snapshot_json||sha256(row.snapshot_json)!==row.snapshot_hash
+      ||snapshot.runId!==run.row.run_id||snapshot.revision!==row.world_revision||snapshot.seq!==row.last_seq)
       throw new Error('Snapshot del corte privado inválido');
-    return { snapshot, source: {runId: run.row.run_id,commitIndex,worldRevision:row.world_revision,
-      worldSeq:row.last_seq,snapshotHash:row.snapshot_hash,configurationRevision:run.row.config_revision,
-      configurationHash:run.row.configuration_hash} };
+    return {snapshot,snapshotHash:row.snapshot_hash};
   }
 
-  function validateActorCutExperienceClosure(cut: z.infer<typeof ActorStateCutSchema>, run: ReturnType<typeof parseWorldRun>, snapshot: z.infer<typeof WorldSnapshotSchema>) {
+  // No mutation API: a future trusted promotion must archive the exact original
+  // bytes at commit zero before replacing the world_runs head, in the same TX.
+  function configurationAtCommit(run:ReturnType<typeof parseWorldRun>,commitIndex:number){
+    snapshotAtExactConfigurationCommit(run,commitIndex);
+    const rows=database.prepare('SELECT * FROM run_configuration_revisions WHERE run_id=? ORDER BY effective_commit_index').all(run.row.run_id).map(value=>ConfigurationRevisionRowSchema.parse(value));
+    if(rows.length===0)return {configuration:run.configuration,fence:run.fence,configurationRevision:run.row.config_revision,
+      configurationHash:run.row.configuration_hash,effectiveCommitIndex:0,provenance:'original' as const,activationSnapshot:run.initialSnapshot};
+    let selected:typeof rows[number]|undefined;let previous:typeof rows[number]|undefined;
+    for(const row of rows){
+      const {record_hash,...record}=row;
+      if(hashJson(record).hash!==record_hash||sha256(row.configuration_json)!==row.configuration_hash
+        ||sha256(row.continuity_fence_json)!==row.continuity_fence_hash
+        ||(previous===undefined?row.effective_commit_index!==0:row.configuration_revision!==previous.configuration_revision+1)
+        ||row.effective_commit_index>run.row.commit_index)throw new Error('Historial de configuración inválido');
+      const activation=snapshotAtExactConfigurationCommit(run,row.effective_commit_index);
+      const configuration=parseStoredJson(row.configuration_json);
+      const fence=WorldContinuityFenceSchema.parse(parseStoredJson(row.continuity_fence_json));
+      if(hashJson(configuration).json!==row.configuration_json||canonicalJson(fence)!==row.continuity_fence_json
+        ||activation.snapshotHash!==row.activation_snapshot_hash||fence.atWorldSeq!==activation.snapshot.seq
+        ||new Set(fence.contexts.map(context=>context.actorId)).size!==fence.contexts.length)
+        throw new Error('Anclaje de configuración inválido');
+      const ready=ReadyRunConfigurationSchema.safeParse(configuration);
+      if(row.effective_commit_index>0&&!ready.success)throw new Error('Revisión efectiva requiere configuración Ready completa');
+      if(ready.success&&(ready.data.runId!==run.row.run_id||ready.data.configRevision!==row.configuration_revision
+        ||canonicalJson(ready.data.worldSnapshot)!==canonicalJson(activation.snapshot)))throw new Error('Configuración Ready fuera de su activación');
+      if(ready.success)for(const context of fence.contexts){
+        const prepared=ready.data.roster.preparedCharacters.find(actor=>actor.characterId===context.actorId);
+        const actor=activation.snapshot.entities.find(entity=>entity.kind==='character'&&entity.characterId===context.actorId);
+        if(prepared===undefined||prepared.identityVersion!==context.identityVersion||hashJson(prepared).hash!==context.preparedContextHash
+          ||prepared.continuity.continuityId!==context.continuityId||prepared.continuity.revision!==context.continuityRevision
+          ||prepared.continuity.contentHash!==context.continuityContentHash||actor?.kind!=='character'||actor.preparation.kind!=='prepared'
+          ||actor.preparation.identityVersion!==context.identityVersion||actor.preparation.continuityId!==context.continuityId)
+          throw new Error('Fence de configuración fuera de su preparación');
+      }
+      if(ready.success){
+        const scene=activation.snapshot.scenes.find(scene=>scene.id===activation.snapshot.activeSceneId);
+        const expected=activation.snapshot.entities.filter(entity=>entity.kind==='character'&&entity.preparation.kind==='prepared'
+          &&(row.effective_commit_index>0||ready.data.forkOrigin!==undefined||scene?.participantIds.includes(entity.characterId)));
+        if(expected.length!==fence.contexts.length||expected.some(actor=>actor.kind==='character'&&!fence.contexts.some(context=>context.actorId===actor.characterId)))
+          throw new Error('Fence de configuración incompleto');
+      }
+      if(row.effective_commit_index<=commitIndex)selected=row;
+      previous=row;
+    }
+    if(previous===undefined||selected===undefined||previous.configuration_revision!==run.row.config_revision
+      ||previous.configuration_json!==run.row.configuration_json||previous.configuration_hash!==run.row.configuration_hash
+      ||previous.continuity_fence_json!==run.row.continuity_fence_json)throw new Error('Head de configuración difiere de su historial');
+    return {configuration:parseStoredJson(selected.configuration_json),fence:WorldContinuityFenceSchema.parse(parseStoredJson(selected.continuity_fence_json)),
+      configurationRevision:selected.configuration_revision,configurationHash:selected.configuration_hash,effectiveCommitIndex:selected.effective_commit_index,
+      provenance:'revision' as const,activationSnapshot:snapshotAtExactConfigurationCommit(run,selected.effective_commit_index).snapshot};
+  }
+
+  function readRunConfigurationAtCommit(input:unknown):z.infer<typeof ConfigurationAtCommitReadResultSchema>{
+    const request=ConfigurationAtCommitRequestSchema.parse(input);database.exec('BEGIN');
+    try{
+      const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+      if(value===undefined){database.exec('COMMIT');return {kind:'missing'};}
+      const effective=configurationAtCommit(parseWorldRun(value),request.commitIndex);
+      const result=ConfigurationAtCommitReadResultSchema.parse({kind:'found',configuration:effective.configuration,configurationRevision:effective.configurationRevision,
+        configurationHash:effective.configurationHash,effectiveCommitIndex:effective.effectiveCommitIndex,provenance:effective.provenance,continuityFence:effective.fence});
+      database.exec('COMMIT');return result;
+    }catch{try{database.exec('ROLLBACK');}catch{/* Read-only transaction. */}return {kind:'unavailable',reason:'invalid-configuration'};}
+  }
+
+  function exactActorCutSource(run: ReturnType<typeof parseWorldRun>, commitIndex: number) {
+    const {snapshot,snapshotHash}=snapshotAtExactConfigurationCommit(run,commitIndex);
+    const effective=configurationAtCommit(run,commitIndex);
+    return {snapshot,effective,source:{runId:run.row.run_id,commitIndex,worldRevision:snapshot.revision,worldSeq:snapshot.seq,snapshotHash,
+      configurationRevision:effective.configurationRevision,configurationHash:effective.configurationHash}};
+  }
+
+  function validateActorCutExperienceClosure(cut: z.infer<typeof ActorStateCutSchema>, configurationValue: unknown, snapshot: z.infer<typeof WorldSnapshotSchema>) {
     const admitted = new Set<string>(cut.experiences.map(item=>item.envelope.experienceId));
-    const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
+    const configuration = ReadyRunConfigurationSchema.safeParse(configurationValue);
     const prepared = configuration.success ? configuration.data.roster.preparedCharacters.find(actor=>actor.characterId===cut.actorId) : undefined;
     const initial = prepared?.initialExperience.value;
     if (initial?.kind === 'run-cut') for (const experience of initial.experiences) admitted.add(experience.experienceId);
@@ -1943,7 +2041,7 @@ export function openJournal(input: { path: string }) {
 
   function captureActorStateCut(runId: string, commitIndex: number) {
     const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(runId));
-    const { snapshot, source } = exactActorCutSource(run, commitIndex);
+    const { snapshot, source, effective } = exactActorCutSource(run, commitIndex);
     const recordedAt = new Date().toISOString();
     const actors = snapshot.entities.filter(entity => entity.kind === 'character')
       .sort((left,right) => left.characterId < right.characterId ? -1 : left.characterId > right.characterId ? 1 : 0);
@@ -1978,7 +2076,7 @@ export function openJournal(input: { path: string }) {
       for (const envelope of actor.mind.experiences) add(freezeExperience(envelope));
       const cut = ActorStateCutSchema.parse({kind:'actor-state-cut',source,actorId:actor.characterId,recordedAt,knowledge,
         experiences:[...experiences.values()].sort((left,right) => left.envelope.experienceId < right.envelope.experienceId ? -1 : left.envelope.experienceId > right.envelope.experienceId ? 1 : 0)});
-      validateActorCutExperienceClosure(cut,run,snapshot);
+      validateActorCutExperienceClosure(cut,effective.configuration,snapshot);
       return {cut,payload:hashJson(cut)};
     });
     const manifest = hashJson(ActorStateCutManifestSchema.parse({source,actors:cuts.map(({cut,payload})=>({actorId:cut.actorId,cutHash:payload.hash}))}));
@@ -2028,7 +2126,7 @@ export function openJournal(input: { path: string }) {
             || (previousId !== undefined && previousId >= frozen.envelope.experienceId)) throw new Error('Experiencia del corte privado alterada');
           previousId = frozen.envelope.experienceId;
         }
-        validateActorCutExperienceClosure(cut,run,exact.snapshot);
+        validateActorCutExperienceClosure(cut,exact.effective.configuration,exact.snapshot);
         if (cut.actorId === request.actorId) requested = cut;
       }
       return requested === undefined ? {kind:'unavailable',reason:'actor-not-in-cut'} : {kind:'found',cut:requested};
@@ -2042,13 +2140,13 @@ export function openJournal(input: { path: string }) {
         const exact = exactActorCutSource(run,request.commitIndex);
         if (exact.source.worldRevision !== request.worldRevision || exact.source.worldSeq !== request.worldSeq)
           return {kind:'unavailable',reason:'invalid-cut'};
-        const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
+        const configuration = ReadyRunConfigurationSchema.safeParse(exact.effective.configuration);
         if (!configuration.success) return {kind:'unavailable',reason:'configuration-not-ready'};
         if (configuration.data.runId !== request.runId || configuration.data.configRevision !== exact.source.configurationRevision
-          || canonicalJson(configuration.data.worldSnapshot) !== canonicalJson(run.initialSnapshot)
-          || run.fence.atWorldSeq !== run.initialSnapshot.seq)
+          || canonicalJson(configuration.data.worldSnapshot) !== canonicalJson(exact.effective.activationSnapshot)
+          || exact.effective.fence.atWorldSeq !== exact.effective.activationSnapshot.seq)
           return {kind:'unavailable',reason:'invalid-cut'};
-        for (const context of run.fence.contexts) {
+        for (const context of exact.effective.fence.contexts) {
           const prepared = configuration.data.roster.preparedCharacters.find(actor=>actor.characterId===context.actorId);
           if (prepared === undefined || prepared.identityVersion !== context.identityVersion || hashJson(prepared).hash !== context.preparedContextHash
             || prepared.continuity.continuityId !== context.continuityId || prepared.continuity.revision !== context.continuityRevision
@@ -5140,6 +5238,7 @@ export function openJournal(input: { path: string }) {
     },
 
     readActorStateCut,
+    readRunConfigurationAtCommit,
     readForkSource,
     beginForkJob,beginForkJobFromBackup,readForkJob,findForkJob,readForkPackage,listStagingForkJobs,
     recordForkProjection,readForkProjectionReceipt,readForkProjectionReceipts,failForkJob,retryForkJob,publishForkJob,
