@@ -30,6 +30,7 @@ function patchFor(configuration:Awaited<ReturnType<typeof setup>>['configuration
   const world={...configuration.worldSnapshot,entities:configuration.worldSnapshot.entities.map((entity)=>entity.kind==='character'?{...entity,mind:{...entity.mind,experiences:[]}}:entity)};
   return RunDraftPatchSchema.parse(Object.fromEntries(Object.entries({name:configuration.name,fictionalAt:configuration.fictionalAt,continuity:configuration.continuity,
     roster:configuration.roster,humanParticipants:configuration.humanParticipants,worldSnapshot:world,dramaticLine:configuration.dramaticLine,
+    dramaticReferences:configuration.dramaticReferences,
     circadianPolicy:configuration.circadianPolicy,spanishVariety:configuration.spanishVariety,narrationMode:configuration.narrationMode,
     inferenceProfile:configuration.inferenceProfile,budget:configuration.budget,maxReformulations:configuration.maxReformulations,audio:configuration.audio})
     .map(([field,value])=>[field,configured(value)])));

@@ -13,7 +13,10 @@ _Evitar_: personaje y actor usados indistintamente.
 **Representación**: Realización concreta de la obra con una situación inicial, un reparto activo y acontecimientos propios.
 _Evitar_: investigación del corpus como si fuera una representación ya ocurrida.
 
-**Continuidad de la representación**: Conjunto de antecedentes y acontecimientos que se admiten como ocurridos en una representación determinada.
+**Continuidad de la representación**: Marco de antecedentes e hitos que fija qué se admite como ocurrido, no ocurrido o todavía indeterminado en una representación determinada.
+
+**Corte documental de continuidad**: Selección acotada y versionada de antecedentes respaldados por fuentes, que sirve para proponer la continuidad inicial de una representación. Conserva los límites de la evidencia y los acontecimientos cuyo estado todavía no está establecido.
+_Evitar_: confundirlo con una escena vivida o un recuerdo compartido por todo el reparto.
 
 **Bifurcación**: Nueva representación que parte de un momento confirmado de otra, conserva su procedencia y continúa con historia y memorias independientes. No incorpora información aprendida después del momento elegido.
 _Evitar_: copiar el presente como si fuera el pasado.
@@ -105,6 +108,9 @@ _Evitar_: guardián entendido como obligación de decir la verdad o impedir toda
 **Metaindicación**: Instrucción de la dirección sobre la representación, que no se convierte por sí sola en conocimiento del personaje.
 
 **Línea dramática**: Continuidad de un conflicto y sus consecuencias que sirve de referencia para reconocer su progreso.
+
+**Referencia dramática**: Obra o tradición elegida por quien prepara la representación como lente opcional para el Director, con un aspecto de interés. No prescribe etapas, actos o escenas, no determina un desenlace y no se entrega al contexto privado de los actores.
+_Evitar_: referencia dramática como plantilla obligatoria o garantía de fidelidad formal.
 
 **Etapa dramática**: Momento reconocible en el desarrollo de un conflicto, como planteamiento, desarrollo, clímax o desenlace.
 _Evitar_: etapa como sinónimo automático de acto.

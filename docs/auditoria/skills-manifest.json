@@ -98,6 +98,25 @@
         "computedHash": "f1c25fcfc1616686f387465824b1f4458782d962e64ef2e217b3ffb02bf3650a"
       },
       "note": "Installed pinned upstream version rather than copying the different local pstack snapshot; pstack was read only."
+    },
+    "writing-for-agents": {
+      "sourceRepository": "https://github.com/mattpocock/skills",
+      "sourceCommit": "49dd158d1076134a641b33efb035946536778336",
+      "sourcePath": "skills/productivity/writing-for-agents",
+      "installedOn": "2026-10-15",
+      "license": "MIT",
+      "originalFilesSha256": {
+        "SKILL-MECHANICS.md": "c768e6307c7c10728c401c213f2c4ba71c542127eeb7ad2956aabd15a0fa0059",
+        "SKILL.md": "551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a",
+        "agents/openai.yaml": "eacb24b2a618cfb81dacb0416f4fdd75ddf3a8060f8ddb99aae1b1e301907e4b"
+      },
+      "installedFilesSha256": {
+        "LICENSE": "0e7ac423bf2c6e223b7c5b156f8cf72da49d748e56a1641402c31f22ad07dbb5",
+        "SKILL-MECHANICS.md": "c768e6307c7c10728c401c213f2c4ba71c542127eeb7ad2956aabd15a0fa0059",
+        "SKILL.md": "551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a",
+        "agents/openai.yaml": "d306a0f226cf3a8c084283f45dc1e15435d4ace1ed0e7a9d60b31ad10b9713f9"
+      },
+      "implicitInvocation": true
     }
   },
   "validation": {
@@ -107,6 +126,11 @@
     "relativeLinks": "passed excluding fenced examples",
     "sourceHashes": "all original files match pinned upstream commits",
     "patchReplay": "applied to clean temporary upstream copies; all installed hashes match",
-    "reviewCorrection": "TypeScript entrypoint and patterns both require construction/boundary validation for non-negative finite duration."
+    "reviewCorrection": "TypeScript entrypoint and patterns both require construction/boundary validation for non-negative finite duration.",
+    "writingForAgents": {
+      "date": "2026-10-15",
+      "patchReplay": "passed; all installed hashes match",
+      "relativeLinks": "SKILL-MECHANICS.md and SKILL.md exist"
+    }
   }
 }

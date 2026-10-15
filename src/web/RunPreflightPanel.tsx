@@ -3,6 +3,7 @@ import type { RunPreflightJobDocument, RunPreflightJobView } from '../domain/htt
 import { capturePreflightIntent, createRunPreflightClient, preflightRejection, preflightTerminal, type PreflightDocument, type PreflightIntent, type RunPreflightClient } from './run-preflight-client.ts';
 import type { RunDocument } from './run-controls-client.ts';
 import type { DraftDocument } from './run-drafts-client.ts';
+import { MemoryPreparationPanel } from './MemoryPreparationPanel.tsx';
 import { RunBudgetPanel } from './RunBudgetPanel.tsx';
 
 const client = createRunPreflightClient();
@@ -20,6 +21,17 @@ export function RunPreflightReport({ value }: { value: RunPreflightJobDocument }
       <ul>{result.checks.map((check, index) => <li key={`${check.checkId}:${index}`}><strong>{checkLabels[check.checkId]}</strong>: {checkStates[check.kind]}{check.code !== undefined && <span className="muted"> · {check.code}</span>}</li>)}</ul><p className="muted">Comprobado: <time dateTime={result.checkedAt}>{result.checkedAt}</time></p></>}
     {result === null && <p>El trabajo todavía no tiene un resultado confirmado.</p>}
   </div>;
+}
+/** UI guidance only: nonzero initial sequence numbers do not imply lived history.
+ * The durable host also checks observations and experiences before choosing purpose. */
+export function memoryPreparationReopensExisting(document: DraftDocument, currentRun?: RunDocument): boolean {
+  const lifecycle = currentRun?.view.lifecycle.kind ?? document.view.state.lifecycle;
+  if (lifecycle !== 'ready' || (document.view.state.editability !== undefined && document.view.state.editability !== 'editable')) return true;
+  const initial = document.view.configuration.worldSnapshot;
+  if (initial.kind === 'empty') return false;
+  const currentRevision = currentRun?.view.worldRevision ?? document.view.state.worldRevision;
+  if (initial.value.revision !== undefined && currentRevision !== null && initial.value.revision !== currentRevision) return true;
+  return currentRun !== undefined && initial.value.seq !== undefined && initial.value.seq !== currentRun.view.lastWorldSeq;
 }
 type Selection = { kind: 'none' } | { kind: 'receipt'; job: RunPreflightJobView } | { kind: 'document'; document: PreflightDocument };
 export function RunPreflightPanel({ document, currentRun, disabled = false, api = client }: { document: DraftDocument; currentRun?: RunDocument; disabled?: boolean; api?: RunPreflightClient }) {
@@ -82,6 +94,7 @@ export function RunPreflightPanel({ document, currentRun, disabled = false, api 
   const activeJobs = history.kind === 'ready' && history.items.some(value => !preflightTerminal(value.job));
   const notReady = !['ready', 'paused', 'stopped'].includes(currentRun?.view.lifecycle.kind ?? document.view.state.lifecycle) || (currentRun?.view.worldRevision ?? document.view.state.worldRevision) === null;
   return <section className="run-preflight-panel" aria-labelledby={`preflight-${runId}`}><h2 id={`preflight-${runId}`}>Requisitos de ejecución</h2><p>Comprobá la configuración guardada, el Escenario y los servicios necesarios. Esta comprobación no inicia la obra ni llama al modelo.</p>
+    <MemoryPreparationPanel key={runId} runId={runId} configurationRevision={currentRun?.view.configRevision ?? document.view.state.configurationRevision} worldRevision={currentRun?.view.worldRevision ?? document.view.state.worldRevision} disabled={disabled || notReady} reopenExisting={memoryPreparationReopensExisting(document, currentRun)} />
     <div className="draft-actions"><button type="button" disabled={disabled || notReady || busy || intent !== null || activeJobs || history.kind !== 'ready' || needsRead} onClick={evaluate}>Comprobar requisitos de ejecución</button><button type="button" onClick={() => setRefresh(value => value + 1)}>Actualizar historia de comprobaciones</button></div>
     {(disabled || notReady) && <p className="muted">Guardá los cambios y completá la validación Ready para evaluar el corte persistido.</p>}
     {!notReady && <RunBudgetPanel runId={runId} api={api} />}

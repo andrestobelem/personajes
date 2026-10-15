@@ -10,7 +10,7 @@ import {
   SelectableInferenceProfileSchema, type InferenceProvider, type SelectableInferenceProfile,
 } from '../domain/inference-profile.ts';
 import {
-  CircadianPolicySchema, DramaticLineSchema, ProductionValidationIssueSchema,
+  CircadianPolicySchema, DramaticLineSchema, DramaticReferencesSchema, ProductionValidationIssueSchema,
   HumanParticipantProfilesSchema, NarrationModeSchema, ProductionAudioSchema, ProductionRosterSchema, RunBudgetSchema,
   RunConfigurationDraftSchema, SpeechBindingIdSchema, SoundBindingIdSchema,
 } from '../domain/production.ts';
@@ -68,6 +68,8 @@ export const ReadyRunConfigurationSchema = z.strictObject({
   humanParticipants: HumanParticipantProfilesSchema,
   worldSnapshot: WorldSnapshotSchema,
   dramaticLine: DramaticLineSchema,
+  /** Missing only in legacy configurations; references are never required for readiness. */
+  dramaticReferences: DramaticReferencesSchema.optional(),
   circadianPolicy: CircadianPolicySchema,
   language: z.literal('es'),
   spanishVariety: SpanishVarietyForActingSchema,
@@ -293,6 +295,15 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
   const humanParticipants = configuredValue({ field: draft.humanParticipants, name: 'humanParticipants', issues });
   const rawWorld = configuredValue({ field: draft.worldSnapshot, name: 'worldSnapshot', issues });
   const dramaticLine = configuredValue({ field: draft.dramaticLine, name: 'dramaticLine', issues });
+  if (draft.dramaticReferences?.kind === 'proposed') {
+    addIssue(issues, {
+      code: 'proposal-not-confirmed', field: 'dramaticReferences',
+      detail: 'Las referencias dramáticas propuestas requieren confirmación o edición; no son una plantilla obligatoria.',
+    });
+  }
+  const dramaticReferences = draft.dramaticReferences?.kind === 'configured'
+    ? draft.dramaticReferences.value
+    : draft.dramaticReferences?.kind === 'empty' ? [] : undefined;
   const circadianPolicy = configuredValue({ field: draft.circadianPolicy, name: 'circadianPolicy', issues });
   const spanishVariety = configuredValue({ field: draft.spanishVariety, name: 'spanishVariety', issues });
   const narrationMode = configuredValue({ field: draft.narrationMode, name: 'narrationMode', issues });
@@ -351,6 +362,7 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
     humanParticipants,
     worldSnapshot: world,
     dramaticLine,
+    ...(dramaticReferences === undefined ? {} : { dramaticReferences }),
     circadianPolicy,
     language: 'es',
     spanishVariety,

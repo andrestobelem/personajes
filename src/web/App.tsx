@@ -9,6 +9,7 @@ import { readStoredBackupIntent } from './backup-client.ts';
 const BackupRestorePanel = React.lazy(async () => ({ default: (await import('./BackupRestorePanel.tsx')).BackupRestorePanel }));
 
 const RunDraftWorkspace = React.lazy(async () => ({ default: (await import('./RunDraftWorkspace.tsx')).RunDraftWorkspace }));
+const IcmRuntimeConfigurationPanel = React.lazy(async () => ({ default: (await import('./IcmRuntimeConfigurationPanel.tsx')).IcmRuntimeConfigurationPanel }));
 const PiAccessPanel = React.lazy(async () => ({ default: (await import('./PiAccessPanel.tsx')).PiAccessPanel }));
 const PiAccessCheckPanel = React.lazy(async () => ({ default: (await import('./PiAccessCheckPanel.tsx')).PiAccessCheckPanel }));
 const DossierExchangePanel = React.lazy(async () => ({ default: (await import('./DossierExchangePanel.tsx')).DossierExchangePanel }));
@@ -174,7 +175,7 @@ export function App() {
       {hostRecovered&&<section aria-label="Biblioteca después de recuperación"><p role="status">El host fue recuperado y verificado. Actualizá la biblioteca cuando termines de revisar los borradores abiertos.</p><button disabled={refreshingLibrary} onClick={()=>void refreshLibrary()}>Actualizar biblioteca recuperada</button>{libraryRefreshError&&<p role="alert">{libraryRefreshError}</p>}</section>}
       {originalRetained&&<OriginalRetainedLibraryNotice refreshing={refreshingLibrary} error={libraryRefreshError} onReload={()=>void refreshLibrary()}/>}
       {state.kind === 'ready' && openedTabs.has('runs') && <React.Suspense fallback={<p role="status">Abriendo la preparación…</p>}><div hidden={tab !== 'runs'}><RunDraftWorkspace catalog={state.catalog.items} {...(openRunRequest===undefined?{}:{openRequest:openRunRequest})} /></div></React.Suspense>}
-      {openedTabs.has('access') && <React.Suspense fallback={<p role="status">Abriendo el acceso…</p>}><div hidden={tab !== 'access'}><PiAccessPanel /><PiAccessCheckPanel /></div></React.Suspense>}
+      {openedTabs.has('access') && <React.Suspense fallback={<p role="status">Abriendo el acceso…</p>}><div hidden={tab !== 'access'}><PiAccessPanel /><PiAccessCheckPanel /><IcmRuntimeConfigurationPanel /></div></React.Suspense>}
       {state.kind==='ready'&&openedTabs.has('exchange')&&<React.Suspense fallback={<p role="status">Abriendo el intercambio…</p>}><div hidden={tab!=='exchange'}><DossierExchangePanel catalog={state.catalog.items} onHostRecovered={()=>{setHostRecovered(true);setOriginalRetained(false);}} onOriginalRetained={()=>{setOriginalRetained(true);setHostRecovered(false);}} onOpenRun={(runId)=>{setOpenRunRequest({runId});changeTab('runs');}}/></div></React.Suspense>}
       <div hidden={tab === 'runs' || tab === 'access' || tab === 'exchange'}><div className="workspace" data-reading={reading}><section className="catalog-panel" aria-label="Catálogo">
         <span className="eyebrow">EL MUNDO EMPIEZA CON SUS PERSONAJES</span><h1 tabIndex={-1} ref={catalogHeading}>{tab === 'characters' ? 'El reparto' : tab === 'research' ? 'Ideas para la obra' : 'Las fuentes'}</h1>

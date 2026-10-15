@@ -11,6 +11,7 @@ import { createHostBackupQuiesce } from '../src/application/host-backup-quiesce.
 import { createHostRequestBarrier } from '../src/application/host-request-barrier.ts';
 import { openLocalHost } from '../src/application/local-host.ts';
 import { createVoiceRuntime } from '../src/application/voice-runtime.ts';
+import { createRunMemoryPreparation } from '../src/application/run-memory-preparation.ts';
 import { createWorldDeliverySupervisor } from '../src/application/world-delivery-supervisor.ts';
 import { ApprovedJournalSchemaSchema, validateExternalBackup } from '../src/application/external-backup-validation.ts';
 import { BackupForkSourceSchema, ForkSourceDataSchema } from '../src/application/fork-source.ts';
@@ -34,6 +35,7 @@ function inventory(root: string) {
 async function fixture(memory = false) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-external-validation-')); const root = join(directory, 'data');
   const host = openLocalHost({ privateDataRoot: root }); const voice = createVoiceRuntime({ host }); const deliveries = createWorldDeliverySupervisor({ journal: host.journal });
+  const memories = createRunMemoryPreparation({ host, acquireMaintenance: async () => () => {} });
   const inactive = { backupBusy: false }; const service = openBackupService({ privateDataRoot: root,
     quiesce: createHostBackupQuiesce({ host, voice: voice.service, deliveries, admission: createHostRequestBarrier(), oauth: inactive, access: inactive, preflight: inactive }) });
   try {
@@ -70,10 +72,21 @@ async function fixture(memory = false) {
         manifest = BackupManifestSchema.parse({ ...manifest, journalVersion: version });
         const text = JSON.stringify(manifest); writeFileSync(join(bundle.bundleRoot, 'manifest.json'), text); manifestHash = hash(text);
       },
-      async close() { service.close(); await voice.close(); await deliveries.close(); host.close(); rmSync(directory, { recursive: true, force: true }); rmSync(root + '-auth', { recursive: true, force: true }); },
+      async close() { service.close(); await memories.close(); await voice.close(); await deliveries.close(); host.close(); rmSync(directory, { recursive: true, force: true }); rmSync(root + '-auth', { recursive: true, force: true }); },
     };
-  } catch (error: unknown) { service.close(); await voice.close(); await deliveries.close(); host.close(); rmSync(directory, { recursive: true, force: true }); throw error; }
+  } catch (error: unknown) { service.close(); await memories.close(); await voice.close(); await deliveries.close(); host.close(); rmSync(directory, { recursive: true, force: true }); throw error; }
 }
+
+test('helper acepta un backup anterior a la preparación de memorias sin ejecutar DDL de la fuente', async () => {
+  const f = await fixture();
+  try {
+    f.mutate('world.sqlite', db => db.exec('DROP TABLE memory_preparation_receipts; DROP TABLE memory_preparation_jobs;'));
+    const before = inventory(f.bundleRoot);
+    const result = await validateExternalBackup(f.request());
+    assert.equal(result.sources.length, 1);
+    assert.deepEqual(inventory(f.bundleRoot), before);
+  } finally { await f.close(); }
+});
 
 test('helper aislado valida journal real y escribe fuente congelada exacta sin tocar bundle ni crear sidecars', async () => {
   const f = await fixture();

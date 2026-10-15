@@ -84,6 +84,8 @@ test('editor renderizado deja circunstancias sin inventar y bloquea configuraci�
   const draftMarkup = renderToStaticMarkup(React.createElement(RunDraftEditor, props));
   assert.match(draftMarkup, /Fecha y hora ficticias/);
   assert.match(draftMarkup, /Elegí un nombre/);
+  assert.match(draftMarkup, /Referencias dramáticas · opcional/);
+  assert.match(draftMarkup, /no se incluyen en el contexto privado de los actores/);
   assert.match(draftMarkup, /Pendiente/);
   assert.doesNotMatch(draftMarkup, /<textarea[^>]*>\s*\{/);
   const promoted = renderToStaticMarkup(React.createElement(RunDraftEditor, { ...props, readOnly: true, lifecycle: 'ready' }));

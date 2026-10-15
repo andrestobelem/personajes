@@ -125,7 +125,7 @@ test('fallo al guardar checkpoint final revierte configuración, epoch, archivo,
 test('vista de preparación muestra identidad efectiva sin reescribir borrador original y bloquea PATCH/validate ordinarios',async()=>{
  const t=await fixture();try{
   const runId=t.f.source.snapshot.runId;const recordedAt='2026-10-15T00:00:00Z';const configuration=t.f.source.configuration;
-  const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+  const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
   const configured=Object.fromEntries(fields.flatMap(field=>configuration[field]===undefined?[]:[[field,{kind:'configured',value:configuration[field],evidence:{kind:'operator-choice',operatorId:'original-operator',recordedAt}}]]));
   const draft=RunConfigurationDraftSchema.parse({...createEmptyRunConfigurationDraft({runId,revision:configuration.configRevision}),...configured});const history={draft,principalId:'original-operator',recordedAt};
   t.inspect(db=>{db.prepare('INSERT INTO run_configuration_drafts VALUES(?,?,?,?)').run(runId,draft.revision,recordedAt,recordedAt);db.prepare('INSERT INTO run_configuration_draft_history VALUES(?,?,?,?,?,?)').run(runId,draft.revision,history.principalId,recordedAt,canonical(history),configuratorValueHash(history));});

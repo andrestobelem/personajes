@@ -114,6 +114,14 @@ La comunicación tiene estados distintos: propuesta/borrador → revisión aplic
 
 Las tools de personajes sólo observan o producen intentos/efectos dentro del Escenario. No envían mensajes reales, accionan APIs externas arbitrarias, acceden a internet general, shell ni archivos privados. Integraciones de host como login, memoria o TTS tienen catálogo y autorizaciones propios, fuera del actor. TTS procesa diálogo/narración ya publicados y voz seleccionada; no otorga al personaje control sobre credenciales, URLs, facturación o publicación externa. Cualquier ampliación futura de efectos externos exige una configuración administrativa explícita y trazable.
 
+## 4.8 Alcance por versiones
+
+El PRD conserva los requisitos del producto completo. El corte acordado para la **primera alpha** es textual, de un episodio y con un elenco activo pequeño. V1 debe poder operarse de punta a punta desde una GUI funcional y visual: preparar o elegir presets editables, conectar ICM, autenticarse con el proveedor seleccionado, iniciar y observar una escena, e intervenir con una identidad ficticia propia. La alpha usa actores Pi independientes y memoria situada.
+
+La segunda versión absorbe la síntesis ElevenLabs, el narrador opcional, exportación/importación portable, análisis histórico avanzado, la aceptación ampliada del presupuesto y la aceptación completa de los 25 ensayos y 77 criterios. Los topes y las pausas de seguridad ya implementados permanecen en V1.
+
+La [matriz de alcance V1/V2](diseno/alcance-versiones.md) asigna los 77 IDs y describe qué cobertura mínima de cada requisito se exige a la alpha. Una asignación de versión no acredita implementación ni cambia la evidencia requerida para cerrar el producto completo.
+
 ## 5. Requisitos funcionales verificables
 
 Cada ID representa una obligación del producto. Las specs deben asignarle comportamiento, datos, interfaces y pruebas. La ausencia de evidencia de ejecución mantiene el requisito pendiente, aunque exista diseño.

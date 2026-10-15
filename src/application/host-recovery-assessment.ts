@@ -19,9 +19,38 @@ const administrativeColumns: Record<typeof adminNames[number], readonly string[]
   backup_restore_previews: ['token', 'preview_json', 'target_fingerprint', 'used', 'result_json', 'integrity_hash'],
   exchange_http_operations: ['principal_id', 'operation_id', 'request_hash', 'response_json', 'integrity_hash', 'operation_kind'],
 };
+// These two tables are host-owned setup receipts, not narrative journal state.
+// Recovery accepts only the exact DDL used by run-memory-preparation.ts; a
+// familiar prefix alone must never turn arbitrary tables into trusted state.
+const memoryPreparationSchema = [
+  { type: 'index', name: 'memory_preparation_jobs_scope', tbl_name: 'memory_preparation_jobs', sql: 'CREATE INDEX memory_preparation_jobs_scope ON memory_preparation_jobs(principal_id,run_id,created_at DESC,job_id DESC)' },
+  { type: 'index', name: 'sqlite_autoindex_memory_preparation_jobs_1', tbl_name: 'memory_preparation_jobs', sql: null },
+  { type: 'index', name: 'sqlite_autoindex_memory_preparation_receipts_1', tbl_name: 'memory_preparation_receipts', sql: null },
+  { type: 'table', name: 'memory_preparation_jobs', tbl_name: 'memory_preparation_jobs', sql: `CREATE TABLE memory_preparation_jobs(
+    job_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision>=0),
+    created_at INTEGER NOT NULL CHECK(created_at>=0),
+    updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+    data_json TEXT NOT NULL,
+    data_hash TEXT NOT NULL
+  )` },
+  { type: 'table', name: 'memory_preparation_receipts', tbl_name: 'memory_preparation_receipts', sql: `CREATE TABLE memory_preparation_receipts(
+    principal_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    receipt_hash TEXT NOT NULL,
+    PRIMARY KEY(principal_id,idempotency_key),
+    FOREIGN KEY(job_id) REFERENCES memory_preparation_jobs(job_id) ON DELETE RESTRICT
+  )` },
+] as const;
 // Current journal/exchange/voice tables. Unknown additions require a conscious
 // recovery contract rather than silently becoming ignored operational state.
-const worldTables = new Set(`act_scenes actor_activation_causes actor_activation_invitation_jobs actor_activation_invitations actor_job_checkpoints actor_job_request_leases actor_knowledge actor_pi_candidates actor_pi_consumptions actor_pi_sessions actor_pi_turn_receipts actor_state_cut_batches actor_state_cuts actor_terminal_proposals actor_turn_intents actor_turn_job_inputs actor_turn_jobs actor_turn_reconciliations acts administrative_checkpoint_integrity administrative_checkpoints administrative_jobs administrative_request_leases administrative_sessions backup_host_identity backup_jobs backup_restore_previews circumstance_operations continuista_candidates continuista_checkpoints continuista_jobs continuista_receipts continuista_request_leases continuista_sessions coordinator_pulses direction_events direction_operations director_annotations director_candidates episode_scenes episodes exchange_dossier_adaptations exchange_dossier_exports exchange_dossier_imports exchange_dossier_previews exchange_http_operations experiences fork_backup_sources fork_dramatic_seeds fork_job_history fork_job_retries fork_jobs fork_projection_receipts human_intervention_receipts legacy_narration_publications memory_outbox memory_receipts model_time_run_state model_time_spans narration_candidates narration_receipts narration_review_candidates narration_review_receipts pi_access_job_history pi_access_job_operations pi_access_job_results pi_access_jobs pi_oauth_job_history pi_oauth_job_operations pi_oauth_jobs pulses request_reservations routine_clock_advances run_budgets run_configuration_draft_history run_configuration_drafts run_configuration_revisions run_control_operations run_draft_operations run_draft_validation_reports run_preflight_job_history run_preflight_job_operations run_preflight_job_results run_preflight_jobs run_step_jobs schema_version sqlite_sequence structure_events structure_operations voice_config_receipts voice_config_versions voice_entities voice_operations voice_receipts voice_reservations voice_schema_version voice_staged_media world_commits world_deliveries world_events world_perception_experiences world_perceptions world_prepared_contexts world_proposals world_resolutions world_reviews world_runs identity_promotion_receipts actor_job_identity_bindings actor_pi_session_archives actor_identity_session_bindings actor_identity_epochs configurator_consents configurator_operations configurator_candidates configurator_checkpoints configurator_sessions configurator_generations configurator_jobs configurator_http_operations`.split(' '));
+const worldTables = new Set(`act_scenes actor_activation_causes actor_activation_invitation_jobs actor_activation_invitations actor_job_checkpoints actor_job_request_leases actor_knowledge actor_pi_candidates actor_pi_consumptions actor_pi_sessions actor_pi_turn_receipts actor_state_cut_batches actor_state_cuts actor_terminal_proposals actor_turn_intents actor_turn_job_inputs actor_turn_jobs actor_turn_reconciliations acts administrative_checkpoint_integrity administrative_checkpoints administrative_jobs administrative_request_leases administrative_sessions backup_host_identity backup_jobs backup_restore_previews circumstance_operations continuista_candidates continuista_checkpoints continuista_jobs continuista_receipts continuista_request_leases continuista_sessions coordinator_pulses direction_events direction_operations director_annotations director_candidates episode_scenes episodes exchange_dossier_adaptations exchange_dossier_exports exchange_dossier_imports exchange_dossier_previews exchange_http_operations experiences fork_backup_sources fork_dramatic_seeds fork_job_history fork_job_retries fork_jobs fork_projection_receipts human_intervention_receipts legacy_narration_publications memory_outbox memory_receipts memory_preparation_jobs memory_preparation_receipts model_time_run_state model_time_spans narration_candidates narration_receipts narration_review_candidates narration_review_receipts pi_access_job_history pi_access_job_operations pi_access_job_results pi_access_jobs pi_oauth_job_history pi_oauth_job_operations pi_oauth_jobs pulses request_reservations routine_clock_advances run_budgets run_configuration_draft_history run_configuration_drafts run_configuration_revisions run_control_operations run_draft_operations run_draft_validation_reports run_preflight_job_history run_preflight_job_operations run_preflight_job_results run_preflight_jobs run_step_jobs schema_version sqlite_sequence structure_events structure_operations voice_config_receipts voice_config_versions voice_entities voice_operations voice_receipts voice_reservations voice_schema_version voice_staged_media world_commits world_deliveries world_events world_perception_experiences world_perceptions world_prepared_contexts world_proposals world_resolutions world_reviews world_runs identity_promotion_receipts actor_job_identity_bindings actor_pi_session_archives actor_identity_session_bindings actor_identity_epochs configurator_consents configurator_operations configurator_candidates configurator_checkpoints configurator_sessions configurator_generations configurator_jobs configurator_http_operations`.split(' '));
 const memoryTables = new Set(`code_areas concept_links concepts facts feedback hook_events icm_metadata memoirs memories messages pending_consolidations pending_extractions sessions sqlite_sequence vec_memories vec_memories_chunks vec_memories_info vec_memories_rowids vec_memories_vector_chunks00`.split(' '));
 for (const prefix of ['concepts', 'feedback', 'memories', 'messages']) for (const suffix of ['', '_config', '_data', '_docsize', '_idx']) memoryTables.add(`${prefix}_fts${suffix}`);
 const fileSchema = z.strictObject({ path: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/), bytes: z.number().int().nonnegative() });
@@ -97,6 +126,11 @@ function sqliteFingerprint(files: Map<string, Buffer>, path: string, world: bool
     if (db.prepare('PRAGMA quick_check').all().some(row => row.quick_check !== 'ok')) fail('RECOVERY_SQLITE_INVALID');
     const schema = z.array(z.strictObject({ type: z.string(), name: z.string(), tbl_name: z.string(), sql: z.string().nullable() }))
       .parse(db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name').all());
+    const memoryPreparationObjects = schema.filter(entry => entry.name.startsWith('memory_preparation_')
+      || entry.tbl_name.startsWith('memory_preparation_'));
+    if (memoryPreparationObjects.length > 0 && canonical(memoryPreparationObjects) !== canonical(memoryPreparationSchema)) {
+      fail('RECOVERY_MEMORY_PREPARATION_SCHEMA_INVALID');
+    }
     const known = world ? worldTables : memoryTables;
     const tables: HostRecoveryPreservePlan['tables'] = []; const registeredBackups = new Map<string, string | null>(); const values: unknown[] = [];
     for (const table of schema.filter(entry => entry.type === 'table')) {

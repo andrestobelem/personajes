@@ -7,10 +7,12 @@ import { setup } from './fixtures/continuista.ts';
 import { controlledDirectorSessionFactory } from './fixtures/director-session.ts';
 import { createDirectorPiWorker } from '../src/application/director-pi-worker.ts';
 import { createRunObservationApplication } from '../src/application/run-observation.ts';
+import { DirectorContextSchema } from '../src/domain/admin-roles.ts';
+import type { DramaticReferences } from '../src/domain/production.ts';
 import { DirectorObservationListSchema } from '../src/domain/run-observation.ts';
 
-async function fixtureWithTerminalPulse() {
-  const fixture=await setup();
+async function fixtureWithTerminalPulse(dramaticReferences?: DramaticReferences) {
+  const fixture=await setup(undefined, dramaticReferences);
   const db=new DatabaseSync(join(fixture.directory,'journal.sqlite'));
   try{db.exec('DELETE FROM actor_turn_job_inputs; DELETE FROM actor_turn_jobs;');}finally{db.close();}
   const begun=fixture.journal.beginCoordinatorPulse({runId:fixture.claim.runId});
@@ -24,12 +26,22 @@ async function fixtureWithTerminalPulse() {
 }
 
 test('Director independiente usa SDK Pi y ledger real, publica evidencia append-only sin decidir hechos y replay no reinfiere',async()=>{
-  const fixture=await fixtureWithTerminalPulse();
+  const dramaticReferences:DramaticReferences=[
+    {tradition:'greek-tragedy',author:'Sófocles',work:'Edipo rey',focus:'Reconocimiento y consecuencias.'},
+    {tradition:'old-comedy',author:'Aristófanes',work:'Las aves',focus:'Consecuencias del orden propuesto.'},
+  ];
+  const fixture=await fixtureWithTerminalPulse(dramaticReferences);
   try {
-    const stats={requests:0,disposed:0};const worker=createDirectorPiWorker({journal:fixture.journal,runtime:fixture.runtime,ownerToken:randomUUID(),sessionFactory:controlledDirectorSessionFactory({root:fixture.directory,stats})});
+    const stats={requests:0,disposed:0};let receivedContext:ReturnType<typeof DirectorContextSchema.parse>|undefined;
+    const controlled=controlledDirectorSessionFactory({root:fixture.directory,stats});
+    const worker=createDirectorPiWorker({journal:fixture.journal,runtime:fixture.runtime,ownerToken:randomUUID(),sessionFactory:async input=>{
+      const session=await controlled(input);
+      return {...session,async prompt(promptInput){receivedContext=DirectorContextSchema.parse(JSON.parse(promptInput.text));return session.prompt(promptInput);}};
+    }});
     const world=fixture.journal.loadWorld({runId:fixture.claim.runId});
     const accepted=await worker.run({runId:fixture.claim.runId,pulseId:fixture.pulseId});
     if(accepted.kind!=='accepted')assert.fail(`Director no aceptado: ${accepted.kind}`);
+    assert.deepEqual(receivedContext?.dramaticReferences,dramaticReferences);
     assert.equal(stats.requests,2);assert.equal(stats.disposed,1);
     assert.equal(accepted.receipt.annotation.observation.assessment.kind,'insufficient');
     assert.deepEqual(fixture.journal.loadWorld({runId:fixture.claim.runId}),world);

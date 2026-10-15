@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SelectableInferenceProfileSchema } from './inference-profile.ts';
-import { DramaticLineSchema } from './production.ts';
+import { DramaticLineSchema, DramaticReferencesSchema } from './production.ts';
 import { CharacterIdSchema, EventIdSchema, FictionalInstantSchema, HashSchema, JobIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema } from './values.ts';
 import { WorldEventSchema } from './world-schema.ts';
 
@@ -38,6 +38,8 @@ export const DirectorAnnotationSchema = z.strictObject({
 export const DirectorContextSchema = z.strictObject({
   kind: z.literal('director-context'), schemaVersion: z.literal(1), role: z.literal('director'),
   scope: AdministrativeRunScopeSchema, dramaticLine: DramaticLineSchema,
+  /** Optional, operator-authored lens; omitted from legacy contexts and actor contexts. */
+  dramaticReferences: DramaticReferencesSchema.optional(),
   participantCharacterIds: z.array(CharacterIdSchema).max(100),
   confirmedEvents: z.array(WorldEventSchema).max(10000),
   previousAnnotations: z.array(DirectorAnnotationSchema).max(10000),

@@ -48,3 +48,7 @@ Validación realizada:
 - El parche se aplicó a copias temporales limpias de los originales y reprodujo **todos los hashes finales** del manifiesto.
 
 La comprobación demuestra integridad de archivos, configuración y reproducción. No pretende demostrar que un modelo siempre seleccionará la skill adecuada ni que todos los ejemplos TypeScript constituyen un programa completo compilable.
+
+## Incorporación de Writing for Agents el 15 de octubre de 2026
+
+Por pedido del usuario se instaló [writing-for-agents](../../.agents/skills/writing-for-agents/SKILL.md) localmente. El inventario actual reúne cinco skills. Fuente: [Matt Pocock, commit 49dd158](https://github.com/mattpocock/skills/tree/49dd158d1076134a641b33efb035946536778336/skills/productivity/writing-for-agents), licencia MIT incluida. Se conserva SKILL-MECHANICS.md y se habilita invocación implícita en agents/openai.yaml. El manifiesto registra hashes originales y finales; el parche acumulado incluye licencia y metadatos añadidos. Su sección nueva se reprodujo sobre una copia temporal limpia y coincidió byte por byte con los archivos instalados. Las verificaciones anteriores de cuatro skills conservan su fecha y alcance histórico.

@@ -498,3 +498,31 @@ Implementados formulario completo, fuente parental exacta, preview persistente c
 La prueba integrada entrega una intervención a una instancia Pi en una obra activa con SQLite/ICM reales y transporte controlado. Con una llamada permitida, la petición siguiente se deniega antes del transporte, el runtime pausa la representación y RunView conserva perfil, estado agotado y saldo exactos; el render de controles muestra pausa, agotamiento y ausencia de sustitución de modelo. El Escenario no gana un hecho por la solicitud denegada. La revisión documental alinea el alcance del ledger Pi común con los cinco roles que infieren y distingue las cuotas durables de audio, que se proyectan desde un ledger separado. [Evidencia y límites](presupuesto-representacion.md).
 
 Verificación: TypeScript y build aprobados (473 módulos); **1.170 pruebas aprobadas, cero fallidas y una omitida exclusiva de Linux** (1.171 totales), con ICM 0.11.4 e incluyendo C59. No hubo login ni inferencia live de proveedor; no se atribuyen mediciones de tokens/costo ni audio remoto. El objetivo y la aceptación integral de los 77 requisitos siguen abiertos.
+
+## Presets editables de preparación — 15 de octubre de 2026
+
+Nueva preparación ofrece puesta en blanco y ensayo sintético Max/Hymie/Fibonacci. La propuesta editorial no importa identidades, conocimientos ni recuerdos; requiere confirmar circunstancias, curar actores y colocarlos. SQLite conserva propuestas al reabrir sin crear un mundo operativo. El recorrido gráfico verificó selección, guardado, bloqueo de validación y reapertura. La revisión independiente no encontró bloqueantes en 16 pruebas focales. Al cierre de ese primer corte seguían pendientes el selector de cortes documentados, la puesta con OAuth/modelo reales y la aceptación integral; el selector se incorporó después, como se registra a continuación. Ver [evidencia y límites](presets-de-preparacion.md).
+
+Verificación global con ICM real: 1.182 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux. TypeScript y build correctos (475 módulos); las 16 pruebas focales se repitieron después de compactar visualmente el selector. El objetivo completo sigue activo.
+
+## Cortes documentales de continuidad — 15 de octubre de 2026
+
+El selector ya ofrece dos cortes acotados y versionados, con fuentes del distribuidor verificadas, alcances e incertidumbres. Sólo nombre y continuidad se proponen; no se inventan fechas diegéticas, mundo, reparto ni recuerdos. Los hitos no establecidos permanecen indeterminados. Títulos, referencias y límites persisten dentro de la continuidad hasheada y sobreviven al reinicio de SQLite; el catálogo original queda congelado. La revisión independiente confirma que el prompt privado no serializa la continuidad global como conocimiento del actor. La puesta con proveedor real y el objetivo integral siguen pendientes. [Evidencia, fuentes y límites](cortes-documentales-de-continuidad.md).
+
+Navegador: selección, fuentes, guardado, validación bloqueada y reapertura verificados. Verificación global con ICM real: 1.188 pruebas aprobadas, cero fallos y una omitida exclusiva de Linux; después de los ajustes de títulos/inmutabilidad se repitieron 23 focales, TypeScript y build (476 módulos). Los 77 criterios permanecen pendientes de aceptación integral.
+
+## Preparación explícita de memorias privadas — 15 de octubre de 2026
+
+Se añadió trabajo durable por corte y principal, API autenticada y panel para preparar las SQLite de cada actor sin recuerdos ni inferencia. Una puesta con historia sólo reabre bases existentes verificadas. El host conserva y cierra las conexiones que permiten el acceso WAL de sólo lectura; consultas, reinicio y recuperación no inicializan bases automáticamente. La preparación usa una barrera de mantenimiento y conserva intención/recibo idempotente ante respuestas inciertas. Una secuencia inicial no nula no prueba vida anterior.
+
+La integración con CLI real verificó HTTP, preflight, backup con conexión ociosa, reinicio e historial. En navegador se verificó inicialización, gate ICM cumplido y conservación de la base tras reiniciar el host. La primera suite detectó una incompatibilidad de recuperación offline: se corrigió con admisión de DDL exacta y divergencia conservadora del ledger; sus 34 regresiones pasaron. [Evidencia y límites](preparacion-de-memorias.md). Sigue pendiente seleccionar el ejecutable ICM desde GUI, autenticar una cuenta real y acreditar la obra integral; los 77 criterios no se cierran por este cambio.
+
+Verificación global final con ICM 0.11.4 real: **1.205 pruebas aprobadas, cero fallos y una omisión exclusiva de Linux** (1.206 totales). TypeScript correcto; build correcto (479 módulos). Log local: `/private/tmp/personajes-memory-full-verify-r3.log`.
+
+## Configuración gráfica del ejecutable ICM — 15 de octubre de 2026
+
+El panel de acceso permite indicar el CLI local, aplicarlo y desactivarlo, con historial e idempotencia durables. La selección queda fuera de los backups de la obra y prevalece sobre el entorno. La recomposición exige inactividad, mantiene credenciales y archivos de sesión y no llama a recover ni inicia actores. Se verificaron launcher real, precedencia de null guardado, preparación de una memoria después de configurar y reinicio de host. En navegador se comprobó aplicación, selección guardada y consulta del resultado tras reiniciar.
+
+La revisión independiente reprodujo y ayudó a corregir apertura de un archivo enlazado antes de validarlo y espera ilimitada por pipes de descendientes del CLI. El control de exclusión usa SQLite separada sin estado de obra y se libera al morir el proceso; la recuperación del host principal conserva su política explícita. [Evidencia y límites](configuracion-icm-del-host.md), [decisión](../adr/0016-configuracion-local-del-runtime-icm.md).
+
+Verificación global con ICM real: **1.229 pruebas aprobadas, cero fallos y una omisión exclusiva de Linux**, 1.230 totales. TypeScript y build correctos (482 módulos). El login e inferencia reales y la aceptación integral de los 77 requisitos siguen pendientes.

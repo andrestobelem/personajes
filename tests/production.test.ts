@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { projectRunPreflightReport } from '../src/application/run-preflight-jobs.ts';
 import { test } from 'node:test';
 import { createEmptyRunConfigurationDraft, ProductionAudioSchema, RunBudgetSchema, RunConfigurationDraftSchema } from '../src/domain/production.ts';
-import type { ProductionRoster } from '../src/domain/production.ts';
+import type { DramaticReferences, ProductionRoster } from '../src/domain/production.ts';
 import { ContinuityContextSchema, PreparedCharacterSchema, SpanishVarietyForActingSchema } from '../src/domain/preparation.ts';
 import type { PreparedCharacter } from '../src/domain/preparation.ts';
 import { WorldSnapshotSchema } from '../src/domain/world.ts';
@@ -224,6 +224,10 @@ function readyFixture(input: Parameters<typeof draftFixture>[0] = {}): ReadyRunC
 
 test('el borrador nuevo registra Sol 6.1 low y Ready conserva el perfil confirmado', () => {
   const empty = createEmptyRunConfigurationDraft({ runId, revision: 0 });
+  assert.deepEqual(empty.dramaticReferences, {
+    kind: 'configured', value: [],
+    evidence: { kind: 'integrator-default', decisionRef: 'S09-default-no-dramatic-reference-template' },
+  });
   assert.equal(empty.inferenceProfile?.kind, 'configured');
   if (empty.inferenceProfile?.kind === 'configured') {
     assert.deepEqual(empty.inferenceProfile.value, DEFAULT_INFERENCE_PROFILE);
@@ -234,6 +238,45 @@ test('el borrador nuevo registra Sol 6.1 low y Ready conserva el perfil confirma
   const selected = validateRunConfiguration({ draft: draftFixture({ inferenceProfile: CLAUDE_INFERENCE_PROFILE }) });
   assert.equal(selected.kind, 'ready');
   if (selected.kind === 'ready') assert.deepEqual(selected.configuration.inferenceProfile, CLAUDE_INFERENCE_PROFILE);
+});
+
+test('referencias trágicas y cómicas son opcionales, confirmadas y no completan el conflicto', () => {
+  const references: DramaticReferences = [
+    { tradition: 'greek-tragedy', author: 'Sófocles', work: 'Edipo rey', focus: 'Reconocimiento y responsabilidad.' },
+    { tradition: 'old-comedy', author: 'Aristófanes', work: 'Las aves', focus: 'Consecuencias del nuevo orden.' },
+  ];
+  const draft = RunConfigurationDraftSchema.parse({
+    ...draftFixture(),
+    dramaticReferences: configured(references),
+  });
+  const result = validateRunConfiguration({ draft });
+  assert.equal(result.kind, 'ready');
+  if (result.kind === 'ready') {
+    assert.deepEqual(result.configuration.dramaticReferences, references);
+    assert.deepEqual(result.configuration.dramaticLine.conflict, { kind: 'not-formulated' });
+  }
+
+  const proposed = RunConfigurationDraftSchema.parse({
+    ...draft,
+    dramaticReferences: { kind: 'proposed', proposalId: randomUUID(), source: 'editorial', value: references },
+  });
+  const proposedResult = validateRunConfiguration({ draft: proposed });
+  assert.equal(proposedResult.kind, 'incomplete');
+  if (proposedResult.kind === 'incomplete') assert.ok(proposedResult.issues.some((issue) => issue.code === 'proposal-not-confirmed' && issue.field === 'dramaticReferences'));
+
+  const { dramaticReferences: _historicalReferences, ...historicalDraft } = draftFixture();
+  const historicalResult = validateRunConfiguration({ draft: historicalDraft });
+  assert.equal(historicalResult.kind, 'ready');
+  if (historicalResult.kind === 'ready') assert.equal('dramaticReferences' in historicalResult.configuration, false);
+  const { dramaticReferences: _historicalReadyReferences, ...historicalReadyData } = readyFixture();
+  const historicalReady = ReadyRunConfigurationSchema.parse(historicalReadyData);
+  assert.equal('dramaticReferences' in historicalReady, false);
+  assert.equal(RunConfigurationDraftSchema.safeParse({ ...draft, dramaticReferences: configured([references[0], references[0]]) }).success, false);
+
+  const cleared = RunConfigurationDraftSchema.parse({ ...draft, dramaticReferences: { kind: 'empty' } });
+  const clearedResult = validateRunConfiguration({ draft: cleared });
+  assert.equal(clearedResult.kind, 'ready');
+  if (clearedResult.kind === 'ready') assert.deepEqual(clearedResult.configuration.dramaticReferences, []);
 });
 
 test('Luna sólo se puede leer como historia y un perfil ausente no se rellena retroactivamente', () => {

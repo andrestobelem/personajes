@@ -1288,8 +1288,9 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
     try{releaseAdmission=options.admissionBarrier?.enter({method,path:segments})??(()=>{});}
     catch{
       const recovering=options.admissionBarrier?.isRecovering===true;
-      const code=recovering?'HOST_RECOVERY_IN_PROGRESS':'HOST_BACKUP_IN_PROGRESS';
-      fail({status:503,kind:'dependency',code,message:recovering?'El host está recuperando un respaldo; reintentá al terminar.':'El host está preparando un backup; reintentá al terminar.',safeCode:code,retryable:true});
+      const maintaining=options.admissionBarrier?.isMaintaining===true;
+      const code=recovering?'HOST_RECOVERY_IN_PROGRESS':maintaining?'HOST_MAINTENANCE_IN_PROGRESS':'HOST_BACKUP_IN_PROGRESS';
+      fail({status:503,kind:'dependency',code,message:recovering?'El host está recuperando un respaldo; reintentá al terminar.':maintaining?'El host está preparando recursos privados; reintentá al terminar.':'El host está preparando un backup; reintentá al terminar.',safeCode:code,retryable:true});
     }
     try{return await handleAdmitted(req,res,url,segments,method);}finally{releaseAdmission();}
   }

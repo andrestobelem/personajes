@@ -202,7 +202,7 @@ test('preparación derivada atribuye nombre al operador y valores heredados al h
   const staged=f.stage();f.project();const ready=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});
   const draft=f.journal.readRunConfigurationDraft({runId:ready.targetRunId});assert.ok(draft);
   assert.equal(draft.name.kind,'configured');if(draft.name.kind==='configured')assert.equal(draft.name.evidence.kind,'operator-choice');
-  for(const field of ['fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const){
+  for(const field of ['fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const){
    const section:{kind:string;evidence?:{kind:string;derivationRef?:string}}|undefined=draft[field];assert.ok(section);assert.equal(section.kind,'configured');assert.equal(section.evidence?.kind,'host-derived');assert.equal(section.evidence?.derivationRef,`fork:${staged.operationId}`);
   }
  }finally{f.close();}

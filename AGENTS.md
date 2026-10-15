@@ -21,7 +21,7 @@ Estas instrucciones orientan a los asistentes que desarrollan o mantienen el pro
 
 ## Skills y entrevistas de diseño
 
-Las skills están en [.agents/skills](.agents/skills): [domain-modeling](.agents/skills/domain-modeling/SKILL.md), [grill-with-docs](.agents/skills/grill-with-docs/SKILL.md), [grilling](.agents/skills/grilling/SKILL.md) y [typescript-best-practices](.agents/skills/typescript-best-practices/SKILL.md). Leer las que sean aplicables; no iniciar una entrevista sólo por guardar una aclaración ya resuelta.
+Las skills están en [.agents/skills](.agents/skills): [domain-modeling](.agents/skills/domain-modeling/SKILL.md), [grill-with-docs](.agents/skills/grill-with-docs/SKILL.md), [grilling](.agents/skills/grilling/SKILL.md) y [typescript-best-practices](.agents/skills/typescript-best-practices/SKILL.md). Para escribir skills o instrucciones para agentes, usar [writing-for-agents](.agents/skills/writing-for-agents/SKILL.md). Leer las que sean aplicables; no iniciar una entrevista sólo por guardar una aclaración ya resuelta.
 
 El usuario pidió y reiteró este procedimiento si se necesita otra ronda de grill-with-docs: **un agente entrevistador y otro custodio del concepto que responde basándose en la conversación y los documentos**. Usar subagentes separados para esos papeles; conservar preguntas, respuestas, fuentes, decisiones y puntos abiertos según el [procedimiento documentado](docs/diseno/procedimiento-grill-with-docs.md). Las respuestas delegadas no son elecciones del usuario. Investigar datos comprobables antes de preguntar; reservar las preguntas humanas para preferencias materiales realmente ausentes y continuar el trabajo independiente.
 

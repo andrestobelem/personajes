@@ -1,0 +1,6 @@
+interface:
+  display_name: "Writing for Agents"
+  short_description: "Write documents agents consume"
+  default_prompt: "Use $writing-for-agents to improve documents consumed by agents."
+policy:
+  allow_implicit_invocation: true

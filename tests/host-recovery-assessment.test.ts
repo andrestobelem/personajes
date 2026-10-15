@@ -15,6 +15,7 @@ import { assessHostRecovery, applyHostRecoveryPreservation } from '../src/applic
 import { createHostBackupQuiesce } from '../src/application/host-backup-quiesce.ts';
 import { createHostRequestBarrier } from '../src/application/host-request-barrier.ts';
 import { openLocalHost } from '../src/application/local-host.ts';
+import { createRunMemoryPreparation } from '../src/application/run-memory-preparation.ts';
 import { createVoiceRuntime } from '../src/application/voice-runtime.ts';
 import { createWorldDeliverySupervisor } from '../src/application/world-delivery-supervisor.ts';
 import { draftFixture } from './fixtures/continuista.ts';
@@ -77,6 +78,58 @@ test('assessment normaliza journal completo sin tocar main/WAL/SHM y preserva ba
     } finally { db.close(); }
     assert.deepEqual(bytes(f.root), before);
   } finally { await f.close(); }
+});
+
+test('assessment confía sólo en la DDL exacta de los recibos de preparación de memoria', async () => {
+  const f = await fixture();
+  const memoryPreparation = createRunMemoryPreparation({ host: f.host, icmBinaryPath: '/unused-during-assessment',
+    acquireMaintenance: async () => () => undefined });
+  try {
+    await memoryPreparation.close();
+    const bundle = await f.backup();
+    const baseline = assess(f, bundle);
+    assert.ok(baseline.kind === 'compatible', JSON.stringify(baseline));
+
+    f.mutate(db => db.exec('ALTER TABLE memory_preparation_jobs ADD COLUMN operator_extension TEXT'));
+    const changed = assess(f, bundle);
+    assert.ok(changed.kind === 'blocked');
+    if (changed.kind === 'blocked') assert.equal(changed.code, 'RECOVERY_MEMORY_PREPARATION_SCHEMA_INVALID');
+  } finally { await memoryPreparation.close(); await f.close(); }
+});
+
+test('assessment bloquea un receipt de preparación posterior al backup para no perder su idempotencia al recuperar', async () => {
+  const f = await fixture();
+  const memoryPreparation = createRunMemoryPreparation({ host: f.host, icmBinaryPath: '/unused-before-maintenance',
+    acquireMaintenance: async () => new Promise<() => void>(() => undefined) });
+  try {
+    const { kind, schemaVersion, runId: _runId, revision, ...patch } = draftFixture();
+    void kind; void schemaVersion; void _runId; void revision;
+    const created = f.host.journal.createRunConfigurationDraft({ principalId: 'memory-recovery', idempotencyKey: randomUUID(), patch });
+    assert.equal(created.kind, 'created');
+    if (created.kind !== 'created') assert.fail('Se esperaba un borrador válido.');
+    const ready = f.host.journal.validateRunConfigurationDraft({ principalId: 'memory-recovery', idempotencyKey: randomUUID(),
+      runId: created.draft.runId, expectedRevision: 0 });
+    assert.equal(ready.kind, 'ready');
+    if (ready.kind !== 'ready') assert.fail('Se esperaba una configuración Ready.');
+    const configuration = ReadyRunConfigurationSchema.parse(f.host.journal.readWorldConfiguration({ runId: ready.runId }));
+    assert.equal(configuration.configRevision, ready.revision);
+    const world = f.host.journal.loadWorld({ runId: ready.runId });
+    assert.ok(world);
+    const bundle = await f.backup();
+    const request = { runId: ready.runId, expectedConfigurationRevision: ready.revision,
+      expectedWorldRevision: world.revision, idempotencyKey: randomUUID(), principalId: 'memory-recovery' };
+    const accepted = memoryPreparation.start(request);
+    assert.equal(accepted.kind, 'accepted');
+    if (accepted.kind !== 'accepted') assert.fail('Se esperaba un receipt durable.');
+
+    const changed = assess(f, bundle);
+    assert.ok(changed.kind === 'blocked');
+    if (changed.kind === 'blocked') assert.equal(changed.code, 'RECOVERY_STATE_DIVERGED');
+    const ledger = new DatabaseSync(join(f.root, 'world.sqlite'), { readOnly: true });
+    try {
+      assert.equal(ledger.prepare('SELECT COUNT(*) AS count FROM memory_preparation_receipts WHERE job_id=?').get(accepted.job.jobId)?.count, 1);
+    } finally { ledger.close(); }
+  } finally { await memoryPreparation.close(); await f.close(); }
 });
 
 for (const change of ['voice', 'budget', 'unknown-table', 'unclassified-receipt'] as const) {

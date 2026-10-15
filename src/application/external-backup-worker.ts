@@ -98,10 +98,10 @@ function ordinaryJournalCopy(sourcePath: string, cleanPath: string) {
       if (!approvedAppendOnlyTrigger(trigger) || !actual.some(object => object.type === 'trigger' && object.name === trigger.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     const names = new Set(actual.filter(object => object.type === 'table').map(object => object.name));
-    // Auxiliary voice/exchange tables may be absent from a host that never
+    // Auxiliary voice/exchange/memory-preparation tables may be absent from a host that never
     // composed those services; their presence always requires an exact template.
     for (const approved of request.approvedJournalSchema.filter(object => object.type === 'table')) {
-      if (!names.has(approved.name) && !/^(?:voice_|exchange_)/.test(approved.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
+      if (!names.has(approved.name) && !/^(?:voice_|exchange_|memory_preparation_)/.test(approved.name)) reject('EXTERNAL_BACKUP_JOURNAL_SCHEMA_INVALID');
     }
     source.allow([...names]);
     const version = z.strictObject({ version: z.union([z.literal(39),z.literal(40)]) }).safeParse(source.db.prepare('SELECT MAX(version) version FROM schema_version').get());

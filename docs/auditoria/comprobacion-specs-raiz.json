@@ -13,13 +13,13 @@
     "docs/specs/README.md": "bac8b6d0a62fe1642124918d1e82ed7dc46211045eae3834001034db6aee2bd9"
   },
   "currentSpecHashes": {
-    "docs/specs/01-dominio-y-catalogo.md": "c190ff486af58c8e6726a8c95edcc9c2e002ab457f90692237880560cc552ad0",
-    "docs/specs/02-persistencia-e-icm.md": "2e3beb168a9c292b6ab7b83bb813d5c0315c34c187141489d0af61b688f0e5d8",
+    "docs/specs/01-dominio-y-catalogo.md": "8b78c49321bda1a2ae5e4dfcf92e1f78cbe9e8518fbaac205802ba9b42aa3a1c",
+    "docs/specs/02-persistencia-e-icm.md": "9ff31677043ed79313e5c2cf6b3ee490ebf4fd899cecc9103b9137d65fde74df",
     "docs/specs/03-pi-y-coordinacion.md": "9e8cfc31d859ad7f1d3d2b481f13cd56081d06b8ee6e7ea3b33dd42aedc04d8c",
-    "docs/specs/04-api-y-autoridad.md": "c53f3ceaf2f894631df1b7834f121de6482adbf7fcb4268796d2098c84565d08",
-    "docs/specs/05-interfaz.md": "d3c7972ec8793e45ce14323480a4667d5daa9f483ae302c1dd635062d822ca52",
+    "docs/specs/04-api-y-autoridad.md": "17fe6e7828504ea162dc1c8eed1cbfe27ee0015b688acce0b3f82552d911a93b",
+    "docs/specs/05-interfaz.md": "eac7b79468eb3fa38cd7ca5ca851cc1d87c4f2e18ab063e3eca7bfe521ea1d8d",
     "docs/specs/06-voces-y-ritmo.md": "426f4d395accf518d7be4db47e6c99fcc7ea5809319a069d571207c2ce1c4bf6",
-    "docs/specs/07-verificacion.md": "6a1e28233c6877f18ab6ab55dd12845c23c834056d0720023c654aa910422454",
+    "docs/specs/07-verificacion.md": "03fe001493bbe1f614e8d5af3a87a28902a31f4888469ea639c089d4b8a19e9a",
     "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"
   },
   "requirements": 77,
@@ -33,10 +33,10 @@
     "limitation": "API probe only; not durable SQLite/ICM proof, not product test"
   },
   "productEvidence": {
-    "partialRequirementRowsUpdated": 63,
+    "partialRequirementRowsUpdated": 64,
     "acceptanceStatus": "pending for all 77 requirements",
     "matrix": "docs/auditoria/trazabilidad-prd.md"
   },
-  "currentPrdHash": "ee8d05cdfe9dd80e7a3d1cfa02f6538c691677eecae56084f487405bc2889e7b",
-  "currentChangeNote": "R10 15/10: C55/C57 conectan OAuth de OpenAI Codex y Anthropic en el host para sesiones Pi independientes; C56 integra posesiones históricas; C58 prueba intervención HTTP hasta respuesta actoral; C59 acredita pausa visible al agotar presupuesto durante actuación activa; C60 prueba que run.refresh recarga las proyecciones de Stage y descarta una respuesta atrasada; C61 habilita navegación desde escenas a cortes locales exactos y pagina toda la historia estructural. S03 precisa que el wrapper de presupuesto conserva el proveedor OAuth del perfil elegido; pi.test verifica Codex y Anthropic con transporte controlado. S05 define saltos por escena y ausencia explícita de cortes heredados locales. Las cuotas de audio tienen ledger separado. Los 77 estados de aceptación siguen pendientes."
+  "currentPrdHash": "cd9209c87c4ecf650f6f179ddd1f2fc6150da19b6bd7db9a0e29c8dd41ecc692",
+  "currentChangeNote": "R10 15/10: C55/C57 conectan OAuth de OpenAI Codex y Anthropic en el host para sesiones Pi independientes; C56 integra posesiones históricas; C58 prueba intervención HTTP hasta respuesta actoral; C59 acredita pausa visible al agotar presupuesto durante actuación activa; C60 prueba que run.refresh recarga las proyecciones de Stage y descarta una respuesta atrasada; C61 habilita navegación desde escenas a cortes locales exactos y pagina toda la historia estructural. S03 precisa que el wrapper de presupuesto conserva el proveedor OAuth del perfil elegido; pi.test verifica Codex y Anthropic con transporte controlado. S05 define saltos por escena y ausencia explícita de cortes heredados locales. Las cuotas de audio tienen ledger separado. R11 DIR-04: S01/S04/S05 agregan selección opcional de referencias clásicas, preservación hasta Ready y contexto no vinculante del Director, sin filtrarlas a actores ni modificar la estructura; se actualizaron hashes actuales y la matriz pasa de 63 a 64 requisitos con evidencia parcial. Los 77 estados de aceptación siguen pendientes. R12: S05 explicita presets locales blanco/Max-Hymie, propuestas editoriales, curación y colocación explícitas; el selector de cortes documentados y la aceptación integral siguen pendientes. R13: S01/S05 incluyen cortes documentales de continuidad versionados; fuentes, títulos, límites y estados indeterminados se conservan en la propuesta hasheada. Selección local sin fecha diegética, reparto ni recuerdos automáticos; no acredita actuación ni aceptación integral. R14: S02/S04/S05 especifican preparación explícita e idempotente de memorias y reapertura de bases existentes; una puesta con historia nunca recibe una base vacía en reemplazo. Integración HTTP con ICM real, navegador con reinicio y recuperación offline con DDL exacta verificadas; selección GUI del ejecutable ICM y aceptación integral pendientes. R15: S02/S04/S05 definen selección gráfica del ejecutable ICM, persistencia local ajena a backups, idempotencia y recomposición inactiva sin inferencia. Ledger y control usan SQLite separadas; ownership principal conserva sus reglas. Configuración nula guardada prevalece sobre entorno. Integración local verificada; aceptación integral y OAuth real pendientes."
 }

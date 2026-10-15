@@ -3,6 +3,9 @@ import { RunConfigurationDraftSummarySchema, type CatalogPage, type RunConfigura
 import { createEmptyRunConfigurationDraft, type RunConfigurationDraft } from '../domain/production.ts';
 import { DRAFT_SECTIONS, changedDraftSections, describeDraftSection, reconcileDraft, type DraftSection } from './draft-form.ts';
 import { RunDraftEditor } from './RunDraftEditor.tsx';
+import { PreparationPresetChooser, type PreparationPresetChoice } from './PreparationPresetChooser.tsx';
+import { createPreparationPreset } from '../application/preparation-presets.ts';
+import { createDocumentedContinuityDraft } from '../application/documented-continuity-cuts.ts';
 import type { RunDocument } from './run-controls-client.ts';
 const VoiceWorkspace = React.lazy(async () => ({ default: (await import('./VoiceWorkspace.tsx')).VoiceWorkspace }));
 import { RunStageWorkspace } from './RunStageWorkspace.tsx';
@@ -10,8 +13,9 @@ import { RunControlsPanel } from './RunControlsPanel.tsx';
 import { RunPreflightPanel } from './RunPreflightPanel.tsx';
 import { createDraftSaveIntent, listRunDrafts, readRunDraft, saveRunDraft, validateRunDraft, readDraftHttpFailure, type DraftDocument, type DraftSaveIntent } from './run-drafts-client.ts';
 
-type Screen = { kind: 'none' } | { kind: 'loading'; id: string }
+type Screen = { kind: 'none' } | { kind: 'choosing' } | { kind: 'preparing-preset' } | { kind: 'loading'; id: string }
   | { kind: 'editing'; document: DraftDocument; epoch: number } | { kind: 'reconciled'; document: DraftDocument; configuration: RunConfigurationDraft; epoch: number } | { kind: 'new'; configuration: RunConfigurationDraft; epoch: number };
+type StartingPoint = { kind: 'preset'; preset: PreparationPresetChoice } | { kind: 'documented'; cutId: string };
 type Saving = { kind: 'idle' } | { kind: 'saving'; intent: DraftSaveIntent }
   | { kind: 'uncertain'; intent: DraftSaveIntent; message: string }
   | { kind: 'validating'; document: DraftDocument; key: string } | { kind: 'validation-uncertain'; document: DraftDocument; key: string; message: string }
@@ -73,7 +77,8 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
   async function openConfirmed(id: string | 'new') {
     setVoiceOpened(false); setRunView('preparation'); setCurrentRun(undefined); setReplacePrompt(undefined); setError(''); setMessage(''); setDirty(false);
     if (id === 'new') {
-      setScreen({ kind: 'new', configuration: createEmptyRunConfigurationDraft({ runId: crypto.randomUUID(), revision: 0 }), epoch: ++epoch.current });
+      ++epoch.current;
+      setScreen({ kind: 'choosing' });
       return;
     }
     const currentEpoch = ++epoch.current;
@@ -82,6 +87,25 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
       const document = await readRunDraft(id);
       if (epoch.current === currentEpoch) { setScreen({ kind: 'editing', document, epoch: currentEpoch }); addToList(document); }
     } catch (failure) { if (epoch.current === currentEpoch) { setScreen({ kind: 'none' }); setError(errorMessage(failure)); } }
+  }
+  async function chooseStartingPoint(selection: StartingPoint) {
+    if (screen.kind !== 'choosing' || saving.kind !== 'idle') return;
+    const currentEpoch = ++epoch.current;
+    setScreen({ kind: 'preparing-preset' }); setError('');
+    try {
+      const common = { runId: crypto.randomUUID(), uuid: () => crypto.randomUUID() };
+      const configuration = selection.kind === 'documented'
+        ? await createDocumentedContinuityDraft({ ...common, cutId: selection.cutId })
+        : await createPreparationPreset({ ...common, preset: selection.preset, catalog: props.catalog });
+      if (currentEpoch !== epoch.current) return;
+      setScreen({ kind: 'new', configuration, epoch: currentEpoch });
+      setMessage(selection.kind === 'documented'
+        ? 'Corte documental propuesto. Revisá sus fuentes y vacíos; elegí fecha, lugar y reparto, y curá por separado lo que cada actor puede recordar.'
+        : selection.preset === 'fibonacci' ? 'Ensayo sintético propuesto. Revisá y confirmá cada sección; la curación de los actores y tu identidad ficticia siguen a tu cargo.' : 'Puesta en blanco. Definí las circunstancias de esta representación.');
+    } catch (failure) {
+      if (currentEpoch !== epoch.current) return;
+      setScreen({ kind: 'choosing' }); setError(errorMessage(failure));
+    }
   }
   async function persist(intent: DraftSaveIntent) {
     setSaving({ kind: 'saving', intent }); setError(''); setMessage('');
@@ -158,6 +182,8 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
       {saving.kind === 'uncertain' && <div className="edit-notice" role="alert"><p>{saving.message}</p><button className="primary-button" onClick={() => void persist(saving.intent)}>Reintentar el mismo guardado</button></div>}
       {saving.kind === 'conflict' && <div className="draft-conflict" role="alert"><h2>El borrador cambió en otra edición</h2><p>{saving.message} Tu edición local está conservada.</p><p>Elegí qué secciones de tu edición mantener sobre la revisión guardada {saving.remote.view.configuration.revision}. Las otras usan lo guardado.</p>{!['draft', 'ready'].includes(saving.remote.view.state.lifecycle) && <p>La representación actual está activa o finalizada y está conservada. Podés abrirla; no se reconciliarán cambios sobre ella.</p>}<ul>{DRAFT_SECTIONS.filter(([field]) => changedDraftSections(saving.local, saving.remote.view.configuration).includes(field)).map(([field, label]) => <li key={field}><label><input type="checkbox" checked={saving.keepLocal.includes(field)} onChange={(event) => setSaving({ ...saving, keepLocal: event.target.checked ? [...saving.keepLocal, field] : saving.keepLocal.filter((item) => item !== field) })} />Mantener mi {label.toLocaleLowerCase('es')}</label><small>Mi edición: {describeDraftSection(saving.local, field)}</small><small>Guardado: {describeDraftSection(saving.remote.view.configuration, field)}</small></li>)}</ul><button className="primary-button" disabled={!['draft', 'ready'].includes(saving.remote.view.state.lifecycle)} onClick={reconcile}>Reconciliar en la edición local</button><button onClick={() => { const remote = saving.remote; setSaving({ kind: 'idle' }); setScreen({ kind: 'editing', document: remote, epoch: ++epoch.current }); setDirty(false); setMessage('Revisión guardada abierta; se descartaron los cambios locales.'); }}>Descartar mi edición y abrir lo guardado</button></div>}
       {screen.kind === 'none' && <div className="run-empty"><span className="ornament" aria-hidden="true">◈</span><h2>Una obra empieza por sus circunstancias</h2><p>Creá una preparación o abrí un borrador guardado. La fecha, el lugar y el conflicto quedan a tu elección.</p></div>}
+      {screen.kind === 'choosing' && <PreparationPresetChooser onChoose={(preset) => void chooseStartingPoint({ kind: 'preset', preset })} onChooseContinuity={(cutId) => void chooseStartingPoint({ kind: 'documented', cutId })} onCancel={() => { ++epoch.current; setError(''); setScreen({ kind: 'none' }); }} />}
+      {screen.kind === 'preparing-preset' && <p role="status">Preparando propuestas editables…</p>}
       {screen.kind === 'loading' && <p role="status">Abriendo preparación…</p>}
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <><nav className="run-view-nav" aria-label="Vista de la representación"><button aria-current={runView === 'preparation' ? 'page' : undefined} onClick={() => setRunView('preparation')}>Preparación y requisitos</button><button aria-current={runView === 'stage' ? 'page' : undefined} onClick={() => setRunView('stage')}>Escenario, conversación e historia</button><button aria-current={runView === 'voice' ? 'page' : undefined} onClick={() => { setVoiceOpened(true); setRunView('voice'); }}>Voces y sonido</button></nav><RunControlsPanel runId={screen.document.view.configuration.runId} onRead={acceptRun} disabled={dirty || saving.kind !== 'idle'} /></>}
       <div hidden={runView !== 'preparation'}>

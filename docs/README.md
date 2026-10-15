@@ -8,6 +8,8 @@ El [PRD](PRD.md) y las [especificaciones 1.0](specs/README.md) conservan los cie
 
 ## Para empezar
 
+[Prompts fundadores y plantilla de personaje](prompts-fundadores.md): versión trabajada en canvas con Writing for Agents, conservada como borrador de trabajo.
+
 La [lista de pendientes del producto](PENDIENTES.md) organiza las entregas restantes y cubre los 77 requisitos; distingue implementación existente de aceptación todavía pendiente.
 
 1. [Concepto y decisiones](diseno/concepto-y-decisiones.md): qué experiencia se quiere construir.
@@ -51,6 +53,7 @@ Los estudios de personajes son también investigaciones independientes: el [índ
 | [Narrador y voz en off](diseno/narrador-y-voz-en-off.md) | Omnisciencia narrativa autorizada y separación del saber de los personajes. |
 | [Organización de Pi y Escenario](diseno/organizacion-de-pi-y-escenario.md) | Distribución de instancias, ICM, persistencia y aplicación futura. |
 | [Interfaz funcional y visual](diseno/interfaz-funcional-y-visual.md) | Funciones completas y criterios observables para entender y operar la obra. |
+| [Alcance de versiones](diseno/alcance-versiones.md) | Corte acordado para la alpha V1 y las ampliaciones de V2, con asignación de los IDs del PRD. |
 | [Qué falta definir](diseno/decisiones-abiertas.md) | 30 puntos, verificaciones técnicas y decisiones de la primera puesta. |
 | [Procedimiento grill-with-docs](diseno/procedimiento-grill-with-docs.md) | Entrevistador y custodio del concepto, evidencia y registro de respuestas. |
 
@@ -72,6 +75,12 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - [Continuista Pi y recibos durables](auditoria/continuista-pi-y-recibos.md).
 - [Recuperación parental y composición del runtime](auditoria/recuperacion-parental-y-runtime.md).
 - [Launcher y preparación de representaciones](auditoria/launcher-y-borradores.md).
+- [Presets editables de preparación](auditoria/presets-de-preparacion.md).
+- [Cortes documentales de continuidad y sus fuentes](auditoria/cortes-documentales-de-continuidad.md).
+- [Preparación explícita y reapertura de memorias privadas](auditoria/preparacion-de-memorias.md).
+- [Configuración gráfica del ejecutable ICM del host](auditoria/configuracion-icm-del-host.md).
+- [Brecha de arranque ordinario tras cierre abrupto](auditoria/arranque-tras-caida.md).
+- [ADR 0016: selección local de ICM y recomposición explícita](adr/0016-configuracion-local-del-runtime-icm.md).
 - [Acceso Pi y preparación gráfica v19](auditoria/oauth-y-preparacion.md).
 - [Login OAuth dual para OpenAI Codex y Anthropic](auditoria/oauth-dual.md).
 - [Corrección de gates del preflight](auditoria/preflight-gates.md).
@@ -107,7 +116,7 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 
 - [Backups externos](auditoria/backups-externos.md), [ADR 0014](adr/0014-transferencia-privada-y-admision-externa.md), [entrevista](auditoria/dialogo-backups-externos.md) y [respuestas](auditoria/backups-externos-respuestas.md): descarga privada completa, upload por partes, cuarentena/validación aislada, registro independiente y continuación como fork en otro host. Integridad no autentica al emisor; recover extranjero bloqueado. Export portable público, puesta/inferencia/audio integrales y los 77 criterios de aceptación siguen abiertos.
 
-- [Promoción futura de identidad: diseño y fundamentos](auditoria/promocion-identidad.md), [ADR 0015](adr/0015-promocion-futura-y-configuracion-historica.md), [entrevista](auditoria/dialogo-configurador-e-identidad.md) y [respuestas](auditoria/promocion-identidad-respuestas.md): lectura histórica v38 y preparación pura; aplicación completa todavía pendiente.
+- [Promoción futura de identidad: diseño y fundamentos](auditoria/promocion-identidad.md), [ADR 0015](adr/0015-promocion-futura-y-configuracion-historica.md), [entrevista](auditoria/dialogo-configurador-e-identidad.md) y [respuestas](auditoria/promocion-identidad-respuestas.md): lectura histórica v38 y preparación pura; C51 aplica promoción transaccional. P22 con proveedor real y aceptación integral siguen pendientes.
 
 - [Promoción de identidad, cortes 50–51](auditoria/promocion-identidad.md) y [ADR 0015](adr/0015-promocion-futura-y-configuracion-historica.md): diseño y fundamento C50; C51 construye ledger/worker Pi, promoción transaccional v39, epochs y revisión/consentimiento gráfico. Verificación global, build y navegador con reinicio aprobados; P22 live y aceptación integral todavía pendientes.
 

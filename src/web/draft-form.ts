@@ -6,13 +6,15 @@ import { WorldClockSchema, WorldPlaceSchema } from '../domain/world-schema.ts';
 export const DRAFT_SECTIONS = [
   ['name', 'Nombre'], ['fictionalAt', 'Fecha y hora ficticias'], ['worldSnapshot', 'Escenario inicial'],
   ['continuity', 'Continuidad'], ['roster', 'Reparto y preparación'], ['humanParticipants', 'Interlocutores humanos'],
-  ['dramaticLine', 'Línea dramática'], ['circadianPolicy', 'Reloj'], ['spanishVariety', 'Español'],
+  ['dramaticLine', 'Línea dramática'], ['dramaticReferences', 'Referencias dramáticas'], ['circadianPolicy', 'Reloj'], ['spanishVariety', 'Español'],
   ['narrationMode', 'Narrador'], ['inferenceProfile', 'Modelo de los agentes'], ['budget', 'Presupuesto'], ['maxReformulations', 'Reformulaciones'], ['audio', 'Audio'],
 ] satisfies readonly (readonly [keyof RunConfigurationDraft, string])[];
 export type DraftSection = typeof DRAFT_SECTIONS[number][0];
 
-export function draftFieldState(field: RunConfigurationDraft[DraftSection]) {
-  if (field === undefined) return { kind: 'empty' as const, label: 'Perfil histórico', detail: 'Esta preparación no registra una selección nueva de modelo.' };
+export function draftFieldState(field: RunConfigurationDraft[DraftSection], section?: DraftSection) {
+  if (field === undefined) return section === 'dramaticReferences'
+    ? { kind: 'empty' as const, label: 'Sin referencias', detail: 'Esta preparación histórica no registra referencias dramáticas.' }
+    : { kind: 'empty' as const, label: 'Perfil histórico', detail: 'Esta preparación no registra una selección nueva de modelo.' };
   switch (field.kind) {
     case 'empty': return { kind: 'empty' as const, label: 'Pendiente', detail: 'Todavía no definido.' };
     case 'proposed': return { kind: 'proposed' as const, label: 'Propuesto', detail: `Propuesta de ${field.source}; falta confirmar.` };
@@ -113,6 +115,8 @@ export function describeDraftSection(draft: RunConfigurationDraft, section: Draf
     case 'roster': return draft.roster.kind === 'empty' ? 'Reparto pendiente' : `${draft.roster.value.activeCharacterIds.join(', ') || 'Sin participantes activos'} · ${draft.roster.value.preparedCharacters.length} contextos preparados`;
     case 'humanParticipants': return draft.humanParticipants.kind === 'empty' ? 'Interlocutores pendientes' : draft.humanParticipants.value.map((profile) => profile.identity.displayName).join(', ') || 'Sin perfiles humanos configurados';
     case 'dramaticLine': return draft.dramaticLine.kind === 'empty' ? 'Línea pendiente' : `${draft.dramaticLine.value.purpose}${draft.dramaticLine.value.question.kind === 'formulated' ? ` · ${draft.dramaticLine.value.question.text}` : ''}${draft.dramaticLine.value.conflict.kind === 'formulated' ? ` · ${draft.dramaticLine.value.conflict.statement}` : ' · Conflicto abierto'}`;
+    case 'dramaticReferences': return draft.dramaticReferences === undefined || draft.dramaticReferences.kind === 'empty'
+      ? 'Sin referencias' : draft.dramaticReferences.value.map((reference) => `${reference.tradition === 'greek-tragedy' ? 'Tragedia griega' : 'Comedia antigua'} · ${reference.work}`).join('; ') || 'Sin referencias';
     case 'circadianPolicy': return draft.circadianPolicy.kind === 'empty' ? 'Reloj pendiente' : draft.circadianPolicy.value.kind === 'manual-only' ? 'Avance manual' : `Avance automático · máximo ${draft.circadianPolicy.value.maxAdvanceMs} ms`;
     case 'spanishVariety': return draft.spanishVariety.kind === 'empty' ? 'Variedad pendiente' : draft.spanishVariety.value.label;
     case 'narrationMode': return draft.narrationMode.kind === 'empty' ? 'Narrador pendiente' : draft.narrationMode.value.kind === 'enabled' ? 'Activado' : 'Desactivado';

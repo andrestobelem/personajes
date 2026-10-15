@@ -2394,7 +2394,7 @@ export function openJournal(input: { path: string }) {
       for(const act of episode.acts){database.prepare('INSERT INTO acts VALUES(?,?,?,?,?)').run(job.targetRunId,episode.episodeId,act.actId,act.ordinal,act.title);act.sceneIds.forEach((sceneId,index)=>database.prepare('INSERT INTO act_scenes VALUES(?,?,?,?,?)').run(job.targetRunId,episode.episodeId,act.actId,sceneId,index+1));}
     }
     const recordedAt=new Date().toISOString();const evidence={kind:'operator-choice',operatorId:job.principalId,recordedAt};
-    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
     const configured=Object.fromEntries(fields.flatMap(field=>packet.configuration[field]===undefined?[]:[[field,{kind:'configured',value:packet.configuration[field],evidence:field==='name'?evidence:{kind:'host-derived',derivationRef:`fork:${job.operationId}`,recordedAt}}]]));
     const draft=RunConfigurationDraftSchema.parse({...createEmptyRunConfigurationDraft({runId:job.targetRunId,revision:0}),...configured});
     database.prepare('INSERT INTO run_configuration_drafts VALUES(?,?,?,?)').run(job.targetRunId,0,recordedAt,recordedAt);appendRunDraftHistory({draft,principalId:job.principalId,recordedAt});
@@ -2516,7 +2516,7 @@ export function openJournal(input: { path: string }) {
     const latest=database.prepare('SELECT * FROM identity_promotion_receipts WHERE run_id=? ORDER BY rowid DESC LIMIT 1').get(entry.draft.runId);
     const receipt=latest===undefined?undefined:identityPromotionRecord(latest).receipt;
     const evidence={kind:'host-derived',derivationRef:receipt===undefined?`configuration-cut:${entry.draft.runId}:${configuration.configRevision}`:`identity-promotion:${receipt.operationId}`,recordedAt:receipt?.recordedAt??entry.recordedAt};
-    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
     const changes=Object.fromEntries(fields.flatMap(field=>{
       const value=configuration[field];const old=entry.draft[field];if(value===undefined||(old?.kind==='configured'&&hashJson(old.value).hash===hashJson(value).hash))return [];
       return [[field,{kind:'configured',value,evidence}]];
@@ -4172,6 +4172,7 @@ export function openJournal(input: { path: string }) {
     return validateDirectorContext({kind:'director-context',schemaVersion:1,role:'director',scope:{runId:run.row.run_id,pulseId,jobId,generation,
       lifecycleRevision:run.row.lifecycle_revision,configurationRevision:run.row.config_revision,worldRevision:run.row.world_revision,
       throughWorldSeq:run.row.last_seq,fictitiousAt:run.snapshot.clock.instant,profile:runInferenceProfile(run)},dramaticLine:configuration.dramaticLine,
+      ...(configuration.dramaticReferences===undefined?{}:{dramaticReferences:configuration.dramaticReferences}),
       participantCharacterIds:scene?.participantIds??[],confirmedEvents:events,previousAnnotations:directorAnnotationsAt(run.row.run_id,run.row.last_seq)});
   }
 

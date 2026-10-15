@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { test } from 'node:test';
+import { loadCatalog } from '../src/adapters/catalog.ts';
+import { createLocalHttpServer } from '../src/server/http.ts';
+import { createIcmRuntimeConfigurationRoutes } from '../src/server/icm-runtime-configuration-routes.ts';
+import { IcmRuntimeConfigurationViewSchema, IcmRuntimeConfigurationJobSchema, icmRuntimeConfigurationEtag, icmRuntimeConfigurationJobEtag } from '../src/domain/icm-runtime-configuration.ts';
+import { SessionCreatedSchema } from '../src/domain/http.ts';
+const view = IcmRuntimeConfigurationViewSchema.parse({ kind: 'icm-runtime-configuration', revision: 0, configuredBinaryPath: null, source: 'unconfigured' });
+const job = IcmRuntimeConfigurationJobSchema.parse({ kind: 'icm-runtime-configuration-job', jobId: randomUUID(), principalId: 'local-operator', state: 'queued', revision: 0, expectedConfigurationRevision: 0, binaryPath: '/private/icm', requestHash: 'a'.repeat(64), failureCode: null, createdAt: 1, updatedAt: 1, completedAt: null });
+test('host ICM HTTP binds auth CSRF idempotency CAS and principal; recovery GET never applies', async t => {
+  const calls: unknown[] = []; let reads = 0;
+  const application = { readConfiguration() { ++reads; return view; }, start(input: unknown) { calls.push(input); return { kind: 'accepted', job }; }, read(input: { jobId: string; principalId: string }) { return input.jobId === job.jobId && input.principalId === job.principalId ? job : undefined; }, list() { return { jobs: [job], nextCursor: null }; } };
+  const catalog = await loadCatalog({ repositoryRoot: process.cwd() }); const server = createLocalHttpServer({ catalog, shellHtml: '<html><head></head><body></body></html>', operatorExtensions: [createIcmRuntimeConfigurationRoutes({ application })] }); const { origin } = await server.listen(0); t.after(() => server.close());
+  const base = origin + '/api/v1/host/icm-runtime-configuration'; assert.equal((await fetch(base)).status, 401);
+  const security = { Origin: origin, 'Content-Type': 'application/json' }; const html = await (await fetch(origin + '/', { headers: security })).text(); const bootNonce = html.match(/name="personajes-bootstrap" content="([A-Za-z0-9_-]+)"/)?.[1]; assert.ok(bootNonce); const session = await fetch(origin + '/api/v1/session', { method: 'POST', headers: security, body: JSON.stringify({ bootNonce }) }); const { csrfToken } = SessionCreatedSchema.parse(await session.json()); const cookie = session.headers.get('set-cookie')?.split(';')[0]; assert.ok(cookie); const headers = { ...security, Cookie: cookie, 'X-CSRF-Token': csrfToken }; const key = randomUUID(); const body = JSON.stringify({ binaryPath: '/private/icm', expectedRevision: 0 });
+  assert.equal((await fetch(base + '/jobs', { method: 'POST', headers: { ...headers, 'X-CSRF-Token': '', 'Idempotency-Key': key, 'If-Match': icmRuntimeConfigurationEtag(view) }, body })).status, 403);
+  assert.equal((await fetch(base + '/jobs', { method: 'POST', headers: { ...headers, 'Idempotency-Key': key }, body })).status, 412); assert.equal(calls.length, 0);
+  const mutationHeaders = { ...headers, 'Idempotency-Key': key, 'If-Match': icmRuntimeConfigurationEtag(view) }; const accepted = await fetch(base + '/jobs', { method: 'POST', headers: mutationHeaders, body }); assert.equal(accepted.status, 202, await accepted.clone().text()); assert.equal(accepted.headers.get('etag'), icmRuntimeConfigurationJobEtag(job)); assert.equal(IcmRuntimeConfigurationJobSchema.parse(await accepted.json()).jobId, job.jobId); assert.deepEqual(calls[0], { binaryPath: '/private/icm', expectedRevision: 0, principalId: 'local-operator', idempotencyKey: key });
+  for (const path of ['', '/jobs', '/jobs/' + job.jobId]) assert.equal((await fetch(base + path, { headers })).status, 200); assert.equal(calls.length, 1); assert.ok(reads >= 1);
+  assert.equal((await fetch(base + '/jobs/' + randomUUID(), { headers })).status, 404);
+  const injected = await fetch(base + '/jobs', { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ binaryPath: '/PRIVATE_BAD_PATH', expectedRevision: 0, principalId: 'another-person' }) }); assert.equal(injected.status, 422); assert.doesNotMatch(await injected.text(), /PRIVATE_BAD_PATH|another-person/); assert.equal(calls.length, 1);
+  for (const query of ['?limit=0', '?limit=1&limit=2', '?principalId=another-person']) assert.equal((await fetch(base + '/jobs' + query, { headers })).status, 422);
+});

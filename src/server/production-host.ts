@@ -40,6 +40,8 @@ import { createBackupTransferRoutes } from './backup-transfer-routes.ts';
 import { createExternalBackupRestoreRoutes } from './external-backup-restore-routes.ts';
 import { createIdentityPromotionApplication } from '../application/identity-promotion-application.ts';
 import { createIdentityPromotionRoutes } from './identity-promotion-routes.ts';
+import { createRunMemoryPreparation } from '../application/run-memory-preparation.ts';
+import { createMemoryPreparationRoutes } from './memory-preparation-routes.ts';
 
 /** Reusable composition of one owned private directory. Creation does not recover,
  * begin a representation, login, probe a provider, or synthesize audio. */
@@ -74,10 +76,13 @@ export async function createProductionHost(input:{
    const errors:unknown[]=[];
    async function settle(work:()=>unknown|Promise<unknown>){try{await work();}catch(error){errors.push(error);}}
    oauthController.abort();
+   const stopMemoryPreparation=memoryPreparations?.close();
+   void stopMemoryPreparation?.catch(()=>undefined);
    await restoreRecovery?.catch(()=>undefined);
    await settle(()=>exchange?.backups.waitForRestores());
    await settle(()=>identityPromotions?.close());
    await settle(()=>forks?.close());
+   await settle(()=>stopMemoryPreparation);
    await settle(()=>voices?.close());
    await settle(()=>transfers?.close());
    await settle(()=>externalRestoreRoutes?.close());
@@ -92,6 +97,47 @@ export async function createProductionHost(input:{
   })();
   return closePromise;
  }
+ function assertRuntimeConfigurationIdle():void{
+  const busyCode='PRODUCTION_RUNTIME_CONFIGURATION_BUSY';
+  if(closing)throw new Error(busyCode);
+  try{
+   if(oauthJobs?.backupBusy||accessJobs?.backupBusy||preflightJobs?.backupBusy||memoryPreparations?.backupBusy)throw new Error(busyCode);
+  }catch{throw new Error(busyCode);}
+  let active=false;
+  let reader:DatabaseSync|undefined;
+  try{
+   const snapshotReader=new DatabaseSync(join(host.privateDataRoot,'world.sqlite'),{readOnly:true});
+   reader=snapshotReader;
+   snapshotReader.exec('PRAGMA query_only=ON');
+   const checks:Array<{sql:string;parameters?:readonly string[]}>= [
+    {sql:"SELECT 1 FROM world_runs WHERE lifecycle='running' LIMIT 1"},
+    // Historical ambiguous/uncertain reservations remain part of the ledger,
+    // but only this host's still-open transport reservation is active work.
+    {sql:"SELECT 1 FROM request_reservations r JOIN model_time_spans s USING(job_id,generation,request_seq) WHERE s.owner_token=? AND s.state IN('reserved','running') AND r.state IN('reserved','dispatched') LIMIT 1",parameters:[host.ownerToken]},
+    {sql:"SELECT 1 FROM memory_preparation_jobs WHERE state IN('queued','running') LIMIT 1"},
+    {sql:"SELECT 1 FROM fork_jobs WHERE state='staging' LIMIT 1"},
+    {sql:"SELECT 1 FROM configurator_jobs WHERE json_extract(payload_json,'$.job.state') IN('queued','running') LIMIT 1"},
+    // Running rows carry a live worker claim. Queued actor work is only active
+    // for a running lifecycle; paused/stopped rows can be stale after epoch
+    // invalidation and must not permanently prevent a runtime-path change.
+    {sql:"SELECT 1 FROM actor_turn_jobs j JOIN world_runs r ON r.run_id=j.run_id WHERE (j.state='running' AND j.owner_token=?) OR (j.state='queued' AND r.lifecycle='running') LIMIT 1",parameters:[host.ownerToken]},
+    {sql:"SELECT 1 FROM continuista_jobs j JOIN world_runs r ON r.run_id=j.run_id WHERE (j.state='running' AND j.owner_token=?) OR (j.state='queued' AND r.lifecycle='running') LIMIT 1",parameters:[host.ownerToken]},
+    {sql:"SELECT 1 FROM administrative_jobs WHERE state='running' AND owner_token=? LIMIT 1",parameters:[host.ownerToken]},
+    {sql:"SELECT 1 FROM run_step_jobs WHERE state='running' LIMIT 1"},
+    {sql:"SELECT 1 FROM coordinator_pulses WHERE state='running' LIMIT 1"},
+    {sql:"SELECT 1 FROM world_deliveries WHERE state='delivering' LIMIT 1"},
+    {sql:"SELECT 1 FROM memory_outbox WHERE claim_token IS NOT NULL AND owner_token=? LIMIT 1",parameters:[host.ownerToken]},
+    {sql:"SELECT 1 FROM voice_operations WHERE json_extract(data,'$.state') IN('queued','validating','submitted','response-received','artifact-persisting') LIMIT 1"},
+    {sql:"SELECT 1 FROM voice_reservations WHERE state='reserved' LIMIT 1"},
+   ];
+   active=checks.some(check=>snapshotReader.prepare(check.sql).get(...(check.parameters??[]))!==undefined);
+  }catch{
+   // The gate is deliberately fail-closed if the activity snapshot cannot be
+   // read or does not match the migrated production schema.
+   throw new Error(busyCode);
+  }finally{try{reader?.close();}catch{throw new Error(busyCode);}}
+  if(active)throw new Error(busyCode);
+ }
 let representation: Awaited<ReturnType<typeof createRepresentationRuntime>> | undefined;
 let piRuntime: PiRuntime;
 let oauthJobs: Awaited<ReturnType<typeof createPiOAuthJobs>> | undefined;
@@ -105,6 +151,7 @@ let restoreRecovery: Promise<unknown> | undefined;
 let transfers:ReturnType<typeof openBackupTransferService>|undefined;
 let externalRestoreRoutes:ReturnType<typeof createExternalBackupRestoreRoutes>|undefined;
 let identityPromotions:Awaited<ReturnType<typeof createIdentityPromotionApplication>>|undefined;
+let memoryPreparations:Awaited<ReturnType<typeof createRunMemoryPreparation>>|undefined;
 try {
   voices=createVoiceRuntime({host,...(input.privateAuthRoot===undefined?{}:{privateAuthRoot:input.privateAuthRoot}),onDiagnostic:diagnostic=>diagnosticSink(diagnostic)});
   const configuredExchange=await createExchangeRuntime({host,catalog});
@@ -171,6 +218,24 @@ worldDeliveries = representation === undefined ? createWorldDeliverySupervisor({
     onCommitted: receipt => diagnosticSink({ kind: 'identityPromotionCommitted', runId: receipt.target.runId,
       commitIndex: receipt.target.commitIndex, identityVersion: receipt.identityVersion }),
   });
+const configuredMemories=await createRunMemoryPreparation({host,
+  ...(input.icmBinaryPath===undefined?{}:{icmBinaryPath:input.icmBinaryPath}),
+  async acquireMaintenance({runId}){
+    const releases:Array<()=>void>=[];
+    try{
+      releases.push(await input.admissionBarrier.acquireMaintenance());
+      if(closing||preflightJobs?.backupBusy)throw new Error('MEMORY_PREPARATION_MAINTENANCE_UNAVAILABLE');
+      if(forks!==undefined)releases.push(await forks.suspendAdmissions());
+      if(identityPromotions!==undefined)releases.push(await identityPromotions.suspendAdmissions());
+      if(representation===undefined)throw new Error('MEMORY_PREPARATION_RUNTIME_UNAVAILABLE');
+      releases.push(await representation.suspendRunAdmissions({runId}));
+      if(closing||preflightJobs?.backupBusy)throw new Error('MEMORY_PREPARATION_MAINTENANCE_UNAVAILABLE');
+      let released=false;
+      return ()=>{if(released)return;released=true;for(const release of releases.reverse())release();};
+    }catch(error){for(const release of releases.reverse())release();throw error;}
+  },
+});
+memoryPreparations=configuredMemories;
 if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!==undefined&&preflightJobs!==undefined) {
   exchange.setBackupQuiesce(createHostBackupQuiesce({host,admission:input.admissionBarrier,oauth:oauthJobs,access:accessJobs,preflight:preflightJobs,
     ...(forks===undefined?{}:{forks}),...(identityPromotions===undefined?{}:{configurator:identityPromotions}),
@@ -189,7 +254,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   const httpOptions={
     admissionBarrier:input.admissionBarrier,
     runtimeComposition:()=>({kind:representation!==undefined&&!representation.isClosed?'composed':'unavailable'}),
-    operatorExtensions:[createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),
+    operatorExtensions:[createMemoryPreparationRoutes({application:configuredMemories}),createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),
       createBackupTransferRoutes({service:()=>configuredTransfers}),externalRestoreRoutes,createIdentityPromotionRoutes({application:()=>identityPromotions}),...(exchange===undefined?[]:[exchange.routes])],
     runConfigurationDrafts: host.journal,
     forks: createForkApplication({journal:host.journal,...(forks===undefined?{}:{runtime:forks})}),
@@ -253,7 +318,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
  // A successfully reopened host may outlive that operation; later close receives
  // a fresh capability explicitly or acquires the ordinary ownership gate.
  closeOptions=undefined;
- return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,httpOptions,recover,close,
+ return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,memoryPreparations:configuredMemories,httpOptions,recover,close,assertRuntimeConfigurationIdle,
   ...(testOnly===undefined?{}:{testOnly})});
 } catch (error) {
   try { await close(); } catch (closeError) { throw new AggregateError([error,closeError], 'Production setup and cleanup failed'); }

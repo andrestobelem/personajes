@@ -8,6 +8,8 @@ La progresión básica puede describirse como planteamiento, desarrollo y desenl
 
 La división de la representación describe cómo se presenta esa acción: actos, escenas, intervenciones del coro, entradas, salidas y cambios de situación. En tragedia griega sirven de referencia prólogo, párodo, episodios, estásimos y éxodo; en comedia antigua, prólogo, párodo, agón, parábasis, episodios y éxodo, con variaciones. Véanse [Sófocles](../investigaciones/sofocles-estructura-dramatica.md) y [Aristófanes](../investigaciones/aristofanes-estructura-y-mundo.md). No se convierten esos repertorios en cinco o seis actos obligatorios.
 
+La persona que prepara una obra puede elegir referencias y describir qué aspecto quiere observar. El Director recibe esa selección como lente opcional; no asigna etapas fijas a una tradición ni altera episodios, actos o escenas. La referencia no se añade al contexto de los actores y no autoriza a resolver antes un conflicto abierto.
+
 ## La línea dramática de fondo
 
 La dirección conserva una formulación breve de la tensión central, las condiciones iniciales y las preguntas abiertas. Por ejemplo, en una situación de prueba original: «Una misión exige colaboración entre dos agentes cuya confianza está dañada». Es un encuadre, no una orden de reconciliarse ni de triunfar.

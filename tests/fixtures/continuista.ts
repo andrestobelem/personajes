@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { openJournal } from '../../src/adapters/journal.ts';
 import { PiRuntime, type CreatePiSessionInput, type PiPromptInput } from '../../src/adapters/pi.ts';
 import { createDeliverWorldWorker } from '../../src/application/deliver-world.ts';
-import { createEmptyRunConfigurationDraft, ProductionAudioSchema, RunConfigurationDraftSchema, type ProductionRoster } from '../../src/domain/production.ts';
+import { createEmptyRunConfigurationDraft, ProductionAudioSchema, RunConfigurationDraftSchema, type DramaticReferences, type ProductionRoster } from '../../src/domain/production.ts';
 import { ContinuityContextSchema, PreparedCharacterSchema, SpanishVarietyForActingSchema, type PreparedCharacter } from '../../src/domain/preparation.ts';
 import { WorldSnapshotSchema, type WorldSnapshot } from '../../src/domain/world.ts';
 import { validateRunConfiguration, ReadyRunConfigurationSchema, type ReadyRunConfiguration } from '../../src/application/production-preflight.ts';
@@ -165,6 +165,7 @@ export function draftFixture(input: {
   moment?: number;
   participantIds?: string[];
   humanParticipants?: unknown;
+  dramaticReferences?: DramaticReferences;
 } = {}) {
   const prepared = input.prepared ?? preparedFixture();
   const world = input.world ?? worldFixture({ nonverbal: prepared.voice.value.kind === 'nonverbal' });
@@ -195,6 +196,7 @@ export function draftFixture(input: {
       purpose: 'Explorar una circunstancia cotidiana con agencia propia.',
       question: { kind: 'absent' }, conflict: { kind: 'not-formulated' },
     }),
+    ...(input.dramaticReferences === undefined ? {} : { dramaticReferences: configured(input.dramaticReferences) }),
     circadianPolicy: configured({ kind: 'manual-only' }),
     spanishVariety: configured(input.variety ?? SpanishVarietyForActingSchema.parse({
       kind: 'proposed', label: 'Español de doblaje (propuesta editorial)', source: 'editorial-proposal',
@@ -220,13 +222,13 @@ export function canonical(value: unknown): string {
   return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(',')}}`;
 }
 
-export async function setup(inferenceProfile?: PersistedInferenceProfile | 'historical') {
+export async function setup(inferenceProfile?: PersistedInferenceProfile | 'historical', dramaticReferences?: DramaticReferences) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-actor-worker-'));
   const journal = openJournal({ path: join(directory, 'journal.sqlite') });
   const baseConfiguration = readyFixture({ humanParticipants: [{
     identity: { participantId: 'visitante-prueba', displayName: 'Visitante', identityMarkdown: 'Identidad sintética.', lifeStoryMarkdown: 'Historia sintética.' },
     presence: { kind: 'inScene', sceneId, placeId: 'sala', position: { x: 1, y: 2 }, channelId: '00000000-0000-4000-8000-000000000104' },
-  }] });
+  }], ...(dramaticReferences === undefined ? {} : { dramaticReferences }) });
   const other = preparedFixture({ characterId: 'oculto-prueba' });
   const firstEntity = baseConfiguration.worldSnapshot.entities[0];
   assert.ok(firstEntity?.kind === 'character');

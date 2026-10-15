@@ -65,6 +65,25 @@ export const DramaticLineSchema = z.strictObject({
 });
 export type DramaticLine = z.infer<typeof DramaticLineSchema>;
 
+/** Optional dramatic lenses are configuration metadata, not a required plot template. */
+export const DramaticReferenceSchema = z.strictObject({
+  tradition: z.enum(['greek-tragedy', 'old-comedy']),
+  author: z.string().trim().min(1).max(120),
+  work: z.string().trim().min(1).max(160),
+  focus: z.string().trim().max(1_000).optional(),
+});
+export const DramaticReferencesSchema = z.array(DramaticReferenceSchema).max(12)
+  .superRefine((references, context) => {
+    const seen = new Set<string>();
+    for (const [index, reference] of references.entries()) {
+      const key = `${reference.tradition}:${reference.author.toLocaleLowerCase('es')}:${reference.work.toLocaleLowerCase('es')}`;
+      if (seen.has(key)) context.addIssue({ code: 'custom', path: [index, 'work'], message: 'La referencia está duplicada.' });
+      seen.add(key);
+    }
+  });
+export type DramaticReference = z.infer<typeof DramaticReferenceSchema>;
+export type DramaticReferences = z.infer<typeof DramaticReferencesSchema>;
+
 export const CircadianPolicySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('manual-only') }),
   z.strictObject({
@@ -238,6 +257,8 @@ export const RunConfigurationDraftSchema = z.strictObject({
   /** Structurally closed, possibly incomplete candidate; Ready requires the full WorldSnapshotSchema. */
   worldSnapshot: ProductionDraftFieldSchema(WorldSnapshotDraftSchema),
   dramaticLine: ProductionDraftFieldSchema(DramaticLineSchema),
+  /** Missing only in historical drafts; refs remain separate from progression and structure. */
+  dramaticReferences: ProductionDraftFieldSchema(DramaticReferencesSchema).optional(),
   circadianPolicy: ProductionDraftFieldSchema(CircadianPolicySchema),
   spanishVariety: ProductionDraftFieldSchema(SpanishVarietyForActingSchema),
   narrationMode: ProductionDraftFieldSchema(NarrationModeSchema),
@@ -274,6 +295,10 @@ export function createEmptyRunConfigurationDraft(input: unknown): RunConfigurati
     },
     worldSnapshot: { kind: 'empty' },
     dramaticLine: { kind: 'empty' },
+    dramaticReferences: {
+      kind: 'configured', value: [],
+      evidence: defaultEvidence('S09-default-no-dramatic-reference-template'),
+    },
     circadianPolicy: { kind: 'empty' },
     spanishVariety: { kind: 'empty' },
     narrationMode: {

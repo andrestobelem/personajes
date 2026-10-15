@@ -28,6 +28,21 @@ test('Director no recibe actorId, recuerdos, propuestas ni perfiles alternativos
   assert.throws(()=>validateDirectorContext({...context,scope:{...context.scope,throughWorldSeq:0}}));
 });
 
+test('las referencias clásicas llegan sólo al contexto administrativo como orientación, conservando compatibilidad histórica',()=>{
+  const {context} = fixture();
+  assert.equal('dramaticReferences' in context, false);
+  const references = [
+    { tradition: 'greek-tragedy', author: 'Sófocles', work: 'Antígona', focus: 'Decisión y ley de la ciudad.' },
+    { tradition: 'old-comedy', author: 'Aristófanes', work: 'Las aves', focus: 'Efectos de llevar una propuesta al extremo.' },
+  ];
+  const directed = validateDirectorContext({ ...context, dramaticReferences: references });
+  assert.deepEqual(directed.dramaticReferences, references);
+  assert.deepEqual(directed.dramaticLine.conflict, { kind: 'not-formulated' });
+  assert.equal(directed.confirmedEvents.length, context.confirmedEvents.length);
+  assert.equal(DirectorContextSchema.safeParse({ ...directed, dramaticReferences: [{ ...references[0], extra: 'instrucción' }] }).success, false);
+  assert.equal(DirectorContextSchema.safeParse({ ...directed, dramaticReferences: Array(13).fill(references[0]) }).success, false);
+});
+
 test('etapa suficiente exige hechos referidos y rectificación identificada; no admite decisiones actorales',()=>{
   const {context,observation} = fixture();
   assert.deepEqual(validateDirectorObservation({context,observation}),observation);
