@@ -14,10 +14,10 @@
   },
   "currentSpecHashes": {
     "docs/specs/01-dominio-y-catalogo.md": "ed800252a5cc66ac102eea2d79f487fd44edd9621bd9fba3fcb41e57d6560e68",
-    "docs/specs/02-persistencia-e-icm.md": "301aa9073523c72c49d0db299c9975b9efcbfd739df99553f0509acc63716afe",
-    "docs/specs/03-pi-y-coordinacion.md": "5264b0cbee5d544dd0efe430f17a4850f8a0b1a1f4c8ed8ab15c82662761dc96",
+    "docs/specs/02-persistencia-e-icm.md": "1e01683e6c8a2284f7d9a58d05a221778219f3877c89c239242cdf100e69a3f2",
+    "docs/specs/03-pi-y-coordinacion.md": "25a213874be6a6ebc99399cd1d36fbb943827d5ab7ceabbc8767644320531476",
     "docs/specs/04-api-y-autoridad.md": "3d476dd61ab087d328f2d472d3af17723a59c0349d2e8168ef494880d9e9591e",
-    "docs/specs/05-interfaz.md": "cf568112a38249f2e5f86f24a6e5d291914877645cc91f1d328fce3ca18bd8e9",
+    "docs/specs/05-interfaz.md": "a96a8d4c1de6e38d83c59324b9d83924b7bc875caa6ab60984623e7c72f9f3f1",
     "docs/specs/06-voces-y-ritmo.md": "1c05faf8ce57d7d17ed95f63843eb75b2eff28885401b3de51424ed6bd31ea08",
     "docs/specs/07-verificacion.md": "f9a7417a934d920f86d4cf582f9596a886f865486bbd87a1053b26dacd6f777d",
     "docs/specs/README.md": "eb1bf49a3bc7945b1b15a588b1854b39d4c9044c97ad7e43d14b4d3be2f21f8a"

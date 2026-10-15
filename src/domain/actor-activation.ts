@@ -66,6 +66,7 @@ export function nextRoutineAdvance(input: unknown): number | undefined {
   const request = z.strictObject({ snapshot: WorldSnapshotSchema, policy: CircadianPolicySchema,
     lifecycle: z.enum(['running', 'paused', 'stopped', 'closed', 'ready', 'draft']) }).parse(input);
   if (request.lifecycle !== 'running' || request.policy.kind !== 'advance-while-running' || request.policy.maxAdvanceMs === 0) return undefined;
+  if (!request.snapshot.scenes.some(scene => scene.id === request.snapshot.activeSceneId && scene.lifecycle.kind === 'open')) return undefined;
   const now = request.snapshot.clock.instant;
   const boundaries = request.snapshot.entities.flatMap(actor => actor.kind === 'character' && actor.routine.kind === 'windows'
     ? actor.routine.windows.flatMap(window => [window.from, window.to]) : []).filter(boundary => boundary > now);

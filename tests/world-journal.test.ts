@@ -2151,6 +2151,29 @@ function routineConfigurationFixture(policy:unknown,windows:[number,number][]= [
   return ReadyRunConfigurationSchema.parse({...coordinatorConfigurationFixture([maxId,agentId],world),circadianPolicy:policy});
 }
 
+test('routine clock remains frozen between scenes without creating an event, commit or activation', () => {
+  withJournal((journal, path) => {
+    registerRun(journal, routineConfigurationFixture({ kind: 'advance-while-running', maxAdvanceMs: 1000 }));
+    const closed = journal.applyDramaticStructureCommand({ runId, principalId: dramaticStructurePrincipalId,
+      operationId: uuid(39_040), idempotencyKey: uuid(39_041), expectedWorldRevision: 0, expectedStructureRevision: 0,
+      command: { kind: 'closeScene', sceneId, reason: 'Fin explícito antes de la próxima rutina' } });
+    assert.equal(closed.kind, 'stored');
+    const before = journal.loadWorld({ runId });
+    assert.equal(before?.activeSceneId, null);
+    const database = new DatabaseSync(path);
+    try {
+      const counts = () => ['world_events', 'world_commits', 'routine_clock_advances', 'actor_activation_causes', 'actor_activation_invitations'].map(table =>
+        database.prepare(`SELECT count(*) AS count FROM ${table} WHERE run_id=?`).get(runId));
+      const beforeCounts = counts();
+      const result = journal.advanceRoutineClock({ runId, operationId: uuid(39_042) });
+      assert.equal(result.kind, 'notApplicable');
+      if (result.kind === 'notApplicable') assert.equal(result.reason, 'no-active-scene');
+      assert.deepEqual(journal.loadWorld({ runId }), before);
+      assert.deepEqual(counts(), beforeCounts);
+    } finally { database.close(); }
+  });
+});
+
 test('v32 avanza sólo con política activa, acota el salto, reintenta por receipt y convoca al cruzar rutina',()=>{
   const policy={kind:'advance-while-running',maxAdvanceMs:1_000};
   withJournal((journal)=>{

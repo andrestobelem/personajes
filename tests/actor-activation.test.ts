@@ -47,6 +47,17 @@ test('routine scheduling uses fictional boundaries and bounded running policy, n
 });
 
 
+test('routine scheduling does not advance between scenes even when an absent actor has a future window', () => {
+  const source = snapshot();
+  const now = source.clock.instant;
+  const world = WorldSnapshotSchema.parse({ ...source, schemaVersion: 2, activeSceneId: null,
+    scenes: source.scenes.map(scene => ({ ...scene, lifecycle: { kind: 'closed', startedAt: now, closedAt: now, reason: 'Fin de escena de prueba' } })),
+    entities: source.entities.map(entity => entity.kind === 'character' ? { ...entity, presence: { kind: 'absent' },
+      routine: { kind: 'windows', defaultState: 'unavailable', windows: [{ from: now + 1000, to: now + 2000, state: 'available' }] } } : entity),
+  });
+  assert.equal(nextRoutineAdvance({ snapshot: world, lifecycle: 'running', policy: { kind: 'advance-while-running', maxAdvanceMs: 1000 } }), undefined);
+});
+
 test('routine boundaries represent effective unavailable→available transitions including the default outside windows',()=>{
   const window=(from:number,to:number,state:'available'|'unavailable')=>({from,to,state});
   const cases=[

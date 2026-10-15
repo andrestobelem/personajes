@@ -6826,11 +6826,13 @@ export function openJournal(input: { path: string }) {
         const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         if(value===undefined)return RoutineClockAdvanceResultSchema.parse({kind:'notApplicable',reason:'inactive',worldRevision:null,lifecycleRevision:null});
         const run=parseWorldRun(value);
-        const notApplicable=(reason:'inactive'|'policy'|'no-boundary'|'boundary-too-far'|'step-bound'|'work-pending')=>
+        const notApplicable=(reason:'inactive'|'policy'|'no-active-scene'|'no-boundary'|'boundary-too-far'|'step-bound'|'work-pending')=>
           RoutineClockAdvanceResultSchema.parse({kind:'notApplicable',reason,worldRevision:run.row.world_revision,lifecycleRevision:run.row.lifecycle_revision});
         if(run.row.lifecycle!=='running')return notApplicable('inactive');
         const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
         if(configuration.circadianPolicy.kind!=='advance-while-running')return notApplicable('policy');
+        if(!run.snapshot.scenes.some(scene=>scene.id===run.snapshot.activeSceneId&&scene.lifecycle.kind==='open'))
+          return notApplicable('no-active-scene');
         const step=activeStepJob(request.runId);
         if(step?.pulseId!==undefined&&step.pulseId!==null)return notApplicable('step-bound');
         const workPending=database.prepare(`SELECT 1 FROM coordinator_pulses WHERE run_id=? AND state='running'

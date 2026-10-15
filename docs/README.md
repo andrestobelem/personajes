@@ -89,5 +89,6 @@ Los pendientes sustantivos se mantienen visibles: no hay representación iniciad
 
 - [Preflight durable](auditoria/preflight-durable.md): comprobación explícita del corte guardado, recuperación y obsolescencia, sin inicio ni inferencia implícitos.
 
+- [Reloj y rutinas: preparación, evidencia y límite entre escenas](auditoria/reloj-y-rutinas.md).
 - [Cambios de circunstancia: contrato, implementación y evidencia](auditoria/cambios-de-circunstancia.md): cinco familias físicas, entrega situada y límites de aceptación.
 - [ADR 0008: circunstancias físicas y percepción](adr/0008-circunstancias-fisicas-y-percepcion.md), [entrevista delegada](auditoria/dialogo-circunstancias.md) y [respuestas del custodio](auditoria/circunstancias-respuestas.md).

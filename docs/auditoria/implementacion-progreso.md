@@ -2,6 +2,14 @@
 
 El objetivo completo sigue activo. Los cierres documentales de PRD y S01–S07 se conservan como antecedentes; ambos están en revisión desde el 15 de octubre. La implementación y su revisión continúan. Este registro no reemplaza la matriz de 77 requisitos.
 
+## Corte 40: preparación del reloj y bloqueo entre escenas
+
+La GUI permite elegir avance automático desde un borrador manual o vacío, aplicar un máximo por salto explícito y guardar/reabrir/validar. Rechaza vacío, fracciones y enteros inseguros sin habilitar un guardado incompleto. El recorrido visual conservó 86.400.000 ms y promovió Ready en revisión 1 sin iniciar.
+
+Una auditoría delegada reprodujo que el reloj avanzaba después de cerrar la última escena; ahora planificador y journal exigen escena activa abierta y no crean eventos/commits/convocatorias entre escenas. Se corrigieron dos contradicciones de S02/S03 sobre rutinas ya conectadas. [Pruebas, captura y límites](reloj-y-rutinas.md).
+
+Gate: TypeScript y **645 pruebas: 644 aprobadas, cero fallidas y una omitida por requerir Linux**. Build de 438 módulos. Recurrencia diaria, calendario día/noche, servicios reales y aceptación integral siguen pendientes. El objetivo continúa activo.
+
 ## Corte 39: cinco familias de circunstancias y percepción situada (v33)
 
 Dirección puede cambiar puerta, iluminación, disponibilidad de dispositivo, condición ambiental y aparición de objeto de catálogo. Se confirman con CAS conjunto, recibos durables, scope y exclusión de trabajo en vuelo; el estado ya vigente deja sólo registro administrativo. Las percepciones no inventan hablante ni entregan órdenes al reparto. La entrega y cadena Actor/Continuista hasta conversación se verificaron con SQLite/ICM reales y Pi SDK de transporte controlado.
