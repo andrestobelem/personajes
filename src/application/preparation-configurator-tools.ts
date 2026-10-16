@@ -57,6 +57,17 @@ function toolRejection(code:string,context:ToolContext,raw:unknown):string|undef
       });
       return `Faltan vacíos o contradicciones que deben conservarse textualmente, exactamente con estas cadenas, en ${where} (los del expediente y los ya curados en este borrador): ${missing.join(' | ')||'(revisá ambas listas)'}. Podés agregar otros, pero no quitar ni reformular estos. ${resend}`;
     }
+    case 'CHARACTER_BIOGRAPHY_GAPS_REMOVAL_FORBIDDEN':{
+      const parsed=PreparationConfiguratorProposalSchema.safeParse(raw);
+      const missing=(parsed.success?parsed.data.actors:[]).flatMap(actor=>{
+        const prior=requiredDocumentaryGaps(context,actor.characterId).lifeHistory;
+        const identity=actor.sections.find(section=>section.section==='identity');
+        const next=identity?.section==='identity'?identity.value.lifeHistory:undefined;
+        const unknowns=prior.unknowns.filter(value=>!(next?.unknowns??[]).includes(value)),contradictions=prior.contradictions.filter(value=>!(next?.contradictions??[]).includes(value));
+        return unknowns.length+contradictions.length===0?[]:[`${actor.characterId}: vacíos ${JSON.stringify(unknowns)}; contradicciones ${JSON.stringify(contradictions)}`];
+      });
+      return `La historia de vida ya curada en este borrador no puede perder vacíos ni contradicciones. Conservá textualmente en identity.lifeHistory.unknowns y identity.lifeHistory.contradictions: ${missing.join(' | ')||'(revisá ambas listas)'}. ${resend}`;
+    }
     case 'PREPARATION_CONFIGURATOR_CONTINUITY_MISMATCH':return `Un antecedente o una condición de revisión de un Goal cita un hito o una inclusión que no existe en la continuidad admitida, o un estado de hito distinto. ${admittedContinuity(context,raw)} Usá sólo esos IDs; no inventes milestoneId ni inclusionId. Si no hay ninguno, registrá el antecedente con kind biography y applicability unconditional, y usá condiciones de revisión de tipo circumstance. ${resend}`;
     case 'PREPARATION_CONFIGURATOR_MILESTONE_CONDITION_REQUIRED':return `Un antecedente kind milestone necesita applicability milestone-state o explicit-inclusion con un ID admitido. ${admittedContinuity(context,raw)} Si no hay ninguno, usá kind biography con applicability unconditional. ${resend}`;
     default:return undefined;

@@ -77,15 +77,16 @@ export function compilePreparationConfiguratorPacket(raw:unknown){
 }
 
 /** Gaps a proposal must keep for an actor: the frozen dossier's plus those already curated in this draft. */
-export function requiredDocumentaryGaps(context:PreparationConfiguratorContext,characterId:string):{unknowns:string[];contradictions:string[]}{
+export function requiredDocumentaryGaps(context:PreparationConfiguratorContext,characterId:string):{unknowns:string[];contradictions:string[];lifeHistory:{unknowns:string[];contradictions:string[]}}{
   const source=context.actorSources.find(value=>value.characterId===characterId);
-  if(source===undefined)return {unknowns:[],contradictions:[]};
+  if(source===undefined)return {unknowns:[],contradictions:[],lifeHistory:{unknowns:[],contradictions:[]}};
   const existing=context.draft.roster.kind==='empty'?undefined:context.draft.roster.value.preparedCharacters.find(value=>value.characterId===characterId);
   const partial=context.draft.roster.kind==='empty'?undefined:context.draft.roster.value.preparationDrafts?.find(value=>value.characterId===characterId);
   const priorUnknownPolicy=partial?.unknownPolicy.kind==='declared'?partial.unknownPolicy.value:existing?.unknownPolicy;
   const priorIdentity=partial?.identity.kind==='declared'?partial.identity.value:existing?.identity;
   return {unknowns:[...source.frozenDossier.unknowns,...(priorUnknownPolicy?.value.fields.map(value=>value.topic)??[])],
-    contradictions:[...source.frozenDossier.contradictions,...(priorIdentity?.value.contradictions??[])]};
+    contradictions:[...source.frozenDossier.contradictions,...(priorIdentity?.value.contradictions??[])],
+    lifeHistory:{unknowns:priorIdentity?.value.lifeHistory?.unknowns??[],contradictions:priorIdentity?.value.lifeHistory?.contradictions??[]}};
 }
 
 export function validatePreparationConfiguratorProposal(input:{context:unknown;proposal:unknown}){
