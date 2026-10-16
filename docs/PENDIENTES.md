@@ -11,7 +11,7 @@ Esta lista complementa las 14 entregas detalladas de abajo: conserva su alcance 
 - [ ] Revisar el PRD completo contra la conversación y las aclaraciones posteriores: iniciativa libre, biografías exhaustivas, defaults elegibles, ausencia de cuotas acumuladas y exportación del resultado. Registrar omisiones y contradicciones y resolverlas con procedencia.
 - [ ] Sincronizar las siete specs, trazabilidad Markdown y espejo JSON con los requisitos vigentes; revisar cada uno de los 77 IDs y sus escenarios de aceptación. Cerrar documentalmente PRD/specs sólo al terminar esa revisión.
 - [ ] Reconciliar matriz de decisiones, configuración documental de `obra/`, auditorías, índices y handoff. Distinguir plantillas generales sin puesta de configuraciones persistidas por representación; conservar evidencia histórica y evitar estados incompatibles.
-- [ ] Completar la comprobación de enlaces, fuentes, licencias, expedientes y avatares en el catálogo. Enlaces locales Markdown comprobados el 16 de octubre: 540 archivos, cero rotos; faltan fuentes, licencias, expedientes y avatares.
+- [ ] Completar la comprobación de enlaces, fuentes, licencias, expedientes y avatares en el catálogo. Comprobado el 16 de octubre: 540 archivos Markdown sin enlaces locales rotos; los 28 avatares coinciden en archivo, bytes y SHA-256 con su manifiesto, todos con revisión visual y campo de licencia registrado (ninguno con licencia de reutilización confirmada); 27 son de personaje y corresponden a las 27 carpetas de `obra/personajes`, y `familia-smart` es referencia de grupo. Falta comprobar en línea que las páginas de fuente de expedientes y avatares sigan disponibles.
 
 ### Próxima representación completa
 
