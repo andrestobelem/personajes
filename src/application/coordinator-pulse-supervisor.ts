@@ -48,7 +48,10 @@ export function createCoordinatorPulseSupervisor(input: {
   onFailure?: (failure: SupervisorFailure) => void;
   beforeClosePulse?: (pulse: {runId: RunId; pulseId: PulseId}, signal: AbortSignal) => Promise<boolean>;
   onPulseClosed?: (pulse: {runId: RunId; pulseId: PulseId}) => Promise<void>;
+  /** Delay before re-reading a run that keeps waking while its pulse cannot advance. */
+  suspendedWakeDelayMs?: (consecutive: number) => number;
 }) {
+  const suspendedWakeDelayMs = input.suspendedWakeDelayMs ?? ((consecutive: number) => Math.min(2_000, 250 * 2 ** Math.max(0, consecutive - 2)));
   const ownerToken = OwnerTokenSchema.parse(input.ownerToken);
   const active = new Map<RunId, ActiveRun>();
   const suspendedRuns = new Set<RunId>();
@@ -67,6 +70,7 @@ export function createCoordinatorPulseSupervisor(input: {
     const state: ActiveRun = { wakeVersion: 1, controller: new AbortController(), task: undefined, rescheduleAfterCancel: false };
     active.set(request.runId, state);
     state.task = (async () => {
+      let consecutiveSuspended = 0;
       while (!closed && !state.controller.signal.aborted) {
         const wakeVersion = state.wakeVersion;
         let outcome: 'quiescent' | 'suspended';
@@ -77,8 +81,15 @@ export function createCoordinatorPulseSupervisor(input: {
         }
         if (closed || state.controller.signal.aborted || state.wakeVersion === wakeVersion) return;
         // A wake received while a worker was running gets one fresh durable read.
-        // If that read still reports busy/blocked, it suspends instead of spinning.
-        if (outcome === 'suspended') continue;
+        // A pulse that cannot advance (e.g. waiting on a blocked actor's retry) may
+        // keep being woken by its own director/delivery work: back off with a real
+        // timer so the host keeps serving requests instead of spinning.
+        if (outcome === 'suspended') {
+          consecutiveSuspended += 1;
+          if (consecutiveSuspended >= 2) await abortableDelay(suspendedWakeDelayMs(consecutiveSuspended), state.controller.signal);
+          continue;
+        }
+        consecutiveSuspended = 0;
       }
     })().catch((error: unknown) => {
       reportFailure({ kind: 'supervisor', runId: request.runId, error });
@@ -242,4 +253,13 @@ function jobKey(job: Job): string {
 
 function yieldToHost(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', done); resolve(); }, ms);
+    const done = () => { clearTimeout(timer); resolve(); };
+    signal.addEventListener('abort', done, { once: true });
+  });
 }

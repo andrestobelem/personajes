@@ -403,3 +403,28 @@ test('close aborta y espera al worker activo antes de devolver', async () => {
     assert.equal(closeResolved, true);
   } finally { fixture.close(); }
 });
+
+test('un pulso que no puede avanzar y se despierta solo no hace girar al host', async () => {
+  const pulseId = PulseIdSchema.parse(randomUUID());
+  let drains = 0;
+  let supervisor: ReturnType<typeof createCoordinatorPulseSupervisor> | undefined;
+  const journal = {
+    listActorTurnJobsForPulse: () => [],
+    closeCoordinatorPulse: () => ({ state: 'running' }),
+  } as unknown as Parameters<typeof createCoordinatorPulseSupervisor>[0]['journal'];
+  supervisor = createCoordinatorPulseSupervisor({
+    journal, ownerToken: randomUUID(),
+    actorWorker: { async run() { throw new Error('No hay jobs que ejecutar'); } },
+    async beginPulse() { drains += 1; return { kind: 'existing', pulse: { runId, pulseId, state: 'running', jobs: [] }, jobs: [] } as never; },
+    // Director or delivery work done while closing wakes the same run again.
+    async beforeClosePulse() { supervisor?.schedule({ runId }); return true; },
+  });
+  supervisor.schedule({ runId });
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 10);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  clearInterval(timer);
+  await supervisor.close();
+  assert.ok(drains <= 8, `el supervisor releyó el pulso ${drains} veces en 600 ms`);
+  assert.ok(ticks >= 30, 'el host sigue atendiendo temporizadores mientras el pulso espera');
+});
