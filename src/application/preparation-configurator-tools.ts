@@ -9,10 +9,40 @@ import {validatePreparationConfiguratorContext,validatePreparationConfiguratorPr
 
 export const PreparationConfiguratorLocalCandidateSchema=z.strictObject({kind:z.literal('local-preparation-configurator-candidate'),candidateId:z.uuid(),contextHash:HashSchema,proposalHash:HashSchema,proposal:PreparationConfiguratorProposalSchema});
 const EligibilitySchema=z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('active')}),z.strictObject({kind:z.literal('inactive'),reason:z.string().min(1).max(120)})]);
-function validateToolProposal(input:Parameters<typeof validatePreparationConfiguratorProposal>[0]){
+type ToolContext=ReturnType<typeof validatePreparationConfiguratorContext>;
+type Explained={sourceRefs?:unknown;treatment?:unknown};
+function explainedEntries(raw:unknown):{location:string;value:Explained}[]{
+  const entry=(location:string,value:Record<string,unknown>)=>({location,value:{sourceRefs:value.sourceRefs,treatment:value.treatment}});
+  const proposal=z.object({settings:z.array(z.object({section:z.string()}).passthrough()).catch([]),actors:z.array(z.object({characterId:z.string(),sections:z.array(z.object({section:z.string()}).passthrough()).catch([])}).passthrough()).catch([]),placements:z.array(z.object({characterId:z.string()}).passthrough()).catch([])}).passthrough().safeParse(raw);
+  if(!proposal.success)return [];
+  return [...proposal.data.settings.map(value=>entry(`settings.${value.section}`,value)),
+    ...proposal.data.actors.flatMap(actor=>actor.sections.map(value=>entry(`actors.${actor.characterId}.${value.section}`,value))),
+    ...proposal.data.placements.map(value=>entry(`placements.${value.characterId}`,value))];
+}
+function admittedRefs(context:ToolContext){
+  const refs=[...context.documents.map(document=>document.sourceId),...context.actorSources.flatMap(source=>source.frozenDossier.sourceRefs.map(ref=>ref.id))];
+  return refs.length===0?'ninguno: este corte no admite referencias documentales':refs.join(', ');
+}
+/** Rejections are returned to the model; a bare code gives it nothing to correct. */
+function toolRejection(code:string,context:ToolContext,raw:unknown):string|undefined{
+  const selected=context.actorSources.map(source=>source.characterId).join(', ');
+  const resend='Corregí sólo eso y reenviá la propuesta completa; no envíes un fragmento ni vacíes actors.';
+  switch(code){
+    case 'PREPARATION_CONFIGURATOR_IDENTITY_CONTRADICTION_TREATMENT_REQUIRED':return 'contradictionTreatments sólo corresponde a contradicciones de una identidad previamente curada que esta propuesta elimina, con un tratamiento por cada una y la identidad declarada como adaptación. Si no hay identidad curada previa o no eliminás contradicciones de ella, enviá contradictionTreatments: []. Conservá las contradicciones documentales del dossier en actors[].contradictions; no las conviertas en tratamientos.';
+    case 'PREPARATION_CONFIGURATOR_DOCUMENTARY_REFERENCE_REQUIRED':{
+      const offending=explainedEntries(raw).filter(entry=>entry.value.treatment==='documentary-selection'&&Array.isArray(entry.value.sourceRefs)&&entry.value.sourceRefs.length===0).map(entry=>entry.location);
+      return `treatment documentary-selection exige al menos un sourceRef admitido. Entradas sin referencia: ${offending.join(', ')||'(revisá cada sección)'}. IDs admitidos: ${admittedRefs(context)}. Sin una referencia admitida, usá declared-adaptation y explicá la adaptación en la razón; no inventes referencias. ${resend}`;
+    }
+    case 'PREPARATION_CONFIGURATOR_REFERENCE_NOT_ADMITTED':return `Usaste un sourceRef que no está admitido. IDs admitidos: ${admittedRefs(context)}. No uses URLs, hashes ni nombres de archivo. ${resend}`;
+    case 'PREPARATION_CONFIGURATOR_PROPOSAL_ACTORS_MISMATCH':return `actors debe contener exactamente una entrada por cada personaje seleccionado (${selected}), y placements sólo puede referirse a ellos. ${resend}`;
+    default:return undefined;
+  }
+}
+function validateToolProposal(input:{context:ToolContext;proposal:unknown}){
   try{return validatePreparationConfiguratorProposal(input);}
   catch(error){
-    if(error instanceof Error&&error.message==='PREPARATION_CONFIGURATOR_IDENTITY_CONTRADICTION_TREATMENT_REQUIRED')throw new Error('PREPARATION_CONFIGURATOR_IDENTITY_CONTRADICTION_TREATMENT_REQUIRED: contradictionTreatments sólo corresponde a contradicciones de una identidad previamente curada que esta propuesta elimina, con un tratamiento por cada una y la identidad declarada como adaptación. Si no hay identidad curada previa o no eliminás contradicciones de ella, enviá contradictionTreatments: []. Conservá las contradicciones documentales del dossier en actors[].contradictions; no las conviertas en tratamientos.');
+    const guidance=error instanceof Error?toolRejection(error.message,input.context,input.proposal):undefined;
+    if(error instanceof Error&&guidance!==undefined)throw new Error(`${error.message}: ${guidance}`);
     throw error;
   }
 }

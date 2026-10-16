@@ -85,3 +85,19 @@ test('feedback no relaja el tratamiento obligatorio de una contradicción curada
   const treated={...proposal,actors:[{...proposal.actors[0],contradictionTreatments:[{contradiction:'PRIVATE-CURATED-CONTRADICTION-CONTENT',reason:'Revisión explícita de la identidad anterior, pendiente de aprobación.',sourceRefs:[]}]}]};
   await tool.tool.execute('required-treatment-supplied',treated);assert.ok(tool.readCandidate());
 });
+
+test('rechazos documentales y de reparto indican ubicación, IDs admitidos y que se reenvíe la propuesta completa',async()=>{
+  const f=actorFixture(),actor=f.proposal.actors[0];assert.ok(actor);
+  const tool=createPreparationConfiguratorProposalTool({context:f.context,checkEligibility:()=>({kind:'active'})});
+  const documentary=PreparationConfiguratorProposalSchema.parse({...f.proposal,actors:[{...actor,sections:[{section:'inventory',value:[],reason:'Sin objetos documentados.',sourceRefs:[],treatment:'documentary-selection',unknowns:[]}]}]});
+  await assert.rejects(tool.tool.execute('documentary-without-refs',documentary),error=>{
+    assert.ok(error instanceof Error);assert.match(error.message,/^PREPARATION_CONFIGURATOR_DOCUMENTARY_REFERENCE_REQUIRED: /);
+    assert.match(error.message,/actors\.personaje-prueba\.inventory/);assert.match(error.message,/IDs admitidos: ninguno/);
+    assert.match(error.message,/usá declared-adaptation/);assert.match(error.message,/propuesta completa/);return true;
+  });
+  await assert.rejects(tool.tool.execute('empty-actors',{...f.proposal,actors:[]}),error=>{
+    assert.ok(error instanceof Error);assert.match(error.message,/^PREPARATION_CONFIGURATOR_PROPOSAL_ACTORS_MISMATCH: /);
+    assert.match(error.message,/\(personaje-prueba\)/);return true;
+  });
+  assert.equal(tool.readCandidate(),undefined);
+});
