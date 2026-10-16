@@ -771,7 +771,9 @@ async function dispatchBudgetedRequest(input: {
     preDispatchStage = 'dispatched-state';
     startedNs = clock.nowNs();
     await input.input.port.transitionReservation({ ...reservation, target: 'dispatched', ...(grant === undefined ? {} : { wallTime: { clockEpochId: grant.clockEpochId, monotonicNs: startedNs.toString() } }) });
-  } catch {
+  } catch (failure) {
+    // Operators need the stage and host code; free-form messages may carry private data.
+    const failureCode = failure instanceof Error && /^[A-Z][A-Z0-9_]{2,119}$/.test(failure.message) ? failure.message : 'unclassified';
     if (preDispatchStage === 'dispatched-state') {
       await transitionAfterDispatch(input.input.port, reservation, 'ambiguous', grant === undefined ? undefined : { clockEpochId: grant.clockEpochId, monotonicNs: clock.nowNs().toString() });
     } else {
@@ -783,7 +785,7 @@ async function dispatchBudgetedRequest(input: {
     } else if (preDispatchStage === 'dispatched-state') {
       reportAdapterFault(input.input.port, { code: 'reservation-transition-failed', target: 'dispatched' });
     }
-    input.output.push(terminalErrorMessage(input.model, 'error', 'No se pudo completar el control local antes del despacho.'));
+    input.output.push(terminalErrorMessage(input.model, 'error', `No se pudo completar el control local antes del despacho (etapa ${preDispatchStage}, código ${failureCode}).`));
     return;
   }
   if (grant !== undefined && startedNs !== undefined) {
