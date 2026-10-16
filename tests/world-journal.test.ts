@@ -3515,3 +3515,31 @@ test('la actividad del coordinador distingue trabajo pendiente del reposo cuando
     assert.deepEqual(journal.listCoordinatorPulseTargets(),[]);
   }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
 });
+
+test('un turno de iniciativa sin percepciones nuevas se acepta: la iniciativa es su causa técnica', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-initiative-empty-inbox-'));
+  const journal=openJournal({path:join(directory,'world.sqlite')});
+  try{
+    await createQueuedHumanIntentFixture(journal,['Max, escuchame un momento.'],coordinatorConfigurationFixture([maxId,agentId]));
+    const first=journal.beginCoordinatorPulse({runId});
+    if(first.kind!=='started')assert.fail('La intervención debe convocar a Max');
+    const maxJob=first.jobs.find((job)=>job.actorId===maxId);
+    if(maxJob===undefined)assert.fail('Falta el turno de Max');
+    const turn=await acceptActorAttemptForTest({journal,directory,job:maxJob,seed:46_100,nextInitiative:'after-resolution',
+      makeAttempt:(cut)=>waitAttempt(46_110,maxId,cut.worldRevision)});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:turn.proposalId,version:1,ids:idSource(46_120)}).resolution.kind,'applied');
+    for(const job of first.jobs.filter((item)=>item.actorId!==maxId)){
+      const quiet=await acceptActorAttemptForTest({journal,directory,job,seed:46_130,makeAttempt:(cut)=>waitAttempt(46_140,job.actorId,cut.worldRevision)});
+      assert.equal(journal.commitWorldAttempt({runId,proposalId:quiet.proposalId,version:1,ids:idSource(46_150)}).resolution.kind,'applied');
+    }
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:first.pulse.pulseId}).state,'completed');
+    const continuation=journal.beginCoordinatorPulse({runId});
+    if(continuation.kind!=='started')assert.fail('La iniciativa debe convocar a Max');
+    assert.equal(continuation.pulse.cause.kind,'actorInitiative');
+    const job=continuation.jobs.find((item)=>item.actorId===maxId);
+    if(job?.initiative===undefined)assert.fail('El turno debe llevar la iniciativa');
+    assert.deepEqual(job.perceptionIds,[]);
+    const continued=await acceptActorAttemptForTest({journal,directory,job,seed:46_200,makeAttempt:(cut)=>waitAttempt(46_210,maxId,cut.worldRevision)});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:continued.proposalId,version:1,ids:idSource(46_220)}).resolution.kind,'applied');
+  }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
+});

@@ -5465,7 +5465,8 @@ export function openJournal(input: { path: string }) {
             || canonicalJson(candidate.inputCut) !== canonicalJson(frozenWorldCut)) {
             throw new Error('El corte Pi no coincide con el corte World e inbox congelados del job actoral');
           }
-          if ((assignedPerceptionIds.length === 0 && actorActivationInvitationForJob({
+          // An empty inbox needs a technical cause: an activation invitation or the job's own initiative.
+          if ((assignedPerceptionIds.length === 0 && scheduledJob.initiative_id === null && actorActivationInvitationForJob({
             ...candidate.scope, actorId: candidate.actorId,
           }) === undefined) || assignedPerceptionIds.some((perceptionId) =>
             !candidate.inputCut.perceptionIds.includes(PerceptionIdSchema.parse(perceptionId)))) {
