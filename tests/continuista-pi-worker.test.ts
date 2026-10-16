@@ -413,3 +413,79 @@ test('SDK Continuista + SQLite: timeout no acepta review tardía, conserva owner
     assert.equal(reopened.loadActorPiSession({ runId, actorId })?.committedLeafId, null);
   } finally { source.end(); reopened?.close(); try { fixture.journal.close(); } catch { /* Closed before explicit reopen. */ } rmSync(fixture.directory, { recursive: true, force: true }); }
 });
+
+for (const scenario of ['missing-tool','incomplete-terminal','prompt-and-disposal'] as const) {
+  test(`Continuista diagnostic is bounded and durable failure remains precise: ${scenario}`,async()=>{
+    const fixture=await setup();
+    try {
+      const diagnostics:import('../src/application/continuista-pi-worker.ts').ContinuistaFailureDiagnostic[]=[];
+      const factory=adminFactory(fixture,{omitTool:scenario==='missing-tool',failTerminal:scenario==='incomplete-terminal'});
+      const primary=new Error('SYNTHETIC_PRIVATE_PROMPT_TOKEN');
+      const port=createContinuistaPiWorker({journal:fixture.journal,runtime:fixture.runtime,ids:fixture.ids,ownerToken:fixture.claim.ownerToken,
+        onDiagnostic(value){diagnostics.push(value);throw new Error('SYNTHETIC_DIAGNOSTIC_SINK_SECRET');},
+        async sessionFactory(input){
+          const session=await factory.factory(input);
+          if(scenario!=='prompt-and-disposal')return session;
+          return {...session,async prompt(){throw primary;},async abortAndDispose(){throw new Error('SYNTHETIC_PRIVATE_DISPOSAL_TOKEN');}};
+        }});
+      const action=actorWorker(fixture,port).run(fixture.claim);
+      if(scenario==='prompt-and-disposal')await assert.rejects(action,error=>error===primary);
+      else await assert.rejects(action,scenario==='missing-tool'?/sin entregar revisión/:/terminal.*no está completado/);
+      const db=new DatabaseSync(join(fixture.directory,'journal.sqlite'),{readOnly:true});
+      try{
+        const row=db.prepare('SELECT job_id,generation,state,failure_code FROM continuista_jobs WHERE run_id=?').get(runId);
+        assert.ok(row);
+        assert.equal(row.state,'blocked');
+        assert.equal(row.failure_code,scenario==='missing-tool'?'review-incomplete':scenario==='incomplete-terminal'?'pi-incomplete':'execution-failed');
+        assert.deepEqual(diagnostics.map(value=>value.stage),scenario==='prompt-and-disposal'?['disposal','prompt']:[scenario==='missing-tool'?'review-tool':'terminal']);
+        for(const diagnostic of diagnostics){
+          assert.equal(diagnostic.jobId,row.job_id);assert.equal(diagnostic.generation,row.generation);
+          assert.equal(diagnostic.runId,runId);assert.equal(diagnostic.actorId,actorId);
+          assert.equal(diagnostic.code,'EXECUTION_FAILED');
+          assert.deepEqual(Object.keys(diagnostic).sort(),['actorId','code','generation','jobId','kind','runId','stage']);
+        }
+        assert.doesNotMatch(JSON.stringify(diagnostics),/SYNTHETIC_|stack|promptToken|sessionPath/);
+      }finally{db.close();}
+    }finally{fixture.close();}
+  });
+}
+
+test('Continuista reports only the validated adapter code, never arbitrary provider error properties',async()=>{
+  const fixture=await setup();
+  try{
+    const diagnostics:unknown[]=[];
+    const secret=Object.assign(new Error('SYNTHETIC_REFRESH_TOKEN'),{kind:'piAdapterFailure',code:'OAUTH_REQUIRED',response:'SYNTHETIC_PRIVATE_RESPONSE'});
+    const port=createContinuistaPiWorker({journal:fixture.journal,runtime:fixture.runtime,ids:fixture.ids,ownerToken:fixture.claim.ownerToken,
+      onDiagnostic(value){diagnostics.push(value);},async sessionFactory(){throw secret;}});
+    await assert.rejects(actorWorker(fixture,port).run(fixture.claim),error=>error===secret);
+    assert.equal(diagnostics.length,1);
+    assert.ok(JSON.stringify(diagnostics).includes('"code":"OAUTH_REQUIRED"'));
+    assert.ok(JSON.stringify(diagnostics).includes('"stage":"session"'));
+    assert.doesNotMatch(JSON.stringify(diagnostics),/SYNTHETIC_|response|stack/);
+  }finally{fixture.close();}
+});
+
+test('a durable accepted Continuista review survives cleanup failure without blocking the actor',async()=>{
+  const fixture=await setup();
+  try{
+    const diagnostics:import('../src/application/continuista-pi-worker.ts').ContinuistaFailureDiagnostic[]=[];
+    const factory=adminFactory(fixture);
+    const port=createContinuistaPiWorker({journal:fixture.journal,runtime:fixture.runtime,ids:fixture.ids,ownerToken:fixture.claim.ownerToken,
+      onDiagnostic(value){diagnostics.push(value);},async sessionFactory(input){
+        const session=await factory.factory(input);
+        return {...session,async abortAndDispose(){await session.abortAndDispose();throw new Error('SYNTHETIC_ACCEPTED_REVIEW_CLEANUP_SECRET');}};
+      }});
+    const result=await actorWorker(fixture,port).run(fixture.claim);
+    assert.equal(result.kind,'committed');
+    const scope=factory.scopes[0];assert.ok(scope);
+    const receipt=fixture.journal.readContinuistaReceipt({jobId:scope.jobId,generation:scope.generation});
+    assert.ok(receipt);assert.equal(receipt.review.complete,true);
+    const db=new DatabaseSync(join(fixture.directory,'journal.sqlite'),{readOnly:true});
+    try{
+      assert.deepEqual({...db.prepare('SELECT state,failure_code FROM continuista_jobs WHERE job_id=? AND generation=?').get(scope.jobId,scope.generation)},
+        {state:'accepted',failure_code:null});
+    }finally{db.close();}
+    assert.equal(diagnostics.length,1);assert.equal(diagnostics[0]?.stage,'disposal');assert.equal(diagnostics[0]?.code,'EXECUTION_FAILED');
+    assert.doesNotMatch(JSON.stringify(diagnostics),/SYNTHETIC_|stack|sessionPath/);
+  }finally{fixture.close();}
+});

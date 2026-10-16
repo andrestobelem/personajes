@@ -18,14 +18,17 @@ import {freezeExperience} from '../src/application/experience-envelope.ts';
 import type {IdentityPromotionAuthority} from '../src/server/identity-promotion-routes.ts';
 import {configuratorEvolutionFixture} from './fixtures/configurator-evolution.ts';
 import {controlledConfiguratorSessionFactory,configuratorSessionStats} from './fixtures/configurator-session.ts';
+import {openConfiguratorJobLedger} from '../src/adapters/configurator-job-ledger.ts';
+import {createIcmWorkspaceSnapshot,hashIcmMarkdown,type IcmWorkspaceSnapshot} from '../src/domain/icm-workspace.ts';
+import {actorId} from './fixtures/continuista.ts';
 const binaryPath=process.env.PERSONAJES_ICM_TEST_BINARY;
 const real={skip:binaryPath===undefined?'ICM real requerido para vaciar entregas y proyecciones legítimamente':false};
 
 function forgetHttpResponse(host:ReturnType<typeof openLocalHost>,principalId:string,key:string){const db=new DatabaseSync(join(host.privateDataRoot,'world.sqlite'));try{db.prepare('UPDATE configurator_http_operations SET result_json=NULL,result_hash=NULL WHERE principal_id=? AND idempotency_key=?').run(principalId,key);const row=db.prepare('SELECT * FROM configurator_http_operations WHERE principal_id=? AND idempotency_key=?').get(principalId,key);assert.ok(row);const {record_hash,...rest}=row;void record_hash;db.prepare('UPDATE configurator_http_operations SET record_hash=? WHERE principal_id=? AND idempotency_key=?').run(configuratorValueHash(rest),principalId,key);}finally{db.close();}}
 function deferred(){function signal(){let resolve:()=>void=()=>{};const promise=new Promise<void>(done=>{resolve=done;});return {resolve,promise};}return {entered:signal(),wait:signal()};}
 
-async function fixture(options:{omitProposal?:boolean;incomplete?:boolean;noLease?:boolean;promptGate?:ReturnType<typeof deferred>}={}){
- assert.ok(binaryPath);const f=await configuratorEvolutionFixture();const root=join(f.base.directory,'manager');mkdirSync(root);const db=new DatabaseSync(f.journalPath);try{await backup(db,join(root,'world.sqlite'));}finally{db.close();}
+async function fixture(options:{omitProposal?:boolean;incomplete?:boolean;noLease?:boolean;promptGate?:ReturnType<typeof deferred>;icmWorkspace?:IcmWorkspaceSnapshot}={}){
+ assert.ok(binaryPath);const f=await configuratorEvolutionFixture(options.icmWorkspace===undefined?{}:{icmWorkspace:options.icmWorkspace});const root=join(f.base.directory,'manager');mkdirSync(root);const db=new DatabaseSync(f.journalPath);try{await backup(db,join(root,'world.sqlite'));}finally{db.close();}
  const host=openLocalHost({privateDataRoot:root});const runId=f.source.snapshot.runId;
  for(const actor of f.source.snapshot.entities.filter(entity=>entity.kind==='character')){
   assert.equal((await createDeliverWorldWorker({journal:host.journal,runId,actorId:actor.characterId}).drain()).kind,'completed');
@@ -58,6 +61,51 @@ test('manager applies accepted proof with explicit consent only under runtime le
  const f=await fixture();try{const start=f.start();const begun=await f.app.start(start);await f.app.waitForIdle();const review=f.app.readReview({jobId:begun.jobId,authority:f.authority});assert.ok(review.proposalHash);assert.equal(review.job.state,'accepted');const head=f.app.context({runId:f.runId,authority:f.authority});const request={jobId:begun.jobId,authority:f.authority,expectedRevision:review.job.revision,idempotencyKey:randomUUID(),body:{contextHash:review.job.contextHash,proposalHash:review.proposalHash,targetFullHash:review.targetFullHash,expectedLifecycleRevision:head.lifecycleRevision,expectedCommitIndex:head.commitIndex,expectedWorldRevision:head.worldRevision}};
   await assert.rejects(f.app.approve({...request,idempotencyKey:randomUUID(),body:{...request.body,proposalHash:HashSchema.parse('0'.repeat(64))}}),/CONSENT_HASH_MISMATCH/);assert.equal(f.leases,0);const approved=await f.app.approve(request);assert.equal(approved.promotion.kind,'applied');assert.equal(f.leases,1);assert.equal(f.releases,1);assert.deepEqual(f.voiceRuns,[f.runId]);assert.equal(f.voiceReleased,1);if(approved.promotion.kind==='applied'){assert.equal('principalId'in approved.promotion.receipt,false);assert.equal('approval'in approved.promotion.receipt,false);assert.equal('authority'in approved.promotion.receipt,false);assert.equal(approved.promotion.receipt.identityVersion,2);}
   forgetHttpResponse(f.host,f.authority.principalId,request.idempotencyKey);assert.deepEqual(await f.app.approve(request),approved);assert.equal(f.leases,1);forgetHttpResponse(f.host,f.authority.principalId,start.idempotencyKey);f.catalog.manifest.characters.splice(0);assert.deepEqual(await f.app.start(start),begun);assert.equal(f.stats.sessions,1);await assert.rejects(f.app.reject({jobId:begun.jobId,authority:f.authority,expectedRevision:review.job.revision,idempotencyKey:randomUUID()}),/ALREADY_APPLIED/);await assert.rejects(f.app.approve({...request,idempotencyKey:randomUUID()}),/ALREADY_APPLIED/);
+ }finally{await f.close();}
+});
+
+test('manager aplica Configurador ICM dentro de la transacción y verifica su fuente histórica después de promover',real,async()=>{
+ const audiences=[{role:'actor' as const,actorId},...(['continuista','director','configurator'] as const).map(role=>({role}))];
+ const icmWorkspace=createIcmWorkspaceSnapshot({sources:audiences.map(audience=>({sourceId:`synthetic.${audience.role}`,audience,revision:0,
+  sourceHash:hashIcmMarkdown(audience.role),sections:[{sectionId:'process',markdown:`ICM_PRIVATE_${audience.role}`}]}))});
+ const f=await fixture({icmWorkspace});
+ try{
+  const begun=await f.app.start(f.start());await f.app.waitForIdle();
+  const review=f.app.readReview({jobId:begun.jobId,authority:f.authority});assert.equal(review.job.state,'accepted');assert.ok(review.proposalHash);
+  const head=f.app.context({runId:f.runId,authority:f.authority});
+  const request={jobId:begun.jobId,authority:f.authority,expectedRevision:review.job.revision,idempotencyKey:randomUUID(),
+   body:{contextHash:review.job.contextHash,proposalHash:review.proposalHash,targetFullHash:review.targetFullHash,
+    expectedLifecycleRevision:head.lifecycleRevision,expectedCommitIndex:head.commitIndex,expectedWorldRevision:head.worldRevision}};
+  const approved=await f.app.approve(request);assert.equal(approved.promotion.kind,'applied');
+  assert.deepEqual(await f.app.approve(request),approved);assert.equal(f.stats.requests,2);
+  const ledger=openConfiguratorJobLedger({journalPath:join(f.host.privateDataRoot,'world.sqlite'),privateDataRoot:f.host.privateDataRoot,ownerToken:randomUUID(),
+   host:{readHead(){throw new Error('Historical acceptance must not consult current head');},readForkSource(){throw new Error('Historical acceptance must not start a host transaction');},assertIdle(){throw new Error('Historical acceptance is read-only');}}});
+  try{
+   const lookup={jobId:begun.jobId,principalId:f.authority.principalId};
+   assert.equal(ledger.readAccepted(lookup)?.job.state,'accepted','the archived initial configuration remains the original packet authority');
+   const inspected=f.host.journal.readIcmContextPacketInspection({runId:f.runId});assert.ok(inspected);
+   assert.equal(inspected.configuration.kind,'configured');const packet=inspected.items[0];assert.ok(packet?.kind==='verified');
+   assert.equal(packet.scope.configurationRevision,review.job.source.configurationRevision,'packet inspection uses its original configuration after promotion');
+   if(inspected.configuration.kind!=='configured'||approved.promotion.kind!=='applied')assert.fail('Missing promoted ICM configuration');
+   assert.equal(inspected.configuration.configurationRevision,approved.promotion.receipt.target.configurationRevision);
+   assert.notEqual(packet.scope.configurationRevision,inspected.configuration.configurationRevision);
+   const db=new DatabaseSync(join(f.host.privateDataRoot,'world.sqlite'));
+   try{db.exec('DROP TRIGGER run_configuration_revisions_no_update');
+    const original=db.prepare('SELECT * FROM run_configuration_revisions WHERE run_id=? AND effective_commit_index=0').get(f.runId);assert.ok(original);
+    const {record_hash:originalRecordHash,...record}=original;
+    const changed={...record,activation_snapshot_hash:'0'.repeat(64)};
+    db.prepare('UPDATE run_configuration_revisions SET activation_snapshot_hash=?,record_hash=? WHERE run_id=? AND effective_commit_index=0')
+      .run(changed.activation_snapshot_hash,configuratorValueHash(changed),f.runId);
+    assert.throws(()=>ledger.readAccepted(lookup),/CONFIGURATOR_INPUT_SOURCE_MISMATCH/,'re-sealing the configuration record cannot replace its activation snapshot');
+    db.prepare('UPDATE run_configuration_revisions SET activation_snapshot_hash=?,record_hash=? WHERE run_id=? AND effective_commit_index=0')
+      .run(String(original.activation_snapshot_hash),String(originalRecordHash),f.runId);
+    assert.equal(ledger.readAccepted(lookup)?.job.state,'accepted');
+    db.prepare("UPDATE run_configuration_revisions SET configuration_hash=? WHERE run_id=? AND effective_commit_index=0").run('0'.repeat(64),f.runId);
+   }finally{db.close();}
+   assert.throws(()=>ledger.readAccepted(lookup),/CONFIGURATOR_INPUT_SOURCE_MISMATCH/,'a valid packet cannot replace corrupted historical configuration authority');
+   assert.equal(f.host.journal.readIcmContextPacketInspection({runId:f.runId})?.items[0]?.kind,'corrupt');
+   assert.equal(f.stats.requests,2);
+  }finally{ledger.close();}
  }finally{await f.close();}
 });
 

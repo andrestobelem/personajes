@@ -348,7 +348,10 @@ function controlledTransport(input: { fixture: Fixture; host: ReturnType<typeof 
             const toolCall = requestNumber === 1
               ? { type: 'toolCall' as const, id: `local-recall-${turnId}`, name: 'recall_memory', arguments: { query: 'mensaje recibido' } }
               : requestNumber === 2
-                ? { type: 'toolCall' as const, id: `local-proposal-${turnId}`, name: 'propose_action', arguments: { action: input.actionForPrompt?.(prompt)??{ kind: 'wait', durationMs: 1 } } }
+                ? { type: 'toolCall' as const, id: `local-proposal-${turnId}`, name: 'propose_action', arguments: {
+                  action: input.actionForPrompt?.(prompt) ?? { kind: 'wait', durationMs: 1 },
+                  nextInitiative: 'yield',
+                } }
                 : undefined;
             const message: AssistantMessage = {
               role: 'assistant', api: actualModel.api, provider: actualModel.provider, model: actualModel.id,

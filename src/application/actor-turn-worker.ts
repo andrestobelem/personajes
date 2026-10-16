@@ -11,11 +11,13 @@ import type { WorldIdSource } from '../domain/world.ts';
 import { createActorTools } from './actor-tools.ts';
 import { createActorPiRequestPort } from './actor-pi-request-port.ts';
 import { createActorWorldProjectionPort, ActorWorldProjectionSchema } from './actor-world-projection.ts';
-import { compilePrivateActorPrompt } from './prepare-character.ts';
+import { compilePrivateActorPromptWithSegments } from './prepare-character.ts';
+import { resolveIcmSessionContext } from './icm-session-context.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
 
 type Journal = Pick<ReturnType<typeof openJournal>,
   'readActorTurnRecovery' | 'acceptRecoveredActorTurn' | 'failActorTurnJob' | 'claimActorTurnJob' | 'readWorldConfiguration' | 'readExperiences' | 'loadActorWorldCut' | 'readActorMetaIndications'
+  | 'readIcmContextBinding' | 'readIcmContextPacket' | 'ensureIcmContextPacket'
   | 'compareAndSwapActorKnowledge' | 'loadActorPiSession' | 'registerActorPiSession'
   | 'rotateUnacceptedActorPiSession' | 'checkActorJobEligibility' | 'reserveActorJobRequest'
   | 'expireActorJobRequest' | 'settleActorJobRequestWallTime' | 'transitionActorJobReservation' | 'recordActorJobCheckpoint' | 'recordActorPiCandidate'
@@ -117,7 +119,7 @@ export function createActorTurnWorker(input: {
           });
           // Compile against the real World projection once; subsequent reformulations retain this exact cut.
           let projection: z.infer<typeof ActorWorldProjectionSchema> | undefined;
-          const prompt = await compilePrivateActorPrompt({
+          const prompt = await compilePrivateActorPromptWithSegments({
             prepared, runId: execution.runId, worldRevision: cut.worldRevision,
             throughWorldSeq: cut.worldSeq, fictionalAt: cut.fictionalAt,
             spanishVariety: configuration.spanishVariety,
@@ -127,6 +129,8 @@ export function createActorTurnWorker(input: {
               : input.journal.readActorMetaIndications({runId:execution.runId,actorId:execution.actorId,
                 directionRevision:claimed.job.frozenDirectionRevision,activeSceneId:cut.activeSceneId??null}),
             activationContext:claimed.job.activation?.trigger??null,
+            initiativeContext:claimed.job.initiative===null?null:{sourceProposalId:claimed.job.initiative.sourceProposalId,
+              sourceVersion:claimed.job.initiative.sourceVersion,eligibleAt:claimed.job.initiative.eligibleAt},
             actorJob: { jobId: execution.jobId, generation: execution.generation, ...execution.lease },
             actorWorldProjectionPort: {
               async projectForActor(request) {
@@ -138,6 +142,11 @@ export function createActorTurnWorker(input: {
           if (projection === undefined || canonicalJson(projection.inputPerceptionIds) !== canonicalJson(cut.perceptionIds)) {
             throw new Error('La proyección no conserva el inbox congelado del claim');
           }
+          const sessionContext = resolveIcmSessionContext({ journal: input.journal,
+            binding: { kind: 'actor', execution }, expectedPreparedContextHash: preparedContextHash,
+            hostPolicyMarkdown: prompt.hostPolicyMarkdown, diegeticContextMarkdown: prompt.diegeticContextMarkdown,
+            legacySystemPrompt: prompt.compilation.text, legacyPromptText: '', icmPromptText: '',
+          });
           if (options.signal?.aborted) return blocked('cancelled');
           const previous = input.journal.loadActorPiSession({ runId: execution.runId, actorId: execution.actorId });
           if (previous !== undefined && previous.preparedContextHash !== preparedContextHash) throw new Error('La preparación no coincide con la sesión actoral registrada');
@@ -152,7 +161,7 @@ export function createActorTurnWorker(input: {
           });
           const session = await (input.sessionFactory ?? createPiSession)({
             runtime: input.runtime, profile: inferenceProfile, runId: execution.runId, identity: { kind: 'actor', characterId: execution.actorId },
-            systemPrompt: prompt.text, preparedContextHash, sessionRevision: previous?.sessionRevision ?? 0,
+            systemPrompt: sessionContext.systemPrompt, preparedContextHash, sessionRevision: previous?.sessionRevision ?? 0,
             checkpoint: previous === undefined ? { kind: 'fresh' }
               : previous.committedLeafId === null ? { kind: 'initial', previousSessionPath: previous.sessionPath }
                 : { kind: 'leaf', sessionPath: previous.sessionPath, committedLeafId: previous.committedLeafId },

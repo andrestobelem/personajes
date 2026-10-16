@@ -65,8 +65,10 @@ test("public conversation separates emission, null reception and memory delivery
   );
   assert.match(html, /Emisión/);
   assert.match(html, /Confirmada/);
-  assert.match(html, /Recepción efectiva en el Escenario/);
-  assert.match(html, /Nadie recibió/);
+  assert.match(html, /Recepción efectiva de personajes en el Escenario/);
+  assert.match(html, /Ninguno · 0 alcanzados/);
+  assert.match(html, /Recepción humana confirmada/);
+  assert.match(html, /Sin registro histórico\. No confirma lectura ni memoria ICM\./);
   assert.match(html, /No hay entregas a memoria registradas/);
   assert.match(html, /&lt;script&gt;/);
   assert.doesNotMatch(html, /<script>/);

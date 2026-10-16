@@ -145,7 +145,9 @@ for(const work of ['delivery','memory-projection','uncertain-request'] as const)
    if(work==='delivery')db.exec("UPDATE world_deliveries SET state='planned',delivered_at=NULL WHERE perception_id=(SELECT perception_id FROM world_deliveries LIMIT 1)");
    if(work==='memory-projection')db.exec('INSERT INTO memory_outbox(experience_id,created_at) SELECT experience_id,0 FROM experiences LIMIT 1');
    if(work==='uncertain-request'){
-    const runId=t.f.source.snapshot.runId;const pulseId=randomUUID();db.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)').run(runId,20);db.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)').run(pulseId,runId,10);db.prepare('INSERT INTO request_reservations VALUES(?,?,?,?,?,?)').run(randomUUID(),0,0,runId,pulseId,'ambiguous');
+    const runId=t.f.source.snapshot.runId;const pulseId=randomUUID();
+    assert.equal(db.prepare('UPDATE run_budgets SET max_calls=? WHERE run_id=?').run(20,runId).changes,1,'Ready ya conserva su autoridad contable; preparar evidencia incierta no crea otro contador');
+    db.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)').run(pulseId,runId,10);db.prepare('INSERT INTO request_reservations VALUES(?,?,?,?,?,?)').run(randomUUID(),0,0,runId,pulseId,'ambiguous');
    }
   });
   const before=t.journal.loadWorld({runId:t.f.source.snapshot.runId});assert.throws(()=>t.journal.applyIdentityPromotion(request),/WORK_PENDING/);assert.deepEqual(t.journal.loadWorld({runId:t.f.source.snapshot.runId}),before);assert.equal(t.inspect(db=>db.prepare('SELECT COUNT(*) AS n FROM identity_promotion_receipts').get()?.n),0);assert.equal(t.authorizations,0);

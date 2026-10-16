@@ -1,6 +1,6 @@
 # Obra: workspace ICM en Markdown
 
-Esta carpeta convierte las definiciones del proyecto en instrucciones, contratos y archivos de trabajo revisables. Está preparada para organizar una representación; **no se ha ejecutado una escena**. El reparto contiene 27 personajes de la serie original *Get Smart* (1965–1970), inicialmente inactivos.
+Esta carpeta convierte las definiciones del proyecto en instrucciones, contratos y archivos de trabajo revisables. Sus plantillas no acreditan hechos ni ejecuciones. Los ensayos reales se documentan en [representaciones](../docs/representaciones/el-visitante-y-el-aviso.md); su estado durable pertenece al host. El reparto documental contiene 27 personajes de la serie original *Get Smart* (1965–1970); figurar en él no activa una instancia.
 
 ## Qué hay
 
@@ -11,6 +11,7 @@ Esta carpeta convierte las definiciones del proyecto en instrucciones, contratos
 - [Continuista](continuista/CONTEXT.md): revisar si cada respuesta propuesta respeta conocimiento, continuidad, voz y contexto antes de publicarla.
 - [Escenas](references/escenas.md): uno o más personajes, con conversación, acción solitaria o silencio.
 - [Narrador opcional](narrador/CONTEXT.md): voz en off para espectadores, con revisión propia y sin crear hechos del escenario.
+- [Revisor de narración](revisor-narracion/CONTEXT.md): revisión independiente del texto exacto y sus fuentes, sin publicar ni actuar.
 - [Dirección](direccion/CONTEXT.md): línea dramática y registro de etapas por evidencias.
 - [Escenario](escenario/CONTEXT.md): estado compartido, tiempo, eventos y resolución de acciones.
 - [Interfaz gráfica completa](interfaz/CONTEXT.md): prioridad funcional y visual para entender y operar configuración, escenografía, interacción, evolución e historia; la aplicación y varias superficies ya están implementadas, pero la interfaz completa y su aceptación integral siguen pendientes.
@@ -27,9 +28,9 @@ El perfil por representación puede ser **GPT-6.1 Sol bajo**, predeterminado med
 
 ## Cómo usarlo
 
-Un agente con lectura y escritura de archivos puede abrir `obra/CONTEXT.md` y preparar la configuración. La representación requiere una instancia Pi distinta por personaje; el Coordinador invoca a cada una mediante los contratos de `stages/` y marca el pulso. No representa al elenco rotando roles en un único contexto. El repositorio ya incluye una aplicación web, servidor HTTP, launcher y runtime Pi, además de superficies gráficas parciales para biblioteca, preparación y representación. Estas piezas no significan que se haya iniciado una obra ni que haya habido login o inferencia con cuentas reales. La interfaz gráfica completa, principalmente funcional y visual, todavía debe permitir recorrer y operar configuración, escenografía, interacción, evolución e historia con aceptación integral. El [contrato de interfaz](interfaz/references/contrato.md) conserva ese alcance.
+Para mantener este workspace, un asistente de desarrollo puede abrir `obra/CONTEXT.md` siguiendo [AGENTS.md](AGENTS.md). Los actores del runtime no reciben esas herramientas de archivos: cada uno conserva una instancia Pi distinta, y el Coordinador marca el pulso sin interpretar al elenco en un único contexto. El repositorio incluye aplicación web, servidor HTTP, launcher y runtime Pi, con superficies para biblioteca, preparación y representación. Hay [ensayos con OAuth e inferencia reales](../docs/representaciones/el-visitante-y-el-aviso.md); la conexión de estos contratos Markdown a todos los workers aún está en implementación. La interfaz gráfica completa, principalmente funcional y visual, todavía requiere aceptación integral de configuración, escenografía, interacción, evolución e historia. El [contrato de interfaz](interfaz/references/contrato.md) conserva ese alcance.
 
-La primera operación es configurar una escena: seleccionar la etapa de la continuidad, uno o más personajes participantes, qué sabe cada uno, dónde está y qué herramientas tiene. En este estado no se ha elegido una etapa de la serie ni asignado una misión. Los campos pendientes no se convierten en hechos por inferencia silenciosa. El configurador puede elaborar una propuesta de puesta en escena dentro del encargo del usuario, marcando lo que inventa.
+La primera operación de una puesta nueva es configurar una escena: seleccionar la etapa de la continuidad, uno o más personajes participantes, qué sabe cada uno, dónde está y qué herramientas tiene. Las plantillas no eligen por sí mismas una etapa de la serie ni asignan una misión a las representaciones del host. Los campos pendientes no se convierten en hechos por inferencia silenciosa. El configurador puede elaborar una propuesta de puesta en escena dentro del encargo del usuario, marcando lo que inventa.
 
 ## ICM y adaptación
 
@@ -51,7 +52,7 @@ La [guía de diseño de voces en ElevenLabs](../docs/investigaciones/elevenlabs-
 
 ## Independencia de los personajes
 
-La [configuración de instancias Pi](_config/instancias-pi.md) fija una instancia propia por personaje. Compartir el perfil elegido y la autenticación del host no comparte historias. El uso de procesos separados o varias instancias SDK en un mismo proceso sigue abierto; no se han creado contenedores ni sesiones por estos documentos.
+La [configuración de instancias Pi](_config/instancias-pi.md) fija una instancia propia por personaje. Compartir el perfil elegido y la autenticación del host no comparte historias. El runtime usa instancias SDK y sesiones independientes dentro del proceso del host; estos documentos no crean contenedores ni sesiones por existir.
 
 ## Términos del espacio de la obra
 

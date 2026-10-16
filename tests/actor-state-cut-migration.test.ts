@@ -9,6 +9,7 @@ import { openJournal } from '../src/adapters/journal.ts';
 import { validateRunConfiguration } from '../src/application/production-preflight.ts';
 import { CircumstanceWriteSchema } from '../src/domain/direction-circumstances.ts';
 import { canonical, draftFixture } from './fixtures/continuista.ts';
+import { downgradeCoordinatorPulsesTo44 } from './fixtures/journal-v45-downgrade.ts';
 
 // Restores the exact v33 storage boundary: no private-state checkpoint tables.
 // Durable snapshot bytes and hashes are evidence; present mutable state cannot
@@ -47,14 +48,15 @@ test('v33→v39 conserva bytes y hashes históricos sin fabricar cortes; sólo c
       runBytes = legacy.prepare('SELECT * FROM world_runs').all();
       commitBytes = legacy.prepare('SELECT * FROM world_commits ORDER BY commit_index').all();
       assert.ok(Array.isArray(commitBytes) && commitBytes.length > 0);
-      legacy.exec(`BEGIN; DROP TABLE actor_state_cuts; DROP TABLE actor_state_cut_batches;
-        DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(34,35,36,37,38,39,40,41); COMMIT;`);
+      downgradeCoordinatorPulsesTo44(legacy);
+      legacy.exec(`DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; BEGIN; DROP TABLE actor_state_cuts; DROP TABLE actor_state_cut_batches;
+        DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(34,35,36,37,38,39,40,41,42,43,44); COMMIT;`);
       assert.equal(legacy.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 33);
     } finally { legacy.close(); }
     journal = openJournal({ path });
     const inspection = new DatabaseSync(path);
     try {
-      assert.equal(inspection.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 41);
+      assert.equal(inspection.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 45);
       assert.deepEqual(inspection.prepare('SELECT * FROM world_runs').all(), runBytes);
       assert.deepEqual(inspection.prepare('SELECT * FROM world_commits ORDER BY commit_index').all(), commitBytes);
       assert.equal(inspection.prepare('SELECT COUNT(*) AS n FROM actor_state_cuts').get()?.n, 0);

@@ -28,6 +28,16 @@ export function audioPreparationForm(draft: RunConfigurationDraft): AudioPrepara
     narrator: audio === undefined ? '' : 'preserve',
   };
 }
+export function spanishAudioPreset(form: AudioPreparationForm): AudioPreparationForm {
+  const outputFormat = AUDIO_OUTPUT_FORMATS.find((format) => format === 'mp3_44100_128') ?? '';
+  return {
+    ...form,
+    mode: 'enabled',
+    ttsMode: 'manual-per-publication',
+    outputFormat,
+    subtitles: 'true',
+  };
+}
 export function applyAudioPreparation(input: { draft: RunConfigurationDraft; form: AudioPreparationForm }): RunConfigurationDraft {
   const { draft, form } = input;
   const previous = draft.audio.kind === 'empty' ? undefined : draft.audio.value;

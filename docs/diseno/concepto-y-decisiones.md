@@ -86,3 +86,11 @@ La [matriz de decisiones abiertas](decisiones-abiertas.md) revisa punto por punt
 [Escenario](../../obra/escenario/CONTEXT.md), [escenografía e interfaz](interfaz-funcional-y-visual.md) y [coordinación del pulso](../../obra/coordinador/CONTEXT.md) tienen contratos separados. Los estudios históricos pueden conservar el término mundo. La [organización de Pi](organizacion-de-pi-y-escenario.md) conserva instancias independientes sin exigir un proceso o login humano por personaje.
 
 La [auditoría de cobertura](../auditoria/conversacion-y-cobertura.md) vincula los pedidos con sus archivos y estados. El [procedimiento grill-with-docs](procedimiento-grill-with-docs.md) queda disponible para futuras cuestiones de diseño que requieran otra entrevista.
+
+## Interacción libre y alcance de la representación — aclaración del usuario, 16 de octubre de 2026
+
+«Los agentes tienen que interactuar libremente». La preparación aporta identidad, biografía, deseos, conocimiento situado, capacidades y circunstancias; no un guion de respuestas ni una secuencia obligatoria de escenas. El actor elige con quién interactuar dentro de sus medios, si inicia o responde, qué táctica emplea y cuándo esperar, desistir o revisar una meta. El Coordinador habilita turnos y resuelve concurrencia; no decide las actuaciones. Las restricciones de percepción, identidad y medios mantienen la ficción, sin convertir al Continuista en autor de cada elección.
+
+Cumplir una tarea instrumental no acredita que se haya representado un episodio completo. El Director puede reconocer una resolución localizada y conservar otras tensiones abiertas. Los cierres estructurales siguen siendo operaciones explícitas; no se fuerzan para obtener un archivo exportable. Tampoco se impone un número mínimo de parlamentos, duración o estructura de actos para fabricar extensión. El guion exportado conserva lo efectivamente ocurrido, y la aceptación debe distinguir una escena funcional breve de la representación entera solicitada.
+
+La [escena de entrega](../representaciones/entrega-sin-recibo.md) sólo acredita un recorrido funcional breve. La [preparación de tres actores](../representaciones/un-informe-tres-versiones.md) aún no prueba interacción libre prolongada ni un episodio completo.

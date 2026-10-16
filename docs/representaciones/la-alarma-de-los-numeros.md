@@ -92,8 +92,16 @@ Hymie, transmítele al visitante nuestra conclusión: según su descripción, te
 
 Entendido, gracias a los dos. Corregiré mi aviso preventivo: según lo que observé, es un ejercicio numérico y no hay indicios que justifiquen declarar una emergencia. Me llevo también las respuestas: 13 y 21.
 
+### 17. Maxwell Smart
+
+Bien, Hymie: el visitante entendió la conclusión y corregirá su aviso; no hace falta activar ninguna alarma. Buen trabajo: protegimos a CONTROL de una movilización sin fundamento.
+
+### 18. Hymie
+
+Gracias, Max. El visitante ya confirmó que entendió y corregirá su aviso; no hace falta repetir el mensaje.
+
 ## Vista en tiempo real
 
 El botón «Ver representación en vivo» abre una pantalla dedicada con plano confirmado, conversación, estado operativo y acceso a interlocución. Se actualiza por notificaciones SSE y consulta periódica de respaldo cada dos segundos. «Seguir lo último» desplaza únicamente el panel de conversación y puede desactivarse para leer. No representa tokens en streaming ni propuestas privadas. El plano usa marcadores; no son actores animados y el audio sigue apagado.
 
-Durante la ejecución se observaron propuestas con resolución `audience-invalid`, al usar una lista vacía en un canal dirigido. Se agregó el scope real a la proyección de canales y se rechazó esa combinación en la tool antes de registrar la propuesta; el modelo puede corregirla. La secuencia 14 registra la conclusión de Hymie y la 15 el respaldo de Max; la 16 registra que el visitante la acepta y anuncia que corregirá el aviso preventivo. Esto permite observar un desenlace del conflicto de esta escena. No prueba que el compañero haya recibido una comunicación fuera de escena. La recepción de una intervención humana no convierte a su participante en un destinatario actoral con handle. El cierre estructural del episodio sigue pendiente: la operación `closeScene` fue rechazada por trabajos bloqueados. El guard actual considera también generaciones históricas bloqueadas aunque hayan sido reemplazadas por una nueva; queda registrada esta limitación. No se fabricó un cierre ni se modificaron los objetivos para declararlos alcanzados.
+Durante la ejecución se observaron propuestas con resolución `audience-invalid`, al usar una lista vacía en un canal dirigido. Se agregó el scope real a la proyección de canales y se rechazó esa combinación en la tool antes de registrar la propuesta; el modelo puede corregirla. La secuencia 14 registra la conclusión de Hymie y la 15 el respaldo de Max; la 16 registra que el visitante la acepta y anuncia que corregirá el aviso preventivo. Esto permite observar un desenlace del conflicto de esta escena. No prueba que el compañero haya recibido una comunicación fuera de escena. La recepción de una intervención humana no convierte a su participante en un destinatario actoral con handle. La negativa inicial de `closeScene` permitió detectar el guard que contaba generaciones históricas bloqueadas. Tras corregirlo y verificar que no había turnos vigentes pendientes, la interfaz confirmó cierre de escena en commit 26 y cierre de episodio en commit 27, ambos en secuencia 18. La representación quedó detenida, conservando las intervenciones, las consecuencias y el anuncio aún no observado de corregir el aviso fuera de escena. Los objetivos privados no se modificaron para declararlos alcanzados. Ver [regresión, validación y prueba visual](../auditoria/cierre-ensayo-y-preflight.md).

@@ -1,3 +1,4 @@
+import { resolveIcmSessionContext } from './icm-session-context.ts';
 import { randomUUID } from 'node:crypto';
 import type { openJournal } from '../adapters/journal.ts';
 import type { openConfiguratorJobLedger } from '../adapters/configurator-job-ledger.ts';
@@ -7,11 +8,13 @@ import { ConfiguratorJobViewSchema, ConfiguratorJobExecutionSchema } from '../do
 import { JobIdSchema, PulseIdSchema } from '../domain/values.ts';
 import { ReadyRunConfigurationSchema } from './production-preflight.ts';
 import { CONFIGURATOR_SYSTEM_PROMPT } from './configurator-context.ts';
+import { CONFIGURATOR_ICM_PROMPT } from './configurator-prompt.ts';
 import { canonicalDirectorValue } from './director-context.ts';
 import { createConfiguratorProposalTool } from './configurator-tools.ts';
 
 type Ledger = ReturnType<typeof openConfiguratorJobLedger>;
 type Journal = Pick<ReturnType<typeof openJournal>, 'readWorldConfiguration' | 'configureRun' | 'configurePulse'
+  | 'readIcmContextBinding' | 'readIcmContextPacket' | 'ensureIcmContextPacket'
   | 'reserveNextRequest' | 'transitionReservation' | 'expireBudgetRequest' | 'settleBudgetRequestWallTime'>;
 
 /** One administrative Pi session per explicit job generation. It may only propose;
@@ -75,17 +78,22 @@ export function createConfiguratorPiWorker(input: { ledger: Ledger; journal: Jou
 
       const tool = createConfiguratorProposalTool({ context: claimed.context, checkEligibility: eligibility,
         ...(options.signal === undefined ? {} : { signal: options.signal }) });
+      const contextText=canonicalDirectorValue(claimed.context);
+      const sessionContext=resolveIcmSessionContext({journal:input.journal,binding:{kind:'configurator',execution},
+        hostPolicyMarkdown:CONFIGURATOR_SYSTEM_PROMPT,diegeticContextMarkdown:contextText,
+        legacySystemPrompt:CONFIGURATOR_SYSTEM_PROMPT,legacyPromptText:contextText,
+        icmPromptText:CONFIGURATOR_ICM_PROMPT});
       session = await (input.sessionFactory ?? createPiSession)({ runtime: input.runtime, profile: execution.scope.profile,
         runId: initial.runId, identity: { kind: 'admin', role: 'configurador' }, preparedContextHash: execution.contextHash,
-        checkpoint: { kind: 'fresh' }, systemPrompt: CONFIGURATOR_SYSTEM_PROMPT,
+        checkpoint: { kind: 'fresh' }, systemPrompt: sessionContext.systemPrompt,
         tools: [tool.tool], adminToolAllowlist: { configurador: ['submit_configurator_proposal'] }, requestPort });
       options.signal?.addEventListener('abort', cancel, { once: true });
       const checkpoint = session.checkpoint();
       if (checkpoint.sessionPath === null) throw new Error('CONFIGURATOR_SESSION_MISSING');
       input.ledger.registerSession({ execution, sessionId: checkpoint.sessionId, sessionPath: checkpoint.sessionPath,
-        baseLeafId: checkpoint.candidateLeafId, profile: execution.scope.profile });
+        baseLeafId: null, profile: execution.scope.profile });
       activeSignal();
-      const terminal = await session.prompt({ text: canonicalDirectorValue(claimed.context), scope });
+      const terminal = await session.prompt({ text: sessionContext.promptText, scope });
       activeSignal();
       if (terminal.outcome !== 'completed' || terminal.candidateLeafId === null) throw new Error('CONFIGURATOR_TERMINAL_INCOMPLETE');
       const candidate = tool.readCandidate();

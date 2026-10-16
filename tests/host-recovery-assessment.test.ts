@@ -153,6 +153,20 @@ for (const change of ['voice', 'budget', 'unknown-table', 'unclassified-receipt'
   });
 }
 
+test('assessment reconoce actor_initiatives únicamente en journal v45', async () => {
+  const f = await fixture();
+  try {
+    const bundle = await f.backup();
+    const current = assess(f, bundle);
+    assert.ok(current.kind === 'compatible', JSON.stringify(current));
+
+    f.mutate(db => db.exec('DELETE FROM schema_version WHERE version=45'));
+    const mislabeled = assess(f, bundle);
+    assert.ok(mislabeled.kind === 'blocked');
+    if (mislabeled.kind === 'blocked') assert.equal(mislabeled.code, 'RECOVERY_UNKNOWN_TABLE');
+  } finally { await f.close(); }
+});
+
 test('assessment bloquea archivo o directorio desconocido sin omitirlo del inventario', async () => {
   const f = await fixture();
   try {

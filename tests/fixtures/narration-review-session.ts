@@ -91,6 +91,8 @@ export function controlledNarrationReviewSessionFactory(input: {
       sessionPath: manager.getSessionFile() ?? null,
       candidateLeafId: manager.getLeafId(),
     });
+    manager.appendThinkingLevelChange(sessionInput.profile.reasoningEffort);
+    assert.notEqual(checkpoint().candidateLeafId,null,'fresh metadata is not a committed job base');
     return {
       identity: sessionInput.identity,
       activeToolNames: session.getActiveToolNames(),
@@ -110,7 +112,7 @@ export function controlledNarrationReviewSessionFactory(input: {
         await sessionInput.requestPort.recordCheckpointCandidate({
           identity: sessionInput.identity,
           purpose: { kind: "job-base", baseScope: prompt.scope },
-          snapshot: checkpoint(),
+          snapshot: {...checkpoint(),candidateLeafId:null},
         });
         session.agent.streamFunction = createBudgetedStreamFunction({
           identity: sessionInput.identity,

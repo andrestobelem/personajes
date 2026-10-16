@@ -5,13 +5,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { downgradeCoordinatorPulsesTo44 } from './fixtures/journal-v45-downgrade.ts';
 import { test } from 'node:test';
 import { z } from 'zod';
 import { ReadyRunConfigurationSchema } from '../src/application/production-preflight.ts';
 import { fingerprintInferenceProfile } from '../src/application/pi-access-check.ts';
 import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
 import { PreparedCharacterSchema } from '../src/domain/preparation.ts';
-import { ActorJobExecutionSchema, ContinuistaReviewInputSchema, ContinuistaStoredReviewSchema, RunDraftPatchSchema } from '../src/domain/world-journal.ts';
+import { ActorJobExecutionSchema, ActorTurnJobViewSchema, ContinuistaReviewInputSchema, ContinuistaStoredReviewSchema, RunDraftPatchSchema } from '../src/domain/world-journal.ts';
 import { setup as setupContinuistaFixture, deterministicFactory as continuistaActorFactory, responseFor as continuistaResponse } from './fixtures/continuista.ts';
 import { createActorTurnWorker } from '../src/application/actor-turn-worker.ts';
 import { assembleContinuistaReviewContext } from '../src/application/continuista-review-context.ts';
@@ -25,7 +26,7 @@ import { createWorldDeliverySupervisor } from '../src/application/world-delivery
 import { createActorPiRequestPort } from '../src/application/actor-pi-request-port.ts';
 import {
   ActorKnowledgeSchema, GoalIdSchema, WorldEntityIdSchema, WorldResolutionSchema, WorldSnapshotSchema,
-  hashCommunicationContent,
+  WorldPerceptionSchema, buildActorWorldView, emptyActorKnowledge, hashCommunicationContent,
 } from '../src/domain/world.ts';
 import {
   CharacterIdSchema, ExperienceIdSchema, HashSchema, JobIdSchema,
@@ -53,8 +54,10 @@ function sha256(value: string): string {
 const runId = RunIdSchema.parse(uuid(701));
 const maxId = CharacterIdSchema.parse('maxwell-smart');
 const agentId = CharacterIdSchema.parse('agente-99');
+const chiefId = CharacterIdSchema.parse('jefe');
 const maxEntity = WorldEntityIdSchema.parse(uuid(710));
 const agentEntity = WorldEntityIdSchema.parse(uuid(711));
+const chiefEntity = WorldEntityIdSchema.parse(uuid(714));
 const roomId = 'sala';
 const sceneId = uuid(712);
 const channelId = uuid(713);
@@ -137,14 +140,75 @@ function idSource(seed: number) {
   };
 }
 
+async function acceptActorAttemptForTest(input: {
+  journal: ReturnType<typeof openJournal>;
+  directory: string;
+  job: Pick<z.infer<typeof ActorTurnJobViewSchema>, 'runId'|'actorId'|'jobId'|'generation'|'pulseId'>;
+  seed: number;
+  nextInitiative?: 'yield'|'after-resolution';
+  makeAttempt: (cut: { worldRevision: number; worldSeq: number }) => unknown;
+}) {
+  const { journal, directory, job, seed } = input;
+  const lease = { ownerToken: uuid(seed), claimToken: uuid(seed + 1) };
+  const claim = journal.claimActorTurnJob({ runId:job.runId,actorId:job.actorId,jobId:job.jobId,
+    generation:job.generation,...lease });
+  if (claim.kind !== 'claimed' || claim.job.frozenWorldCut === null) assert.fail('Falta el corte congelado del job de prueba');
+  const cut=claim.job.frozenWorldCut;
+  const scope = { runId: job.runId, pulseId: job.pulseId, jobId: job.jobId, generation: job.generation };
+  const actorId=job.actorId;
+  const sessionId=`${actorId}-action-feedback`;
+  const registration = journal.registerActorPiSession({ runId: job.runId, actorId,
+    sessionId, sessionPath: join(directory, `${sessionId}.jsonl`),
+    preparedContextHash: 'a'.repeat(64),
+    profile: { provider: 'openai-codex', model: 'gpt-6-luna', reasoning: 'xhigh' } });
+  const port = createActorPiRequestPort({ journal, execution: { ...scope, actorId, lease } });
+  const identity = { kind: 'actor', characterId: actorId } as const;
+  const clockEpochId = uuid(seed + 2);
+  const reservation = await port.reserveNextRequest({ purpose: identity, scope, clockEpochId });
+  if (reservation.kind !== 'reserved') assert.fail('La llamada sintética del actor debe reservar cuota');
+  const requestSeq = reservation.requestSeq;
+  const candidateBase = { turnId: uuid(seed + 3), runId: job.runId, actorId, scope, lease,
+    base: registration.session, inputCut: cut };
+  await port.recordCheckpointCandidate({ identity,
+    purpose: { kind: 'request-input', baseScope: scope, request: { scope, requestSeq } },
+    snapshot: { sessionId: registration.session.sessionId, sessionPath: registration.session.sessionPath,
+      candidateLeafId: `action-feedback-input-${job.generation}` } });
+  await port.recordActorPiCandidate?.({ ...candidateBase, kind: 'request-input', candidateId: uuid(seed + 4),
+    requestSeq, candidateLeafId: `action-feedback-input-${job.generation}` });
+  const attempt = input.makeAttempt(cut);
+  const attemptRecord = attempt as { attemptId: string };
+  const proposalId = ProposalIdSchema.parse(uuid(seed + 5));
+  journal.registerWorldProposal({ runId, proposalId, version: 1, jobId: job.jobId, generation: job.generation,
+    proposalSlot: 0, lease, ...(input.nextInitiative===undefined?{}:{nextInitiative:input.nextInitiative}), attempt });
+  if(typeof attempt==='object'&&attempt!==null&&Reflect.get(attempt,'kind')==='communicate'){
+    journal.recordContinuistaReview({kind:'continuista',proposalId,version:1,runId:job.runId,actorId,
+      stateRevision:claim.job.frozenWorldCut.worldRevision,
+      exactContentHash:hashCommunicationContent(Reflect.get(attempt,'content')),
+      ...(input.nextInitiative===undefined?{}:{nextInitiative:input.nextInitiative}),
+      verdict:'allow',criterionCodes:allCriteria,failedCriterionCodes:[],
+      evidenceRefs:['research:continuity-main'],complete:true});
+  }
+  await port.transitionReservation({ purpose: identity, scope, requestSeq, target: 'dispatched',
+    wallTime: { clockEpochId, monotonicNs: process.hrtime.bigint().toString() } });
+  await port.transitionReservation({ purpose: identity, scope, requestSeq, target: 'completed',
+    wallTime: { clockEpochId, monotonicNs: process.hrtime.bigint().toString() } });
+  const candidateId = uuid(seed + 6);
+  await port.recordActorPiCandidate?.({ ...candidateBase, kind: 'terminal-candidate', candidateId,
+    outcome: 'completed', lastRequestSeq: requestSeq, candidateLeafId: `action-feedback-terminal-${job.generation}` });
+  journal.acceptActorTurn({ candidateId, lease, proposal: { kind: 'durable', proposalId, version: 1,
+    attemptHash: sha256(canonicalJson(attempt)) } });
+  return { attempt, attemptId: attemptRecord.attemptId, proposalId, claim, cut };
+}
+
 function waitAttempt(attemptId: number, actorId: string, expectedRevision: number) {
   return { kind: 'wait', attemptId: uuid(attemptId), runId, actorId, expectedRevision, durationMs: 100 };
 }
 
-function communicateAttempt(attemptId: number, expectedRevision: number) {
+function communicateAttempt(attemptId: number, expectedRevision: number, actorId: string = maxId,
+  audienceHandles: string[] = ['agent-99'], text = '¿Me escuchás?') {
   return {
-    kind: 'communicate', attemptId: uuid(attemptId), runId, actorId: maxId, expectedRevision,
-    channelHandle: 'speech', audienceHandles: ['agent-99'], content: { kind: 'speech', text: '¿Me escuchás?' },
+    kind: 'communicate', attemptId: uuid(attemptId), runId, actorId, expectedRevision,
+    channelHandle: 'speech', audienceHandles, content: { kind: 'speech', text },
   };
 }
 
@@ -152,14 +216,23 @@ const allCriteria = ['knowledge', 'continuity', 'identity', 'voice', 'periodPlac
 
 function registerRun(journal: ReturnType<typeof openJournal>, configuration: Record<string, unknown> = { model: 'test-profile', limit: 1 }) {
   const snapshot = WorldSnapshotSchema.parse(configuration.worldSnapshot ?? worldFixture());
+  const readyConfiguration = ReadyRunConfigurationSchema.safeParse(configuration);
+  const continuityActorIds = readyConfiguration.success && readyConfiguration.data.roster.activeCharacterIds.length > 0
+    ? readyConfiguration.data.roster.activeCharacterIds
+    : [maxId, agentId];
   assert.equal(journal.registerWorldRun({
     initialSnapshot: snapshot, configurationRevision: 0,
     configuration,
     continuityFence: {
       kind: 'prepared-contexts', atWorldSeq: 0,
-      contexts: [maxId, agentId].map((actorId) => ({
-        actorId, continuityId: 'continuity-main', continuityRevision: 0,
-        continuityContentHash: HashSchema.parse('b'.repeat(64)), identityVersion: 1,
+      contexts: continuityActorIds.map((actorId) => ({
+        actorId,
+        continuityId: readyConfiguration.success ? readyConfiguration.data.continuity.continuityId : 'continuity-main',
+        continuityRevision: readyConfiguration.success ? readyConfiguration.data.continuity.revision : 0,
+        continuityContentHash: HashSchema.parse(readyConfiguration.success ? readyConfiguration.data.continuity.contentHash : 'b'.repeat(64)),
+        identityVersion: readyConfiguration.success
+          ? readyConfiguration.data.roster.preparedCharacters.find((prepared) => prepared.characterId === actorId)?.identityVersion ?? 1
+          : 1,
         preparedContextHash: HashSchema.parse('a'.repeat(64)),
       })),
     },
@@ -175,6 +248,19 @@ function registerRun(journal: ReturnType<typeof openJournal>, configuration: Rec
     kind: 'actor-knowledge-cas', actorId: maxId, runId, expectedWorldRevision: 0, expectedWorldSeq: 0,
     expectedContinuity: continuity, expectedKnowledgeRevision: 0, knowledge,
   }), { kind: 'stored', knowledgeRevision: 1 });
+}
+
+function grantTestActorKnowledge(journal: ReturnType<typeof openJournal>, actorId: string,
+  bindings: unknown[]) {
+  const world=journal.loadWorld({runId});
+  if(world===undefined)throw new Error('Falta el mundo para actualizar el conocimiento sintético');
+  const current=journal.readActorKnowledge({runId,actorId,throughWorldSeq:world.seq});
+  if(current===undefined)throw new Error(`Falta ActorKnowledge para ${actorId}`);
+  return journal.compareAndSwapActorKnowledge({kind:'actor-knowledge-cas',actorId,runId,
+    expectedWorldRevision:world.revision,expectedWorldSeq:world.seq,
+    expectedContinuity:{continuityId:'continuity-main',revision:0,contentHash:HashSchema.parse('b'.repeat(64))},
+    expectedKnowledgeRevision:current.revision,
+    knowledge:ActorKnowledgeSchema.parse({...current.knowledge,bindings:[...current.knowledge.bindings,...bindings]})});
 }
 
 function registerAttempt(
@@ -331,6 +417,102 @@ test('estructura v29 conserva lo legado y guarda episodios/escenas/actos con CAS
       assert.equal(replayedEvents.events.length, 7);
     } finally { reopened.close(); }
   });
+});
+
+test('cerrar escena tras reinicio admite jobs bloqueados de una época anterior y conserva reservas inciertas', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-stale-epoch-close-'));
+  const path=join(directory,'world.sqlite');
+  let journal=openJournal({path});
+  try{
+    await createQueuedHumanIntentFixture(journal,['La escena puede cerrarse después de pausar.'],coordinatorConfigurationFixture());
+    const begun=journal.beginCoordinatorPulse({runId});
+    if(begun.kind!=='started')assert.fail('La intervención debe abrir un pulso actoral');
+    const job=begun.jobs.find((item)=>item.actorId===maxId);
+    if(job===undefined)assert.fail('Falta el job actoral de Max');
+    if(job.lifecycleRevision===null)assert.fail('El job nuevo debe llevar su época de autoridad');
+    const lease={ownerToken:uuid(39_100),claimToken:uuid(39_101)};
+    const claim=journal.claimActorTurnJob({runId,actorId:maxId,jobId:job.jobId,generation:job.generation,...lease});
+    if(claim.kind!=='claimed')assert.fail('El job debe quedar en ejecución antes de pausar');
+
+    const clockEpochId=uuid(39_102),ownerToken=uuid(39_103);
+    const reservation=journal.reserveNextRequest({runId,pulseId:job.pulseId,jobId:job.jobId,generation:job.generation,clockEpochId,ownerToken});
+    if(reservation.kind!=='reserved')assert.fail('La reserva de prueba debe quedar registrada');
+    journal.transitionReservation({jobId:job.jobId,generation:job.generation,requestSeq:reservation.requestSeq,target:'dispatched',ownerToken,
+      wallTime:{clockEpochId,monotonicNs:'0'}});
+    journal.transitionReservation({jobId:job.jobId,generation:job.generation,requestSeq:reservation.requestSeq,target:'ambiguous',ownerToken,
+      wallTime:{clockEpochId,monotonicNs:'1000000'}});
+
+    const beforePause=journal.readWorldLifecycle({runId});
+    assert.ok(beforePause);
+    assert.equal(journal.setWorldLifecycle({runId,expectedWorldRevision:beforePause.worldRevision,
+      expectedConfigRevision:beforePause.configRevision,target:'paused'}),'updated');
+    const paused=journal.readWorldLifecycle({runId});
+    assert.ok(paused);
+    assert.equal(paused.lifecycle,'paused');
+    assert.ok(paused.lifecycleRevision>job.lifecycleRevision);
+    journal.close();journal=openJournal({path});
+
+    const structure=journal.readDramaticStructure({runId});
+    assert.ok(structure);
+    const closed=journal.applyDramaticStructureCommand({runId,principalId:dramaticStructurePrincipalId,
+      operationId:uuid(39_104),idempotencyKey:uuid(39_105),expectedWorldRevision:paused.worldRevision,
+      expectedStructureRevision:structure.structureRevision,
+      command:{kind:'closeScene',sceneId,reason:'Cierre estructural después de detener la época actoral anterior.'}});
+    assert.equal(closed.kind,'stored','el job bloqueado de una época anterior ya no puede cortar el Escenario');
+    assert.equal(journal.loadWorld({runId})?.activeSceneId,null);
+
+    const inspect=new DatabaseSync(path);
+    try{
+      const storedJob=inspect.prepare('SELECT state,lifecycle_revision FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?')
+        .get(runId,maxId,job.jobId,job.generation) as {state:string;lifecycle_revision:number}|undefined;
+      assert.equal(storedJob?.state,'blocked','el cierre conserva el job viejo');
+      assert.equal(storedJob?.lifecycle_revision,job.lifecycleRevision,'el cierre no actualiza la época del job viejo');
+      const storedReservation=inspect.prepare('SELECT state FROM request_reservations WHERE job_id=? AND generation=? AND request_seq=?')
+        .get(job.jobId,job.generation,reservation.requestSeq) as {state:string}|undefined;
+      assert.equal(storedReservation?.state,'ambiguous','la incertidumbre de transporte permanece intacta para los guards de reanudación');
+    }finally{inspect.close();}
+  }finally{
+    try{journal.close();}catch{/* Puede haberse cerrado al simular el reinicio. */}
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test('cerrar escena sigue bloqueado por jobs queued, running o blocked de la época vigente', async () => {
+  for(const status of ['queued','running','blocked'] as const){
+    const directory=mkdtempSync(join(tmpdir(),`personajes-current-${status}-close-`));
+    const path=join(directory,'world.sqlite');
+    const journal=openJournal({path});
+    try{
+      await createQueuedHumanIntentFixture(journal,[`Prueba de job ${status}.`],coordinatorConfigurationFixture());
+      const begun=journal.beginCoordinatorPulse({runId});
+      if(begun.kind!=='started')assert.fail(`La intervención debe abrir un pulso para ${status}`);
+      const job=begun.jobs.find((item)=>item.actorId===maxId);
+      if(job===undefined)assert.fail(`Falta el job actoral ${status}`);
+      if(status!=='queued'){
+        const lease={ownerToken:uuid(status==='running'?39_110:39_120),claimToken:uuid(status==='running'?39_111:39_121)};
+        const claim=journal.claimActorTurnJob({runId,actorId:maxId,jobId:job.jobId,generation:job.generation,...lease});
+        if(claim.kind!=='claimed')assert.fail(`No se pudo reclamar el job ${status}`);
+        if(status==='blocked'){
+          const failed=journal.failActorTurnJob({execution:{runId,actorId:maxId,jobId:job.jobId,generation:job.generation,
+            pulseId:job.pulseId,lease},code:'execution-failed'});
+          assert.equal(failed.kind,'blocked');
+        }
+      }
+      const lifecycle=journal.readWorldLifecycle({runId});
+      const structure=journal.readDramaticStructure({runId});
+      assert.ok(lifecycle);assert.ok(structure);
+      const result=journal.applyDramaticStructureCommand({runId,principalId:dramaticStructurePrincipalId,
+        operationId:uuid(status==='queued'?39_112:status==='running'?39_113:39_114),
+        idempotencyKey:uuid(status==='queued'?39_115:status==='running'?39_116:39_117),
+        expectedWorldRevision:lifecycle.worldRevision,expectedStructureRevision:structure.structureRevision,
+        command:{kind:'closeScene',sceneId,reason:`El job ${status} conserva autoridad en la época actual.`}});
+      assert.deepEqual(result,{kind:'invalidState',code:'actorJobsActive'},`${status} vigente debe impedir el corte estructural`);
+      assert.equal(journal.loadWorld({runId})?.activeSceneId,sceneId);
+    }finally{
+      try{journal.close();}catch{/* Limpieza si falló una aserción. */}
+      rmSync(directory,{recursive:true,force:true});
+    }
+  }
 });
 
 test('start abre episodio 1 y asocia la escena configurada en la misma transición durable', async () => {
@@ -961,7 +1143,7 @@ test('jobs actorales coalescen intenciones, serializan claims y recuperan identi
     journal.close();
     const beforeV9 = new DatabaseSync(path);
     try {
-      beforeV9.exec('DROP TABLE actor_turn_job_inputs; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE actor_turn_jobs; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41)');
+      downgradeCoordinatorPulsesTo44(beforeV9); beforeV9.exec('DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE actor_turn_job_inputs; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE actor_initiatives; DROP TABLE actor_turn_jobs; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44)');
     } finally { beforeV9.close(); }
     journal = openJournal({ path });
     assert.deepEqual(journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId), perceptions,
@@ -1218,6 +1400,529 @@ test('propuesta revisada y terminal Pi aceptado habilitan el commit exacto de un
   } finally { journal.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('una observación propia crea continuación durable y se recupera sin evento ni duplicados', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'personajes-observation-continuation-'));
+  const path = join(directory, 'world.sqlite');
+  let journal = openJournal({ path });
+  try {
+    await createQueuedHumanIntentFixture(journal, ['Max, mirá a tu compañero.'], coordinatorConfigurationFixture());
+    const started = journal.beginCoordinatorPulse({ runId });
+    if (started.kind !== 'started') assert.fail('La intervención inicial debe abrir el turno de Max');
+    const job = started.jobs.find((item) => item.actorId === maxId);
+    if (job === undefined) assert.fail('Falta el job de Max');
+    const lease = { ownerToken: uuid(9_851), claimToken: uuid(9_852) };
+    const claim = journal.claimActorTurnJob({ runId, actorId: maxId, jobId: job.jobId, generation: job.generation, ...lease });
+    if (claim.kind !== 'claimed' || claim.job.frozenWorldCut === null) assert.fail('Falta el corte congelado de Max');
+
+    const scope = { runId, pulseId: started.pulse.pulseId, jobId: job.jobId, generation: job.generation };
+    const registration = journal.registerActorPiSession({ runId, actorId: maxId, sessionId: 'max-observation',
+      sessionPath: join(directory, 'max-observation.jsonl'), preparedContextHash: 'a'.repeat(64),
+      profile: { provider: 'openai-codex', model: 'gpt-6-luna', reasoning: 'xhigh' } });
+    const port = createActorPiRequestPort({ journal, execution: { ...scope, actorId: maxId, lease } });
+    const identity = { kind: 'actor', characterId: maxId } as const;
+    await port.reserveNextRequest({ purpose: identity, scope, clockEpochId: uuid(9_853) });
+    const candidateBase = { turnId: uuid(9_854), runId, actorId: maxId, scope, lease,
+      base: registration.session, inputCut: claim.job.frozenWorldCut };
+    await port.recordCheckpointCandidate({ identity,
+      purpose: { kind: 'request-input', baseScope: scope, request: { scope, requestSeq: 0 } },
+      snapshot: { sessionId: registration.session.sessionId, sessionPath: registration.session.sessionPath, candidateLeafId: 'observation-input' } });
+    await port.recordActorPiCandidate?.({ ...candidateBase, kind: 'request-input', candidateId: uuid(9_855),
+      requestSeq: 0, candidateLeafId: 'observation-input' });
+
+    const attempt = { kind: 'observe' as const, attemptId: uuid(9_856), runId, actorId: maxId,
+      expectedRevision: claim.job.frozenWorldCut.worldRevision,
+      target: { modality: 'visual' as const, targetHandle: 'agent-99' } };
+    const proposalId = ProposalIdSchema.parse(uuid(9_857));
+    journal.registerWorldProposal({ runId, proposalId, version: 1, jobId: job.jobId, generation: job.generation,
+      proposalSlot: 0, lease, attempt });
+    await port.transitionReservation({ purpose: identity, scope, requestSeq: 0, target: 'dispatched',
+      wallTime: { clockEpochId: uuid(9_853), monotonicNs: process.hrtime.bigint().toString() } });
+    await port.transitionReservation({ purpose: identity, scope, requestSeq: 0, target: 'completed',
+      wallTime: { clockEpochId: uuid(9_853), monotonicNs: process.hrtime.bigint().toString() } });
+    const candidateId = uuid(9_858);
+    await port.recordActorPiCandidate?.({ ...candidateBase, kind: 'terminal-candidate', candidateId,
+      outcome: 'completed', lastRequestSeq: 0, candidateLeafId: 'observation-approved' });
+    journal.acceptActorTurn({ candidateId, lease, proposal: { kind: 'durable', proposalId, version: 1,
+      attemptHash: sha256(canonicalJson(attempt)) } });
+
+    const commit = { runId, proposalId, version: 1, ids: idSource(9_859) };
+    const committed = journal.commitWorldAttempt(commit);
+    assert.equal(committed.resolution.kind, 'applied');
+    if (committed.resolution.kind !== 'applied') assert.fail('La observación debe quedar aplicada');
+    const observation = committed.resolution.perceptions[0];
+    assert.equal(observation?.kind, 'observation');
+    if (observation?.kind !== 'observation') assert.fail('Falta la observación propia');
+    assert.deepEqual(committed.resolution.events, [], 'observar no inventa un hecho público');
+    assert.equal(journal.loadWorld({ runId })?.seq, claim.job.frozenWorldCut.worldSeq,
+      'la observación no avanza la secuencia de eventos del mundo');
+    assert.equal(journal.closeCoordinatorPulse({ runId, pulseId: started.pulse.pulseId }).state, 'completed');
+
+    journal.close();
+    journal = openJournal({ path });
+    assert.equal(journal.commitWorldAttempt(commit).kind, 'existing', 'el replay no duplica la continuación');
+    const awaiting = new DatabaseSync(path);
+    try {
+      assert.equal(awaiting.prepare('SELECT state FROM actor_turn_intents WHERE perception_id=?').get(observation.id)?.state,
+        'awaitingDelivery', 'la intención propia sobrevive al reinicio sin adelantarse a su entrega');
+      assert.equal(awaiting.prepare('SELECT COUNT(*) AS count FROM actor_turn_intents WHERE perception_id=?').get(observation.id)?.count, 1,
+        'repetir el commit conserva una sola intención');
+    } finally { awaiting.close(); }
+    const delivered = await createDeliverWorldWorker({ journal, runId, actorId: maxId }).drain();
+    assert.equal(delivered.kind, 'completed');
+    assert.deepEqual(journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId), [observation.id]);
+    const resumed = journal.beginCoordinatorPulse({ runId });
+    assert.equal(resumed.kind, 'started', 'la observación entregada abre una causa actoral real');
+    if (resumed.kind !== 'started') assert.fail('No se abrió la continuación de Max');
+    assert.equal(resumed.pulse.cause.kind, 'actorAttempt');
+    assert.equal(resumed.pulse.cause.id, attempt.attemptId);
+    assert.deepEqual(resumed.jobs.map((item) => item.actorId), [maxId]);
+    assert.deepEqual(resumed.jobs[0]?.perceptionIds, [observation.id]);
+  } finally { journal.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('un movimiento solitario produce percepción privada respaldada, Experience real y nuevo job en destino', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'personajes-own-movement-continuation-'));
+  const path = join(directory, 'world.sqlite');
+  let journal = openJournal({ path });
+  try {
+    const destinationId = 'destino-del-movimiento';
+    const base = worldFixture();
+    const soloWorld = WorldSnapshotSchema.parse({
+      ...base,
+      places: [...base.places, { id: destinationId, name: 'Pasillo lateral', description: 'Un pasillo vacío.', width: 10, height: 10, lighting: 'normal' }],
+      connections: [{ from: roomId, to: destinationId, durationMs: 250, arrivalPoint: { x: 2, y: 2 }, doorId: null }],
+      entities: base.entities.map((entity) => entity.kind === 'character'
+        ? entity.characterId === maxId
+          ? { ...entity, capabilities: [...entity.capabilities, 'move'] }
+          : { ...entity, presence: { kind: 'absent' } }
+        : entity),
+      scenes: base.scenes.map((scene) => ({ ...scene, participantIds: [maxId], placeIds: [roomId, destinationId] })),
+    });
+    const configuration = coordinatorConfigurationFixture([maxId], soloWorld);
+    await createQueuedHumanIntentFixture(journal, ['Max, seguí hacia el pasillo.'], configuration);
+
+    const world = journal.loadWorld({ runId });
+    const knowledge = journal.readActorKnowledge({ runId, actorId: maxId, throughWorldSeq: world?.seq ?? 0 });
+    assert.ok(world && knowledge);
+    assert.equal(journal.compareAndSwapActorKnowledge({
+      kind: 'actor-knowledge-cas', actorId: maxId, runId, expectedWorldRevision: world.revision,
+      expectedWorldSeq: world.seq,
+      expectedContinuity: { continuityId: 'continuity-main', revision: 0, contentHash: HashSchema.parse('b'.repeat(64)) },
+      expectedKnowledgeRevision: knowledge.revision,
+      knowledge: ActorKnowledgeSchema.parse({ ...knowledge.knowledge,
+        bindings: [...knowledge.knowledge.bindings, { kind: 'place', handle: 'destination', placeId: destinationId }] }),
+    }).kind, 'stored');
+
+    const started = journal.beginCoordinatorPulse({ runId });
+    if (started.kind !== 'started') assert.fail('La intervención debe iniciar el primer turno de Max');
+    assert.deepEqual(started.pulse.cause.kind, 'humanIntervention');
+    assert.equal(started.jobs.length, 1, 'Max está solo entre los personajes de la escena');
+    const job = started.jobs[0];
+    if (job === undefined) assert.fail('Falta el job de Max');
+    const accepted = await acceptActorAttemptForTest({ journal, directory, job, seed: 9_940,
+      makeAttempt: (cut) => ({ kind: 'move', attemptId: uuid(9_948), runId, actorId: maxId,
+        expectedRevision: cut.worldRevision, destinationHandle: 'destination' }) });
+    const commit = { runId, proposalId: accepted.proposalId, version: 1, ids: idSource(9_949) };
+    const committed = journal.commitWorldAttempt(commit);
+    assert.equal(committed.resolution.kind, 'applied');
+    if (committed.resolution.kind !== 'applied') assert.fail('El movimiento debe aplicarse');
+    const event = committed.resolution.events.find((candidate) => candidate.kind === 'moved');
+    const ownPerception = committed.resolution.perceptions.find((perception) => perception.kind === 'worldEvent'
+      && perception.recipientCharacterId === maxId);
+    assert.ok(event);
+    assert.ok(ownPerception?.kind === 'worldEvent');
+    assert.equal(ownPerception?.kind === 'worldEvent' ? ownPerception.eventId : undefined, event?.id);
+    const movedActor = journal.loadWorld({ runId })?.entities.find((entity) => entity.kind === 'character' && entity.characterId === maxId);
+    assert.equal(movedActor?.kind === 'character' ? movedActor.placeId : undefined, destinationId,
+      'el corte siguiente ya ubica a Max en el destino');
+    assert.equal(journal.closeCoordinatorPulse({ runId, pulseId: started.pulse.pulseId }).state, 'completed');
+
+    journal.close();
+    journal = openJournal({ path });
+    assert.equal(journal.commitWorldAttempt(commit).kind, 'existing', 'el replay devuelve la misma resolución sin crear otra percepción');
+    const database = new DatabaseSync(path);
+    try {
+      assert.equal(database.prepare('SELECT COUNT(*) AS n FROM world_perceptions WHERE perception_id=?').get(ownPerception.id)?.n, 1);
+      assert.equal(database.prepare('SELECT recipient_actor_id FROM world_perceptions WHERE perception_id=?').get(ownPerception.id)?.recipient_actor_id, maxId,
+        'la percepción queda dirigida sólo al actor emisor');
+      assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_turn_intents WHERE perception_id=?').get(ownPerception.id)?.n, 1,
+        'el replay conserva una sola intención propia');
+    } finally { database.close(); }
+
+    const delivery = await createDeliverWorldWorker({ journal, runId, actorId: maxId }).drain();
+    assert.equal(delivery.kind, 'completed');
+    const experiences = journal.readExperiences({ runId, actorId: maxId, throughWorldSeq: journal.loadWorld({ runId })?.seq ?? 0 });
+    const movementExperience = experiences.find((experience) => experience.kind === 'perception' && experience.eventId === event.id);
+    assert.ok(movementExperience, 'la memoria deriva de la percepción y evento confirmados');
+    assert.equal(movementExperience?.content, ownPerception.detail);
+    assert.deepEqual(journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId), [ownPerception.id]);
+
+    const resumed = journal.beginCoordinatorPulse({ runId });
+    if (resumed.kind !== 'started') assert.fail('La percepción del movimiento debe abrir un turno nuevo');
+    assert.equal(resumed.pulse.cause.kind, 'actorAttempt');
+    assert.equal(resumed.pulse.cause.id, accepted.attemptId);
+    assert.deepEqual(resumed.jobs.map((item) => item.actorId), [maxId]);
+    assert.deepEqual(resumed.jobs[0]?.perceptionIds, [ownPerception.id]);
+    const nextJob = resumed.jobs[0];
+    if (nextJob === undefined) assert.fail('Falta el job de continuación');
+    const nextLease = { ownerToken: uuid(9_950), claimToken: uuid(9_951) };
+    const nextClaim = journal.claimActorTurnJob({ runId, actorId: maxId, jobId: nextJob.jobId,
+      generation: nextJob.generation, ...nextLease });
+    if (nextClaim.kind !== 'claimed' || nextClaim.job.frozenWorldCut === null) assert.fail('No se congeló el nuevo corte de Max');
+    const nextCut = journal.loadActorWorldCut({ actorId: maxId, identityVersion: 1, runId,
+      continuity: { continuityId: 'continuity-main', revision: 0, contentHash: HashSchema.parse('b'.repeat(64)) },
+      expectedWorldRevision: nextClaim.job.frozenWorldCut.worldRevision,
+      atWorldSeq: nextClaim.job.frozenWorldCut.worldSeq, fictionalAt: nextClaim.job.frozenWorldCut.fictionalAt,
+      actorJob: { jobId: nextJob.jobId, generation: nextJob.generation, ...nextLease } });
+    const actorAtNextCut = nextCut?.snapshot.entities.find((entity) => entity.kind === 'character' && entity.characterId === maxId);
+    assert.equal(actorAtNextCut?.kind === 'character' ? actorAtNextCut.placeId : undefined, destinationId,
+      'la continuación usa el destino confirmado como su corte');
+  } finally { journal.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('putDown sobrevive replay, entrega Experience propia y abre una continuación durable', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'personajes-put-down-journal-'));
+  const path = join(directory, 'world.sqlite');
+  let journal = openJournal({ path });
+  const objectEntityId = WorldEntityIdSchema.parse(uuid(9_960));
+  try {
+    const base = worldFixture();
+    const soloWorld = WorldSnapshotSchema.parse({
+      ...base,
+      entities: [
+        ...base.entities.map((entity) => entity.kind !== 'character' ? entity : entity.characterId === maxId
+          ? { ...entity, capabilities: [...entity.capabilities, 'putDown' as const] }
+          : { ...entity, presence: { kind: 'absent' as const } }),
+        { kind: 'object', entityId: objectEntityId, label: 'Paquete de prueba', description: 'Objeto sintético portátil.',
+          collisionRadius: 0.1, blocksMovement: false, portable: true },
+      ],
+      inventory: [{ objectEntityId, location: { kind: 'heldBy' as const, entityId: maxEntity }, revision: 0 }],
+      scenes: base.scenes.map((scene) => ({ ...scene, participantIds: [maxId] })),
+    });
+    const configuration = coordinatorConfigurationFixture([maxId], soloWorld);
+    await createQueuedHumanIntentFixture(journal, ['Max, dejá el paquete sobre la mesa.'], configuration);
+
+    const world = journal.loadWorld({ runId });
+    const knowledge = journal.readActorKnowledge({ runId, actorId: maxId, throughWorldSeq: world?.seq ?? 0 });
+    assert.ok(world && knowledge);
+    assert.equal(journal.compareAndSwapActorKnowledge({
+      kind: 'actor-knowledge-cas', actorId: maxId, runId, expectedWorldRevision: world.revision,
+      expectedWorldSeq: world.seq,
+      expectedContinuity: { continuityId: 'continuity-main', revision: 0, contentHash: HashSchema.parse('b'.repeat(64)) },
+      expectedKnowledgeRevision: knowledge.revision,
+      knowledge: ActorKnowledgeSchema.parse({ ...knowledge.knowledge, bindings: [
+        ...knowledge.knowledge.bindings, { kind: 'entity', handle: 'h-portable', entityId: objectEntityId },
+      ] }),
+    }).kind, 'stored');
+
+    const started = journal.beginCoordinatorPulse({ runId });
+    if (started.kind !== 'started') assert.fail('La petición humana debe activar a Max');
+    const job = started.jobs.find((item) => item.actorId === maxId);
+    if (job === undefined) assert.fail('Falta el turno de Max');
+    const accepted = await acceptActorAttemptForTest({ journal, directory, job, seed: 9_960,
+      makeAttempt: (cut) => ({ kind: 'putDown', attemptId: uuid(9_970), runId, actorId: maxId,
+        expectedRevision: cut.worldRevision, objectHandle: 'h-portable' }) });
+    const commit = { runId, proposalId: accepted.proposalId, version: 1, ids: idSource(9_980) };
+    const committed = journal.commitWorldAttempt(commit);
+    assert.equal(committed.resolution.kind, 'applied');
+    if (committed.resolution.kind !== 'applied') assert.fail('La puesta debe aplicarse');
+    const event = committed.resolution.events.find((candidate) => candidate.kind === 'objectPlaced');
+    assert.ok(event?.kind === 'objectPlaced');
+    if (event?.kind !== 'objectPlaced') assert.fail('Falta el evento objectPlaced');
+    assert.deepEqual({ entityId: event.entityId, objectEntityId: event.objectEntityId,
+      placeId: event.placeId, position: event.position },
+      { entityId: maxEntity, objectEntityId, placeId: roomId, position: { x: 1, y: 1 } });
+    const ownPerception = committed.resolution.perceptions.find((perception) => perception.kind === 'worldEvent'
+      && perception.recipientCharacterId === maxId);
+    assert.ok(ownPerception?.kind === 'worldEvent');
+    if (ownPerception?.kind !== 'worldEvent') assert.fail('Falta la percepción propia del evento');
+    assert.equal(ownPerception.eventId, event.id);
+    assert.deepEqual(journal.loadWorld({ runId })?.inventory.find((entry) => entry.objectEntityId === objectEntityId)?.location,
+      { kind: 'atPlace', placeId: roomId, position: { x: 1, y: 1 } });
+    assert.equal(journal.closeCoordinatorPulse({ runId, pulseId: started.pulse.pulseId }).state, 'completed');
+
+    journal.close();
+    journal = openJournal({ path });
+    assert.equal(journal.commitWorldAttempt(commit).kind, 'existing', 'replay conserva el mismo evento y percepción');
+    const database = new DatabaseSync(path);
+    try {
+      assert.equal(database.prepare('SELECT COUNT(*) AS n FROM world_events WHERE event_id=?').get(event.id)?.n, 1);
+      assert.equal(database.prepare('SELECT COUNT(*) AS n FROM world_perceptions WHERE perception_id=?').get(ownPerception.id)?.n, 1);
+      assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_turn_intents WHERE perception_id=?').get(ownPerception.id)?.n, 1);
+    } finally { database.close(); }
+
+    const delivery = await createDeliverWorldWorker({ journal, runId, actorId: maxId }).drain();
+    assert.equal(delivery.kind, 'completed');
+    const memories = journal.readExperiences({ runId, actorId: maxId, throughWorldSeq: journal.loadWorld({ runId })?.seq ?? 0 });
+    const memory = memories.find((experience) => experience.kind === 'perception' && experience.eventId === event.id);
+    assert.equal(memory?.content, ownPerception.detail, 'la memoria viene del evento visible, sin inventar un efecto');
+    assert.deepEqual(journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId), [ownPerception.id]);
+
+    const resumed = journal.beginCoordinatorPulse({ runId });
+    if (resumed.kind !== 'started') assert.fail('La percepción propia debe permitir una continuación');
+    assert.equal(resumed.pulse.cause.kind, 'actorAttempt');
+    assert.equal(resumed.pulse.cause.id, accepted.attemptId);
+    assert.deepEqual(resumed.jobs.map((item) => item.actorId), [maxId]);
+    assert.deepEqual(resumed.jobs[0]?.perceptionIds, [ownPerception.id]);
+  } finally {
+    try { journal.close(); } catch { /* Puede haberse cerrado al simular el reinicio. */ }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('un intento no aplicado produce feedback privado, permite cambiar de acción y corta la repetición idéntica', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-action-feedback-'));
+  const path=join(directory,'world.sqlite');
+  let journal=openJournal({path});
+  const gestureAttempt=(attemptId:number,expectedRevision:number,gesture:'nod'|'wave')=>({
+    kind:'communicate' as const,attemptId:uuid(attemptId),runId,actorId:maxId,expectedRevision,
+    channelHandle:'speech',audienceHandles:['agent-99'],content:{kind:'gesture' as const,gesture:{kind:gesture}},
+  });
+  const feedbackFrom=(attemptId:string)=>{
+    const row=database.prepare('SELECT payload_json FROM world_perceptions WHERE attempt_id=? AND recipient_actor_id=?').get(attemptId,maxId);
+    if(row===undefined)assert.fail('Falta feedback privado del intento');
+    return WorldPerceptionSchema.parse(JSON.parse(String(row.payload_json)));
+  };
+  let database=new DatabaseSync(path);
+  try{
+    await createQueuedHumanIntentFixture(journal,['Max, probá algo en la escena.'],coordinatorConfigurationFixture());
+    const firstPulse=journal.beginCoordinatorPulse({runId});
+    if(firstPulse.kind!=='started')assert.fail('La intervención debe iniciar un turno actoral');
+    const firstJob=firstPulse.jobs.find((job)=>job.actorId===maxId);
+    if(firstJob===undefined)assert.fail('Falta el job de Max');
+    const first=await acceptActorAttemptForTest({journal,directory,job:firstJob,seed:9_880,
+      nextInitiative:'after-resolution',
+      makeAttempt:(cut)=>gestureAttempt(9_888,cut.worldRevision,'nod')});
+    const firstCommit={runId,proposalId:first.proposalId,version:1,ids:idSource(9_889)};
+    const firstResult=journal.commitWorldAttempt(firstCommit);
+    assert.equal(firstResult.resolution.kind,'notApplied');
+    if(firstResult.resolution.kind!=='notApplied')assert.fail('La incompatibilidad de gesto/habla debe rechazarse');
+    assert.equal(firstResult.resolution.reason,'channel-kind-mismatch');
+    assert.deepEqual(firstResult.resolution.events,[]);
+    assert.deepEqual(firstResult.resolution.perceptions,[],'la resolución de dominio conserva el resultado puro y no agrega ficción');
+    assert.equal(journal.loadWorld({runId})?.seq,first.cut.worldSeq,'el fallo no avanza la secuencia pública');
+
+    const firstFeedback=feedbackFrom(first.attemptId);
+    assert.equal(firstFeedback.kind,'actionFeedback');
+    if(firstFeedback.kind!=='actionFeedback')assert.fail('El registro debe ser feedback tipado');
+    assert.equal(firstFeedback.reason,'channel-kind-mismatch');
+    assert.equal(firstFeedback.worldRevision,first.cut.worldRevision);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM world_events WHERE origin_id=?').get(first.attemptId)?.n,0);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM world_perception_experiences WHERE perception_id=?').get(firstFeedback.id)?.n,0,
+      'el feedback no se vuelve Experience/ICM Memory');
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_turn_intents WHERE perception_id=?').get(firstFeedback.id)?.n,1);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_initiatives WHERE source_attempt_id=?').get(first.attemptId)?.n,0,
+      'una acción no aplicada no crea iniciativa; sólo el feedback técnico puede ofrecer reconsideración');
+    const projected=buildActorWorldView({snapshot:journal.loadWorld({runId}),actorId:maxId,
+      knowledge:emptyActorKnowledge({runId,actorId:maxId}),pendingPerceptions:[firstFeedback],ids:idSource(9_890)}).view;
+    assert.deepEqual(projected.inbox,[{kind:'actionFeedback',result:'notApplied',reason:'channel-kind-mismatch',
+      message:'Resultado de ejecución: la acción anterior no se aplicó al Escenario. Esto no es un suceso de la ficción; reconsidera tu próxima acción desde la percepción actual.',
+      fictitiousAt:firstFeedback.fictitiousAt}]);
+    assert.equal(JSON.stringify(projected).includes(firstFeedback.chainId),false,'la identidad interna de la cadena no entra al contexto del actor');
+    assert.equal(JSON.stringify(projected).includes(firstFeedback.actionSignature),false,'la firma anti-loop queda sólo en el host');
+    const otherActorView=buildActorWorldView({snapshot:journal.loadWorld({runId}),actorId:agentId,
+      knowledge:emptyActorKnowledge({runId,actorId:agentId}),pendingPerceptions:[firstFeedback],ids:idSource(9_891)}).view;
+    assert.deepEqual(otherActorView.inbox,[],'el feedback no se filtra a otros actores');
+
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:firstPulse.pulse.pulseId}).state,'completed');
+    journal.close();
+    journal=openJournal({path});
+    assert.equal(journal.commitWorldAttempt(firstCommit).kind,'existing','replay devuelve la resolución original');
+    database.close();
+    database=new DatabaseSync(path);
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM world_perceptions WHERE attempt_id=? AND json_extract(payload_json,'$.kind')='actionFeedback'").get(first.attemptId)?.n,1,
+      'replay no duplica el registro de feedback');
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_turn_intents WHERE perception_id=?').get(firstFeedback.id)?.n,1,
+      'replay no duplica la continuación');
+
+    assert.equal((await createDeliverWorldWorker({journal,runId,actorId:maxId}).drain()).kind,'completed');
+    const secondPulse=journal.beginCoordinatorPulse({runId});
+    if(secondPulse.kind!=='started')assert.fail('El feedback entregado debe permitir reconsiderar');
+    const secondJob=secondPulse.jobs.find((job)=>job.actorId===maxId);
+    if(secondJob===undefined)assert.fail('Falta el turno de reconsideración');
+    assert.equal(secondJob.perceptionIds.includes(firstFeedback.id),true);
+    const second=await acceptActorAttemptForTest({journal,directory,job:secondJob,seed:9_900,
+      makeAttempt:(cut)=>gestureAttempt(9_908,cut.worldRevision,'wave')});
+    const secondResult=journal.commitWorldAttempt({runId,proposalId:second.proposalId,version:1,ids:idSource(9_909)});
+    assert.equal(secondResult.resolution.kind,'notApplied');
+    const secondFeedback=feedbackFrom(second.attemptId);
+    assert.equal(secondFeedback.kind,'actionFeedback');
+    if(secondFeedback.kind!=='actionFeedback')assert.fail('Falta segundo feedback');
+    if(firstFeedback.kind!=='actionFeedback')assert.fail('Falta primer feedback');
+    assert.equal(secondFeedback.chainId,firstFeedback.chainId);
+    assert.notEqual(secondFeedback.actionSignature,firstFeedback.actionSignature,
+      'una acción distinta en el mismo corte constituye una causa nueva');
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_turn_intents WHERE perception_id=?').get(secondFeedback.id)?.n,1);
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:secondPulse.pulse.pulseId}).state,'completed');
+    assert.equal((await createDeliverWorldWorker({journal,runId,actorId:maxId}).drain()).kind,'completed');
+
+    const thirdPulse=journal.beginCoordinatorPulse({runId});
+    if(thirdPulse.kind!=='started')assert.fail('La segunda acción fallida debe ofrecer una nueva reconsideración');
+    const thirdJob=thirdPulse.jobs.find((job)=>job.actorId===maxId);
+    if(thirdJob===undefined)assert.fail('Falta el segundo turno de reconsideración');
+    assert.equal(thirdJob.perceptionIds.includes(secondFeedback.id),true);
+    const third=await acceptActorAttemptForTest({journal,directory,job:thirdJob,seed:9_920,
+      makeAttempt:(cut)=>gestureAttempt(9_928,cut.worldRevision,'wave')});
+    const thirdResult=journal.commitWorldAttempt({runId,proposalId:third.proposalId,version:1,ids:idSource(9_929)});
+    assert.equal(thirdResult.resolution.kind,'notApplied');
+    const thirdFeedback=feedbackFrom(third.attemptId);
+    assert.equal(thirdFeedback.kind,'actionFeedback');
+    if(thirdFeedback.kind!=='actionFeedback'||secondFeedback.kind!=='actionFeedback')assert.fail('Falta feedback para detectar repetición');
+    assert.equal(thirdFeedback.chainId,secondFeedback.chainId);
+    assert.equal(thirdFeedback.actionSignature,secondFeedback.actionSignature);
+    assert.equal(thirdFeedback.reason,secondFeedback.reason);
+    assert.equal(thirdFeedback.worldRevision,secondFeedback.worldRevision);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM actor_turn_intents WHERE perception_id=?').get(thirdFeedback.id)?.n,0,
+      'repetir acción, razón y corte queda guardado pero no dispara otro turno automáticamente');
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM world_events WHERE origin_id IN(?,?,?)").get(first.attemptId,second.attemptId,third.attemptId)?.n,0);
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:thirdPulse.pulse.pulseId}).state,'completed');
+  }finally{database.close();journal.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('after-resolution conserva su causa, coalesce inbox antes del claim y se reintenta tras reopen', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-actor-initiative-'));
+  const path=join(directory,'world.sqlite');
+  let journal=openJournal({path});
+  try{
+    const base=worldFixture();
+    const world=WorldSnapshotSchema.parse({...base,clock:{...base.clock,instant:-10_000},entities:base.entities.map((entity)=>entity.kind==='character'
+      ?{...entity,mind:{...entity.mind,experiences:entity.mind.experiences.map((experience)=>({...experience,fictitiousAt:-10_000,receivedAt:-10_000}))}}:entity)});
+    await createQueuedHumanIntentFixture(journal,['Max, escuchame un momento.'],coordinatorConfigurationFixture([maxId,agentId],world));
+    const firstPulse=journal.beginCoordinatorPulse({runId});
+    if(firstPulse.kind!=='started')assert.fail('La intervención humana debe convocar a Max');
+    const firstJob=firstPulse.jobs.find((job)=>job.actorId===maxId);
+    if(firstJob===undefined)assert.fail('Falta el turno de Max');
+    const first=await acceptActorAttemptForTest({journal,directory,job:firstJob,seed:43_100,
+      nextInitiative:'after-resolution',makeAttempt:(cut)=>waitAttempt(43_110,maxId,cut.worldRevision)});
+    const sourceCommit=journal.commitWorldAttempt({runId,proposalId:first.proposalId,version:1,ids:idSource(43_120)});
+    assert.equal(sourceCommit.resolution.kind,'applied');
+    const resultingWorld=journal.loadWorld({runId});
+    if(resultingWorld===undefined)assert.fail('Falta el mundo resuelto');
+    assert.ok(resultingWorld.clock.instant<0,'el escenario de prueba conserva instantes ficticios anteriores a Unix');
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:firstPulse.pulse.pulseId}).state,'completed');
+    const laterHumanInput=journal.commitHumanIntervention({runId,participantId:'interlocutor-andres',
+      expectedRevision:resultingWorld.revision,idempotencyKey:uuid(43_125),request:{kind:'speech',recipientCharacterIds:[maxId],channelId,
+        content:{kind:'speech',text:'Max, y ya que estás aquí: ¿qué hacemos ahora?'}}});
+    if(laterHumanInput.kind!=='stored'||laterHumanInput.resolution.kind!=='applied')assert.fail('La nueva intervención debe quedar confirmada');
+    const deliveredLater=await createDeliverWorldWorker({journal,runId,actorId:maxId}).drain();
+    assert.equal(deliveredLater.kind,'completed');
+    const laterPerceptionId=journal.readQueuedActorTurnIntents({runId,actorId:maxId,limit:10})[0]?.perceptionId;
+    if(laterPerceptionId===undefined)assert.fail('La nueva percepción debe estar entregada antes del próximo claim');
+    const worldWithInbox=journal.loadWorld({runId});
+    if(worldWithInbox===undefined)assert.fail('Falta el mundo con la nueva intervención');
+    const database=new DatabaseSync(path);
+    const persisted=z.strictObject({initiative_id:z.string(),eligible_at:z.number(),source_commit_index:z.number(),state:z.string()})
+      .parse(database.prepare('SELECT initiative_id,eligible_at,source_commit_index,state FROM actor_initiatives WHERE source_attempt_id=?')
+        .get(first.attemptId));
+    database.close();
+    assert.equal(persisted.state,'pending');
+    assert.equal(persisted.eligible_at,resultingWorld.clock.instant);
+    assert.ok(persisted.eligible_at<0,'la fecha ficticia negativa se almacena sin normalizarla a tiempo de host');
+
+    assert.equal(journal.setWorldLifecycle({runId,expectedWorldRevision:worldWithInbox.revision,expectedConfigRevision:0,target:'paused'}),'updated');
+    journal.close();journal=openJournal({path});
+    assert.equal(journal.setWorldLifecycle({runId,expectedWorldRevision:worldWithInbox.revision,expectedConfigRevision:0,target:'running'}),'updated');
+    assert.deepEqual(journal.listCoordinatorPulseTargets().map((item)=>item.runId),[runId]);
+    const continuation=journal.beginCoordinatorPulse({runId});
+    if(continuation.kind!=='started')assert.fail('La iniciativa pendiente debe crear un turno al instante resultante');
+    assert.deepEqual(continuation.pulse.cause,{kind:'actorInitiative',id:persisted.initiative_id,commitIndex:persisted.source_commit_index});
+    const continuationJob=continuation.jobs.find((job)=>job.actorId===maxId);
+    if(continuationJob===undefined)assert.fail('La iniciativa debe pertenecer a Max');
+    assert.deepEqual(continuationJob.perceptionIds,[],'una iniciativa no fabrica percepción ni inbox');
+    assert.equal(continuationJob.initiative?.initiativeId,persisted.initiative_id);
+    assert.equal(continuationJob.initiative?.eligibleAt,resultingWorld.clock.instant);
+
+    const lease={ownerToken:uuid(43_130),claimToken:uuid(43_131)};
+    const claim=journal.claimActorTurnJob({runId,actorId:maxId,jobId:continuationJob.jobId,generation:0,...lease});
+    if(claim.kind!=='claimed')assert.fail('El job de iniciativa sin inbox debe poder reclamar el corte actual');
+    assert.deepEqual(claim.job.frozenPerceptionIds,[laterPerceptionId],
+      'el actor incorpora al mismo turno la percepción ya entregada, incluso si llegó después de crear la iniciativa');
+    const failed=journal.failActorTurnJob({execution:{runId,actorId:maxId,jobId:continuationJob.jobId,generation:0,
+      pulseId:continuation.pulse.pulseId,lease},code:'execution-failed'});
+    assert.equal(failed.job.initiative?.initiativeId,persisted.initiative_id);
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:continuation.pulse.pulseId}).state,'blocked');
+    journal.close();journal=openJournal({path});
+    const retry=journal.retryActorTurnJob({runId,actorId:maxId,jobId:continuationJob.jobId,expectedGeneration:0,pulseId:continuation.pulse.pulseId});
+    assert.equal(retry.kind,'retried');
+    assert.equal(retry.job.generation,1);
+    assert.equal(retry.job.initiative?.initiativeId,persisted.initiative_id,'el retry continúa la misma causa sin duplicarla');
+    assert.deepEqual(retry.job.perceptionIds,[]);
+    const retriedClaim=journal.claimActorTurnJob({runId,actorId:maxId,jobId:retry.job.jobId,generation:1,
+      ownerToken:uuid(43_132),claimToken:uuid(43_133)});
+    assert.equal(retriedClaim.kind,'claimed');
+    assert.deepEqual(retriedClaim.job.frozenPerceptionIds,[laterPerceptionId],
+      'el retry vuelve a incorporar la percepción liberada sin duplicar su causa ni consumirla antes del claim');
+    const after=journal.beginCoordinatorPulse({runId});
+    assert.equal(after.kind,'existing','no se crea un segundo turno para la misma causa mientras el retry está activo');
+    if(after.kind==='existing')assert.equal(after.pulse.pulseId,continuation.pulse.pulseId);
+  }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('la cola de causas deja avanzar una iniciativa anterior después de dos turnos de conversación', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-initiative-fairness-'));
+  const journal=openJournal({path:join(directory,'world.sqlite')});
+  try{
+    const base=worldFixture();
+    const agent=base.entities.find((entity)=>entity.kind==='character'&&entity.characterId===agentId);
+    if(agent?.kind!=='character')assert.fail('Falta Agente 99 en el escenario');
+    const chief={...agent,entityId:chiefEntity,characterId:chiefId,trueDisplayName:'El Jefe',position:{x:3,y:1},
+      mind:{goals:[],beliefs:[],relationships:[],recognizedCharacterIds:[],experiences:[]}};
+    const world=WorldSnapshotSchema.parse({...base,entities:[...base.entities,chief],
+      scenes:base.scenes.map((scene)=>({...scene,participantIds:[maxId,agentId,chiefId]}))});
+    const configured=coordinatorConfigurationFixture([maxId,agentId,chiefId],world);
+    const configuration=ReadyRunConfigurationSchema.parse({...configured,
+      budget:{...configured.budget,maxPiCallsPerRun:20,maxPiCallsPerPulse:4}});
+    await createQueuedHumanIntentFixture(journal,['Max, ¿estás ahí?'],configuration);
+    assert.equal(grantTestActorKnowledge(journal,maxId,[{kind:'entity',handle:'jefe',entityId:chiefEntity}]).kind,'stored');
+    assert.equal(grantTestActorKnowledge(journal,agentId,[{kind:'channel',handle:'speech',channelId},
+      {kind:'entity',handle:'jefe',entityId:chiefEntity},{kind:'entity',handle:'maxwell-smart',entityId:maxEntity}]).kind,'stored');
+    assert.equal(grantTestActorKnowledge(journal,chiefId,[{kind:'channel',handle:'speech',channelId},
+      {kind:'entity',handle:'agente-99',entityId:agentEntity},{kind:'entity',handle:'maxwell-smart',entityId:maxEntity}]).kind,'stored');
+
+    const firstPulse=journal.beginCoordinatorPulse({runId});
+    if(firstPulse.kind!=='started')assert.fail('La pregunta debe activar a Max');
+    const maxJob=firstPulse.jobs.find((job)=>job.actorId===maxId);
+    if(maxJob===undefined)assert.fail('Falta el job inicial de Max');
+    const maxTurn=await acceptActorAttemptForTest({journal,directory,job:maxJob,seed:43_200,nextInitiative:'after-resolution',
+      makeAttempt:(cut)=>communicateAttempt(43_210,cut.worldRevision,maxId,['agent-99','jefe'],'¿Me decís qué encontraste?')});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:maxTurn.proposalId,version:1,ids:idSource(43_220)}).resolution.kind,'applied');
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:firstPulse.pulse.pulseId}).state,'completed');
+    assert.equal((await createDeliverWorldWorker({journal,runId,actorId:agentId}).drain()).kind,'completed');
+    assert.equal((await createDeliverWorldWorker({journal,runId,actorId:chiefId}).drain()).kind,'completed');
+
+    const conversationPulse=journal.beginCoordinatorPulse({runId});
+    if(conversationPulse.kind!=='started')assert.fail('Los testigos deben recibir el evento de Max');
+    assert.equal(conversationPulse.pulse.cause.kind,'actorAttempt');
+    assert.deepEqual(conversationPulse.jobs.map((job)=>job.actorId).sort(),[agentId,chiefId].sort(),
+      'Agente 99 y el Jefe reciben el mismo evento mientras la iniciativa de Max espera su corte');
+    const agentJob=conversationPulse.jobs.find((job)=>job.actorId===agentId);
+    const chiefJob=conversationPulse.jobs.find((job)=>job.actorId===chiefId);
+    if(agentJob===undefined||chiefJob===undefined)assert.fail('Faltan los dos interlocutores');
+    const agentTurn=await acceptActorAttemptForTest({journal,directory,job:agentJob,seed:43_230,
+      makeAttempt:(cut)=>communicateAttempt(43_240,cut.worldRevision,agentId,['jefe','maxwell-smart'],'Lo encontré en el informe. Enseguida te cuento.')});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:agentTurn.proposalId,version:1,ids:idSource(43_250)}).resolution.kind,'applied');
+    const chiefTurn=await acceptActorAttemptForTest({journal,directory,job:chiefJob,seed:43_260,
+      makeAttempt:(cut)=>communicateAttempt(43_270,cut.worldRevision,chiefId,['agente-99','maxwell-smart'],'A ver, cuéntenme los dos.')});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:chiefTurn.proposalId,version:1,ids:idSource(43_280)}).resolution.kind,'applied');
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:conversationPulse.pulse.pulseId}).state,'completed');
+    for(const actorId of [maxId,agentId,chiefId]){
+      assert.equal((await createDeliverWorldWorker({journal,runId,actorId}).drain()).kind,'completed');
+    }
+
+    const next=journal.beginCoordinatorPulse({runId});
+    if(next.kind!=='started')assert.fail('La iniciativa antigua debe avanzar después de los turnos más nuevos de conversación');
+    assert.equal(next.pulse.cause.kind,'actorInitiative');
+    const nextMax=next.jobs.find((job)=>job.actorId===maxId);
+    if(nextMax===undefined)assert.fail('Falta el turno de iniciativa de Max');
+    const claimed=journal.claimActorTurnJob({runId,actorId:maxId,jobId:nextMax.jobId,generation:nextMax.generation,
+      ownerToken:uuid(43_290),claimToken:uuid(43_291)});
+    if(claimed.kind!=='claimed')assert.fail('Max debe reclamar el turno justo');
+    assert.ok(claimed.job.frozenPerceptionIds);
+    assert.equal(claimed.job.frozenPerceptionIds.length,2,
+      'el turno combina las dos nuevas intervenciones de los personajes antes de congelar el inbox');
+  }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
+});
+
 test('sólo el lease vigente de un job actoral puede registrar una propuesta nueva', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-actor-proposal-lease-'));
   const path = join(directory, 'world.sqlite');
@@ -1417,7 +2122,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
       });
       assert.deepEqual(expectedSnapshots.map((row) => row.commit_index), [1, 2, 3]);
       assert.equal(beforeMigration.prepare('SELECT COUNT(*) AS n FROM world_commits').get()?.n, 3);
-      beforeMigration.exec('DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE world_commits; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41)');
+      downgradeCoordinatorPulsesTo44(beforeMigration); beforeMigration.exec('DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE world_commits; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44)');
       assert.equal(beforeMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 5);
     } finally { beforeMigration.close(); }
 
@@ -1437,7 +2142,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
         SELECT run_id,origin_kind,origin_id,payload_json,payload_hash,commit_index,world_revision,last_seq,created_at
         FROM world_resolutions ORDER BY commit_index
       `).all(), legacyRows, 'world_resolutions actorAttempt permanece idéntico');
-      assert.equal(afterMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 41);
+      assert.equal(afterMigration.prepare('SELECT MAX(version) AS version FROM schema_version').get()?.version, 45);
       assert.equal(afterMigration.prepare('SELECT COUNT(*) AS count FROM episodes').get()?.count, 0,
         'v29 no backfillea episodios para corridas heredadas');
       assert.equal(afterMigration.prepare('SELECT structure_revision FROM world_runs WHERE run_id=?').get(runId)?.structure_revision, 0);
@@ -1449,7 +2154,7 @@ test('migración v5 backfillea commits por índice, conserva cortes y permite re
 
     journal.close();
     const removeVersionMarker = new DatabaseSync(path);
-    try { removeVersionMarker.exec('DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41)'); }
+    try { downgradeCoordinatorPulsesTo44(removeVersionMarker); removeVersionMarker.exec('DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44)'); }
     finally { removeVersionMarker.close(); }
     journal = openJournal({ path });
     const idempotent = new DatabaseSync(path);
@@ -2018,7 +2723,7 @@ test('bloqueo durable libera asignaciones sin consumo y retry explícito conserv
     journal.close();
     const legacy = new DatabaseSync(path);
     try {
-      legacy.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+      downgradeCoordinatorPulsesTo44(legacy); legacy.exec(`DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
         CREATE TABLE actor_jobs_v12(
           run_id TEXT NOT NULL REFERENCES world_runs(run_id),actor_id TEXT NOT NULL,job_id TEXT NOT NULL,
           generation INTEGER NOT NULL CHECK(generation>=0),pulse_id TEXT NOT NULL REFERENCES pulses(pulse_id),
@@ -2036,7 +2741,7 @@ test('bloqueo durable libera asignaciones sin consumo y retry explícito conserv
           FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation));
         INSERT INTO actor_inputs_v12 SELECT * FROM actor_turn_job_inputs;
         DROP TABLE actor_turn_job_inputs; ALTER TABLE actor_inputs_v12 RENAME TO actor_turn_job_inputs;
-        DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41); COMMIT;`);
+        DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_results; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44); COMMIT;`);
     } finally { legacy.close(); }
     journal = openJournal({ path });
     assert.deepEqual(journal.scheduleActorTurnJob({ runId, actorId: maxId, pulseId }).kind, 'blocked', 'un job legado sin época demostrable se bloquea');
@@ -2071,6 +2776,10 @@ test('bloqueo durable libera asignaciones sin consumo y retry explícito conserv
     const pending = journal.readQueuedActorTurnIntents({ runId, actorId: maxId }).map((item) => item.perceptionId);
     assert.equal(pending.length, 2);
     assert.equal(journal.scheduleActorTurnJob({ runId, actorId: maxId, pulseId }).kind, 'blocked');
+    assert.throws(() => journal.retryActorTurnJob({ runId, actorId: maxId, jobId: scope.jobId, expectedGeneration: 1, pulseId }), /solicitudes inciertas/);
+    // The controlled transport has now supplied its terminal receipt; retry must not
+    // erase the dispatched reservation or create work while its outcome is unknown.
+    journal.transitionReservation({ jobId: scope.jobId, generation: scope.generation, requestSeq: 0, target: 'completed' });
     const retry = journal.retryActorTurnJob({ runId, actorId: maxId, jobId: scope.jobId, expectedGeneration: 1, pulseId });
     assert.equal(retry.kind, 'retried');
     assert.equal(retry.job.generation, 2);
@@ -2084,7 +2793,7 @@ test('bloqueo durable libera asignaciones sin consumo y retry explícito conserv
         { generation: 0, state: 'released', consumed_at: null }, { generation: 1, state: 'released', consumed_at: null }, { generation: 2, state: 'assigned', consumed_at: null },
       ]);
       assert.equal(inspect.prepare('SELECT consumed FROM pulses WHERE pulse_id=?').get(pulseId)?.consumed, 1);
-      assert.equal(inspect.prepare('SELECT state FROM request_reservations WHERE job_id=? AND generation=1').get(scope.jobId)?.state, 'dispatched');
+      assert.equal(inspect.prepare('SELECT state FROM request_reservations WHERE job_id=? AND generation=1').get(scope.jobId)?.state, 'completed', 'el recibo terminal de la generación anterior permanece tras retry');
       assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(), []);
     } finally { inspect.close(); }
     const nextClaim = journal.claimActorTurnJob({ runId, actorId: maxId, jobId: scope.jobId, generation: 2, ownerToken: uuid(19_505), claimToken: uuid(19_506) });
@@ -2124,7 +2833,8 @@ test('diagnóstico público Continuista valida fallos y conserva reviews legacy 
 
 function coordinatorConfigurationFixture(active = [maxId, agentId], world = worldFixture()) {
   const continuity = { continuityId: 'continuity-main', revision: 0, contentHash: 'b'.repeat(64), kind: 'adaptation', label: 'Continuidad sintética de test', milestones: [], inclusions: [] };
-  const prepared = [maxId,agentId].map((characterId) => {
+  const actorIds=[...new Set([maxId,agentId,...active])];
+  const prepared = actorIds.map((characterId) => {
     const provenance = { kind: 'dossier-evidence', dossierRevision: 1, dossierHash: 'd'.repeat(64), continuity: { continuityId: continuity.continuityId, revision: continuity.revision, contentHash: continuity.contentHash },
       curatedBy: 'test-fixture', curatedAt: '2026-10-14T00:00:00Z', sourceRefs: ['test-source'] };
     return PreparedCharacterSchema.parse({ kind: 'prepared-character', schemaVersion: 1, characterId, dossierRevision: 1, dossierHash: 'd'.repeat(64), identityVersion: 1, continuity,
@@ -2135,7 +2845,7 @@ function coordinatorConfigurationFixture(active = [maxId, agentId], world = worl
       inventory: { value: [], provenance }, initialExperience: { value: { kind: 'none' }, provenance }, unknownPolicy: { value: { defaultTreatment: 'do-not-infer-or-assert', fields: [] }, provenance } });
   });
   return ReadyRunConfigurationSchema.parse({ kind: 'ready-run-configuration', schemaVersion: 1, runId, configRevision: 0, name: 'Puesta sintética coordinator', fictionalAt: world.clock.instant,
-    continuity, roster: { eligibleCharacterIds: [maxId,agentId], preparedCharacters: prepared, activeCharacterIds: active },
+    continuity, roster: { eligibleCharacterIds: actorIds, preparedCharacters: prepared, activeCharacterIds: active },
     humanParticipants: [{ identity: { participantId: 'interlocutor-andres', displayName: 'Andrés', identityMarkdown: 'Identidad sintética.', lifeStoryMarkdown: 'Historia sintética.' },
       presence: { kind: 'inScene', sceneId, placeId: roomId, position: { x: 0.5, y: 1 }, channelId } }], worldSnapshot: world,
     dramaticLine: { purpose: 'Prueba', question: { kind: 'absent' }, conflict: { kind: 'not-formulated' } }, circadianPolicy: { kind: 'manual-only' }, language: 'es',
@@ -2425,7 +3135,7 @@ test('coordinador conserva causa y cuota compartida, asigna destinatarios tardí
     await createDeliverWorldWorker({ journal, runId, actorId: maxId }).drain();
     journal.close();
     const legacy = new DatabaseSync(path);
-    try { legacy.exec('DROP TABLE actor_activation_invitation_jobs; DROP TABLE actor_activation_invitations; DROP TABLE actor_activation_causes; DROP TABLE routine_clock_advances; DROP TABLE coordinator_pulses; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41);'); } finally { legacy.close(); }
+    try { downgradeCoordinatorPulsesTo44(legacy); legacy.exec('DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE actor_activation_invitation_jobs; DROP TABLE actor_activation_invitations; DROP TABLE actor_activation_causes; DROP TABLE routine_clock_advances; DROP TABLE coordinator_pulses; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44);'); } finally { legacy.close(); }
     journal = openJournal({ path });
     const begun = journal.beginCoordinatorPulse({ runId });
     if (begun.kind !== 'started') assert.fail('No se creó pulso');
@@ -2442,7 +3152,12 @@ test('coordinador conserva causa y cuota compartida, asigna destinatarios tardí
     assert.equal(claim.job.perceptionIds.length, 1);
     const scope = { runId, pulseId: begun.pulse.pulseId, jobId: job.jobId, generation: 0 };
     assert.equal(journal.reserveNextRequest({ ...scope, clockEpochId: uuid(30_006), ownerToken: lease.ownerToken }).kind, 'reserved');
+    journal.transitionReservation({ jobId: scope.jobId, generation: scope.generation, requestSeq: 0, ownerToken: lease.ownerToken,
+      target: 'dispatched', wallTime: { clockEpochId: uuid(30_006), monotonicNs: '0' } });
     journal.failActorTurnJob({ execution: { ...scope, actorId: maxId, lease }, code: 'pi-incomplete' });
+    assert.throws(() => journal.retryActorTurnJob({ runId, actorId: maxId, jobId: scope.jobId, expectedGeneration: 0, pulseId: begun.pulse.pulseId }), /solicitudes inciertas/);
+    journal.transitionReservation({ jobId: scope.jobId, generation: scope.generation, requestSeq: 0, ownerToken: lease.ownerToken,
+      target: 'completed', wallTime: { clockEpochId: uuid(30_006), monotonicNs: '1000000' } });
     assert.equal(journal.closeCoordinatorPulse({ runId, pulseId: begun.pulse.pulseId }).state, 'running', 'delivery tardía mantiene pulso abierto');
     journal.close(); journal = openJournal({ path });
     await createDeliverWorldWorker({ journal, runId, actorId: agentId }).drain();
@@ -2570,7 +3285,7 @@ test('ledger Continuista v15 exige terminal completo, comparte cuota y acepta re
   try{
     // Restore an actual populated v14 database before introducing administrative tables.
     const legacy=new DatabaseSync(join(fixture.directory,'journal.sqlite'));
-    try{legacy.exec(`DROP TABLE continuista_receipts;DROP TABLE continuista_candidates;DROP TABLE continuista_checkpoints;DROP TABLE continuista_request_leases;DROP TABLE continuista_sessions;DROP TABLE continuista_jobs;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41);`);}finally{legacy.close();}
+    try{downgradeCoordinatorPulsesTo44(legacy); legacy.exec(`DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE continuista_receipts;DROP TABLE continuista_candidates;DROP TABLE continuista_checkpoints;DROP TABLE continuista_request_leases;DROP TABLE continuista_sessions;DROP TABLE continuista_jobs;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44);`);}finally{legacy.close();}
     const migrated=openJournal({path:join(fixture.directory,'journal.sqlite')});migrated.close();
     const actor=continuistaActorFactory(fixture);let reviewed=false;
     const worker=createActorTurnWorker({journal:fixture.journal,runtime:fixture.runtime,ids:fixture.ids,sessionFactory:actor.factory,
@@ -2690,7 +3405,7 @@ test('v16 reconcilia terminal y admin aceptado de v15 con nuevo claim sin reescr
     const path=join(fixture.directory,'journal.sqlite');const before=new DatabaseSync(path);
     let candidates:unknown[];let checkpoints:unknown[];
     try{candidates=before.prepare('SELECT canonical_payload,payload_hash FROM actor_pi_candidates ORDER BY candidate_id').all();checkpoints=before.prepare('SELECT payload_json,checkpoint_hash FROM actor_job_checkpoints ORDER BY checkpoint_hash').all();
-      before.exec('DROP TABLE actor_turn_reconciliations;DROP TABLE actor_terminal_proposals;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41);');}finally{before.close();}
+      downgradeCoordinatorPulsesTo44(before); before.exec('DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE actor_turn_reconciliations;DROP TABLE actor_terminal_proposals;DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances; DROP TABLE IF EXISTS model_time_spans; DROP TABLE IF EXISTS model_time_run_state; DROP TABLE IF EXISTS run_preflight_job_operations; DROP TABLE IF EXISTS run_preflight_job_results; DROP TABLE IF EXISTS run_preflight_job_history; DROP TABLE IF EXISTS run_preflight_jobs; DROP TABLE IF EXISTS pi_access_job_operations; DROP TABLE IF EXISTS pi_access_job_results; DROP TABLE IF EXISTS pi_access_job_history; DROP TABLE IF EXISTS pi_access_jobs; DROP TABLE IF EXISTS pi_oauth_job_operations; DROP TABLE IF EXISTS pi_oauth_job_history; DROP TABLE IF EXISTS pi_oauth_jobs; DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44);');}finally{before.close();}
     reopened=openJournal({path});const recoveredJournal=reopened;const newLease={ownerToken:uuid(42_002),claimToken:uuid(42_003)};
     assert.equal(reopened.recoverAbandonedActorTurnJobClaims({ownerToken:newLease.ownerToken}),1);
     const claim=reopened.claimActorTurnJob({runId:originalExecution.runId,actorId:originalExecution.actorId,jobId:originalExecution.jobId,generation:originalExecution.generation,...newLease});if(claim.kind!=='claimed')assert.fail('Sin nuevo claim');

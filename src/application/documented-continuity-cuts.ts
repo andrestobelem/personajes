@@ -76,7 +76,7 @@ export async function createDocumentedContinuityDraft(input: {
   const cutId = DocumentedContinuityCutIdSchema.parse(input.cutId);
   const cut = DOCUMENTED_CONTINUITY_CUTS.find((candidate) => candidate.id === cutId);
   if (cut === undefined) throw new Error('El corte documental no está disponible.');
-  const draft = createEmptyRunConfigurationDraft({ runId: input.runId, revision: 0 });
+  const draft = RunConfigurationDraftSchema.parse({ ...createEmptyRunConfigurationDraft({ runId: input.runId, revision: 0 }), icmWorkspace: { kind: 'empty' } });
   const core = {
     continuityId: `documented-${cut.id}`, revision: cut.revision, kind: 'original',
     label: `${cut.title} · corte documental limitado v${cut.revision}. ${cut.description} ${cut.sources.map((source) => `${source.title}. ${source.scope} Límite: ${source.uncertainty}`).join(' ')}`,

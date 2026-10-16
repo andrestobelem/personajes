@@ -6,6 +6,8 @@ Consolidación de la conversación y de los trabajos de investigación al **15 d
 
 El [PRD](PRD.md) y las [especificaciones 1.0](specs/README.md) conservan los cierres documentales previos, pero ambos volvieron a revisión al detectarse cambios de alcance y discrepancias posteriores. La implementación comenzó por la base TypeScript. El [progreso](auditoria/objetivo-y-progreso.md) distingue lectura, correcciones, revisión del PRD, specs e implementación. La [entrevista PRD](auditoria/dialogo-prd.md) registra las preguntas reales a un custodio del concepto. Ningún cierre documental acredita un producto funcionando.
 
+La nueva [preparación con Max, 99 y el Jefe](representaciones/un-informe-tres-versiones.md) está guardada sin Fibonacci y exige biografías y deseos completos; su ejecución sigue pendiente.
+
 ## Para empezar
 
 [Prompts fundadores y plantilla de personaje](prompts-fundadores.md): versión trabajada en canvas con Writing for Agents, conservada como borrador de trabajo.
@@ -46,6 +48,7 @@ Los estudios de personajes son también investigaciones independientes: el [índ
 | Documento | Alcance |
 |---|---|
 | [Actores, personajes y fichas](diseno/actores-personajes-y-fichas.md) | Ficha exhaustiva y separación entre identidad, vida, memoria, metas, voz y capacidades. |
+| [Definición de los agentes](diseno/definicion-de-los-agentes.md) | Responsabilidades, contexto, memoria, herramientas y fronteras de cada rol; estado de la biografía encarnada. |
 | [Dramaturgia y dirección](diseno/dramaturgia-y-direccion.md) | Línea de fondo, etapas reconocidas, actos, escenas y agencia del reparto. |
 | [Escenario, memoria y tiempo](diseno/mundo-memoria-y-tiempo.md) | Conocimiento situado, continuidad, ciclo circadiano y vistas del observador. |
 | [Objetos, mensajes y tools](diseno/objetos-mensajes-y-tools.md) | Composición del dominio, propuestas de acción y responsabilidades. |
@@ -68,6 +71,15 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - [Diálogo constitucional](auditoria/dialogo-constitucional.md) y [respuestas del custodio](auditoria/respuestas-del-concepto.md).
 - [Revisión integral histórica (corte del 14 de octubre)](auditoria/revision-integral.md): snapshot anterior a los cortes C50–C61; consultar la trazabilidad y el progreso para el estado actual.
 - [Participación humana: identidad y brecha de integración](auditoria/participacion-humana.md).
+- [Recepción humana situada: decisión y conservación de historia](adr/0017-recepcion-humana-situada.md) y [entrevista de diseño](diseno/dialogo-recepcion-humana.md).
+- [Implementación y evidencia de recepción humana](auditoria/recepcion-humana-situada.md): cadena controlada, consulta tras cierre y respuesta humana dirigida con OAuth real; aceptación integral pendiente.
+- [El visitante y el aviso](representaciones/el-visitante-y-el-aviso.md): respuesta dirigida de Hymie con OAuth real, audiencias confirmadas y brecha de recuperación de Max.
+- [Diálogo de recuperación de causas](diseno/dialogo-recuperacion-causas.md): convocatoria sin inbox y preservación del pulso humano posterior.
+- [Recuperación de activaciones y diagnósticos](auditoria/recuperacion-activaciones-y-diagnosticos.md): journal v42, generaciones y prueba real.
+- [Plan de integración ICM Markdown](diseno/plan-icm-markdown-runtime.md): paquetes por rol/corte, GUI, conservación e invariantes pendientes de implementación.
+- [Runtime ICM Markdown v43](auditoria/icm-markdown-runtime.md): paquetes durables, conexión de roles, selector gráfico y validación histórica; alcance y pendientes explícitos.
+- [Inicio gráfico y recuperación de sesión](auditoria/inicio-y-recuperacion-de-sesion.md): mensajes de progreso, reconexión explícita y recuperación del mismo control sin duplicar su efecto.
+- [Fundación ICM Markdown](auditoria/icm-markdown-fundacion.md): corte histórico de contratos, lector seguro y admisión.
 - [Puerto Pi y frontera de despacho](auditoria/puerto-pi-y-frontera-de-despacho.md).
 - [Tools tipadas y reformulación](auditoria/tools-tipadas-y-reformulacion.md).
 - [Diagnóstico público del Continuista](auditoria/diagnostico-publico-continuista.md).
@@ -95,7 +107,7 @@ El término actual para el mundo operativo es **Escenario**; **escenografía** e
 - Revisiones Luna 6 xhigh de [investigaciones](auditoria/revision-luna-investigaciones.md), [personajes](auditoria/revision-luna-personajes.md) y [técnica](auditoria/revision-luna-tecnica.md).
 - [Skills instaladas](auditoria/skills-instaladas.md), [manifiesto](auditoria/skills-manifest.json) y [parche local](auditoria/skills-local.patch).
 
-La [representación de ensayo «La alarma de los números»](representaciones/la-alarma-de-los-numeros.md) acredita login OAuth real de OpenAI Codex, turnos de Max y Hymie con memorias independientes y observación del Director. La vista en vivo muestra plano y conversación confirmada, con SSE y consulta de respaldo. El episodio acredita una resolución del intercambio; el cierre estructural y la autonomía integral siguen pendientes; la interfaz gráfica completa y las voces generadas siguen pendientes. No se acredita aquí login real de Anthropic. La biblioteca local sí está implementada. La investigación de doblaje no obtuvo una medición de audio. La cobertura documental extensa del reparto no equivale a una auditoría audiovisual de todos los episodios ni a biografías sin lagunas.
+La [representación de ensayo «La alarma de los números»](representaciones/la-alarma-de-los-numeros.md) acredita login OAuth real de OpenAI Codex, turnos de Max y Hymie con memorias independientes y observación del Director. La vista en vivo muestra plano y conversación confirmada, con SSE y consulta de respaldo. El episodio acredita una resolución del intercambio; su cierre estructural ya fue confirmado y la autonomía integral sigue pendiente; la interfaz gráfica completa y las voces generadas siguen pendientes. No se acredita aquí login real de Anthropic. La biblioteca local sí está implementada. La investigación de doblaje no obtuvo una medición de audio. La cobertura documental extensa del reparto no equivale a una auditoría audiovisual de todos los episodios ni a biografías sin lagunas.
 
 - [Preflight durable](auditoria/preflight-durable.md): comprobación explícita del corte guardado, recuperación y obsolescencia, sin inicio ni inferencia implícitos.
 
@@ -123,3 +135,22 @@ La [representación de ensayo «La alarma de los números»](representaciones/la
 - [Fuentes exactas de preparación — fundamento C52](auditoria/fuentes-de-preparacion.md), [entrevista](auditoria/dialogo-adaptaciones-preparacion.md) y [respuestas](auditoria/adaptaciones-preparacion-respuestas.md): biblioteca readonly de adaptaciones, resolver de fuente congelada y admisión en preparación/preflight/Configurador. El [selector C53](auditoria/seleccion-de-fuentes.md) añade elección gráfica explícita y portabilidad comprobada; el [editor C54](auditoria/edicion-de-expedientes.md) permite edición integral con procedencia y adaptación inmutable; aceptación visual completa sigue pendiente.
 
 - [Llamadas sin límite y admisión del inicio](auditoria/llamadas-sin-limite.md): pedido posterior del usuario, semántica null, contadores y controles operativos conservados.
+
+- [Cierre del ensayo y preflight vencido](auditoria/cierre-ensayo-y-preflight.md): guard por generación vigente, diagnóstico bloqueado legible y escena/episodio cerrados desde la interfaz.
+
+- [Preparación nueva y función completa con ICM](auditoria/preparacion-nueva-y-contexto-icm.md): recorrido GUI real, reparaciones de sesión/preflight/evidencia y límites.
+- [Una pregunta a tiempo · transcripción y cierre](representaciones/pregunta-a-tiempo-icm.md): once emisiones, desenlace y episodio cerrado desde preparación nueva.
+
+- [Configurador anterior a Ready · diseño completo](diseno/configurador-preparacion.md): propuestas por puesta/actor, autoridad del borrador y dependencias pendientes de presupuesto y persistencia.
+
+- [Inspector privado ICM y base de Configurador previo a Ready](auditoria/inspector-icm-y-base-configurador.md): integridad por paquete, aceptación gráfica y límites de la base todavía no ejecutable.
+
+- [El paquete equivocado · función completa sin Fibonacci](representaciones/el-paquete-equivocado.md).
+- [Exportación a guion Fountain](auditoria/exportacion-guion.md) y [resultados guardados](output/README.md).
+
+- [Configurador antes de Ready](auditoria/configurador-preparacion.md): presupuesto compartido, propuesta, curaciones parciales, revisión y aplicación explícita; estado de verificación y límites.
+- [Biografía dentro del personaje](auditoria/biografia-encarnada.md): historia extensa, deseos, metas y memoria propia en el contexto actoral, con validación y límites de curación.
+- [Resultado privado de los intentos](auditoria/resultado-privado-de-intentos.md): corrección de canales y continuidad cuando una acción actoral no se realiza, sin fabricar eventos públicos ni ciclos idénticos.
+- [El maletín bajo custodia](representaciones/el-maletin-bajo-custodia.md): ensayo real con entrega voluntaria, traslado entre salas, continuación en destino y guion exportado; final abierto y herramientas pendientes.
+- [Dejar objetos y acotaciones](auditoria/dejar-objetos-y-acotaciones.md): custodia, depósito situado, continuación y memoria; oferta, aceptación y vencimiento distinguibles en el guion.
+- [Entrega sin recibo](representaciones/entrega-sin-recibo.md): acuerdo, depósito, regreso, aviso y reconocimiento con OAuth real, desenlace observado, cierre y guion conservados.

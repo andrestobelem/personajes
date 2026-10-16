@@ -308,6 +308,15 @@ test('la vista diegética muestra el cover y sólo las experiencias del actor', 
   assert.doesNotMatch(JSON.stringify(recognizedView.view), new RegExp(ninetyNineId));
 });
 
+test('la vista distingue modalidad de canales gestuales sin agregar campos al canal de habla histórico', () => {
+  const snapshot = worldFixture();
+  const built = buildActorWorldView({snapshot, actorId: maxId, knowledge: emptyActorKnowledge({runId, actorId: maxId}), pendingPerceptions: [], ids: idSource(60_100)});
+  assert.equal(built.view.channels.find(channel => channel.label === 'Gestos')?.modality, 'visual');
+  const speech = built.view.channels.find(channel => channel.kind === 'speech');
+  assert.ok(speech);
+  assert.equal(Object.hasOwn(speech, 'modality'), false);
+});
+
 test('una circunstancia llega como experiencia situada sin atribuirla a un personaje ni exponer identificadores host', () => {
   const snapshot = worldFixture();
   const circumstance = {
@@ -661,6 +670,8 @@ test('la revisión exacta habilita emisión, pero la audiencia efectiva depende 
     assert.deepEqual(resolution.events[0].effectiveAudience, [ninetyNineId, fangId]);
   }
   assert.equal(resolution.perceptions.length, 2);
+  assert.equal(resolution.perceptions.some((perception) => perception.recipientCharacterId === maxId), false,
+    'la comunicación no genera autoeco para quien habló');
   assert.equal(resolution.newSnapshot.clock.instant, 200);
   assert.equal('delivery' in (resolution.perceptions[0] ?? {}), false);
 
@@ -779,6 +790,18 @@ test('una revisión obsoleta exige repercepción y una puerta cerrada bloquea el
   assert.deepEqual(blocked.newSnapshot, snapshot);
 
   const opened = WorldSnapshotSchema.parse({ ...snapshot, doors: snapshot.doors.map((door) => ({ ...door, state: 'open' })) });
+  const moved = resolveWorldAttempt({ snapshot: opened, attempt: { ...move, expectedRevision: opened.revision },
+    actorKnowledge: maxKnowledge, ids: idSource(4_500) });
+  assert.equal(moved.kind, 'applied');
+  if (moved.kind === 'applied') {
+    const event = moved.events.find((candidate) => candidate.kind === 'moved');
+    const ownPerception = moved.perceptions.find((perception) => perception.kind === 'worldEvent' && perception.recipientCharacterId === maxId);
+    assert.ok(event);
+    assert.ok(ownPerception?.kind === 'worldEvent');
+    assert.equal(ownPerception?.kind === 'worldEvent' ? ownPerception.eventId : undefined, event?.id,
+      'la percepción privada refiere el evento real del movimiento');
+    assert.equal(ownPerception?.kind === 'worldEvent' ? ownPerception.detail : undefined, 'Te desplazaste hacia Pasillo.');
+  }
   const withBlocker = WorldSnapshotSchema.parse({
     ...opened,
     entities: [...opened.entities, {
@@ -801,6 +824,8 @@ test('una oferta sólo reserva intención, se acepta con handle recibido y caduc
   assert.equal(offered.kind, 'applied');
   if (offered.kind !== 'applied') return;
   assert.equal(offered.events[0]?.kind, 'offerCreated');
+  assert.deepEqual(offered.perceptions.map((perception) => perception.recipientCharacterId), [ninetyNineId],
+    'la oferta continúa por su destinatario y no por un eco del emisor');
   assert.equal(offered.newSnapshot.inventory.find((entry) => entry.objectEntityId === envelopeEntity)?.location.kind, 'heldBy');
   assert.equal(offered.newSnapshot.offers[0]?.state, 'open');
 
@@ -839,6 +864,12 @@ test('una oferta sólo reserva intención, se acepta con handle recibido y caduc
   assert.equal(accepted.kind, 'applied');
   if (accepted.kind !== 'applied') return;
   assert.equal(accepted.events[0]?.kind, 'offerAccepted');
+  const acceptedEvent = accepted.events.find((event) => event.kind === 'offerAccepted');
+  const ownAcceptance = accepted.perceptions.find((perception) => perception.kind === 'worldEvent' && perception.recipientCharacterId === ninetyNineId);
+  assert.ok(ownAcceptance?.kind === 'worldEvent');
+  assert.equal(ownAcceptance?.kind === 'worldEvent' ? ownAcceptance.eventId : undefined, acceptedEvent?.id,
+    'aceptar genera una percepción propia ligada al evento confirmado');
+  assert.equal(ownAcceptance?.kind === 'worldEvent' ? ownAcceptance.detail : undefined, 'Aceptaste la oferta y ahora tienes Sobre.');
   assert.deepEqual(accepted.newSnapshot.inventory.find((entry) => entry.objectEntityId === envelopeEntity)?.location, { kind: 'heldBy', entityId: ninetyNineEntity });
   assert.equal(accepted.newSnapshot.offers[0]?.state, 'accepted');
 
@@ -875,6 +906,144 @@ test('una oferta sólo reserva intención, se acepta con handle recibido y caduc
   assert.deepEqual(refused.newSnapshot, waiting.newSnapshot);
 });
 
+test('tomar deja una percepción propia vinculada al evento de inventario', () => {
+  const snapshot = WorldSnapshotSchema.parse({
+    ...worldFixture(),
+    inventory: [{ objectEntityId: radioEntity, location: { kind: 'atPlace', placeId: roomId, position: { x: 1.5, y: 1 } }, revision: 0 },
+      { objectEntityId: envelopeEntity, location: { kind: 'heldBy', entityId: maxEntity }, revision: 0 }],
+  });
+  const result = resolveWorldAttempt({ snapshot, actorKnowledge: maxKnowledge, ids: idSource(8_500),
+    attempt: attempt({ kind: 'take', attemptId: uuid(94), runId, actorId: maxId, expectedRevision: snapshot.revision, objectHandle: 'h-radio' }) });
+  assert.equal(result.kind, 'applied');
+  if (result.kind !== 'applied') return;
+  const event = result.events.find((candidate) => candidate.kind === 'objectTaken');
+  const ownPerception = result.perceptions.find((perception) => perception.kind === 'worldEvent' && perception.recipientCharacterId === maxId);
+  assert.ok(event);
+  assert.ok(ownPerception?.kind === 'worldEvent');
+  assert.equal(ownPerception?.kind === 'worldEvent' ? ownPerception.eventId : undefined, event?.id);
+  assert.equal(ownPerception?.kind === 'worldEvent' ? ownPerception.detail : undefined, 'Tomaste Radio.');
+});
+
+test('putDown transfiere una posesión en la posición propia, invalida ofertas y permite una nueva toma', () => {
+  const legacy = worldFixture();
+  const legacyResult = resolveWorldAttempt({ snapshot: legacy,
+    attempt: attempt({ kind: 'putDown', attemptId: uuid(9_400), runId, actorId: maxId,
+      expectedRevision: legacy.revision, objectHandle: 'h-envelope' }),
+    actorKnowledge: maxKnowledge, ids: idSource(9_400) });
+  assert.equal(legacyResult.kind, 'notApplied', 'un personaje existente no recibe la capacidad nueva por defecto');
+  if (legacyResult.kind === 'notApplied') assert.equal(legacyResult.reason, 'capability-missing');
+
+  const initial = WorldSnapshotSchema.parse({
+    ...legacy,
+    connections: [{ from: roomId, to: fileId, durationMs: 500, arrivalPoint: { x: 8, y: 8 }, doorId: null }],
+    entities: legacy.entities.map((entity) => entity.kind !== 'character' ? entity : {
+      ...entity,
+      ...(entity.characterId === fangId ? { presence: { kind: 'absent' as const } } : {}),
+      ...(entity.characterId === maxId || entity.characterId === ninetyNineId
+        ? { capabilities: [...entity.capabilities, 'putDown' as const] } : {}),
+    }),
+  });
+  const maxOffers = resolveWorldAttempt({ snapshot: initial,
+    attempt: attempt({ kind: 'offer', attemptId: uuid(9_401), runId, actorId: maxId,
+      expectedRevision: initial.revision, objectHandle: 'h-envelope', recipientHandle: 'h-99' }),
+    actorKnowledge: maxKnowledge, ids: idSource(9_410) });
+  assert.equal(maxOffers.kind, 'applied');
+  if (maxOffers.kind !== 'applied') return;
+  const receivedOffer = maxOffers.perceptions.find((perception) => perception.kind === 'offer');
+  assert.ok(receivedOffer?.kind === 'offer');
+  if (receivedOffer?.kind !== 'offer') return;
+  const recipientView = buildActorWorldView({ snapshot: maxOffers.newSnapshot, actorId: ninetyNineId,
+    knowledge: knowledge(ninetyNineId, [
+      { kind: 'entity', handle: 'h-envelope', entityId: envelopeEntity },
+      { kind: 'entity', handle: 'h-max', entityId: maxEntity },
+    ]), pendingPerceptions: [receivedOffer], ids: idSource(9_420) });
+  const offerHandle = recipientView.view.offers[0]?.handle;
+  assert.ok(offerHandle);
+  const accepted = resolveWorldAttempt({ snapshot: maxOffers.newSnapshot,
+    attempt: attempt({ kind: 'acceptOffer', attemptId: uuid(9_421), runId, actorId: ninetyNineId,
+      expectedRevision: maxOffers.newSnapshot.revision, offerHandle }),
+    actorKnowledge: recipientView.knowledge, ids: idSource(9_430) });
+  assert.equal(accepted.kind, 'applied');
+  if (accepted.kind !== 'applied') return;
+
+  const unauthorized = resolveWorldAttempt({ snapshot: accepted.newSnapshot,
+    attempt: attempt({ kind: 'putDown', attemptId: uuid(9_431), runId, actorId: maxId,
+      expectedRevision: accepted.newSnapshot.revision, objectHandle: 'h-envelope' }),
+    actorKnowledge: maxKnowledge, ids: idSource(9_432) });
+  assert.equal(unauthorized.kind, 'notApplied');
+  if (unauthorized.kind === 'notApplied') assert.equal(unauthorized.reason, 'object-not-available');
+  assert.deepEqual(unauthorized.events, [], 'un no propietario no mueve ni genera un hecho');
+  assert.deepEqual(unauthorized.perceptions, []);
+  assert.deepEqual(unauthorized.newSnapshot, accepted.newSnapshot);
+
+  const ninetyNineKnowledge = knowledge(ninetyNineId, [
+    { kind: 'entity', handle: 'h-envelope', entityId: envelopeEntity },
+    { kind: 'entity', handle: 'h-max', entityId: maxEntity },
+    { kind: 'place', handle: 'p-file', placeId: fileId },
+  ]);
+  const reoffered = resolveWorldAttempt({ snapshot: accepted.newSnapshot,
+    attempt: attempt({ kind: 'offer', attemptId: uuid(9_433), runId, actorId: ninetyNineId,
+      expectedRevision: accepted.newSnapshot.revision, objectHandle: 'h-envelope', recipientHandle: 'h-max' }),
+    actorKnowledge: ninetyNineKnowledge, ids: idSource(9_434) });
+  assert.equal(reoffered.kind, 'applied');
+  if (reoffered.kind !== 'applied') return;
+
+  const placed = resolveWorldAttempt({ snapshot: reoffered.newSnapshot,
+    attempt: attempt({ kind: 'putDown', attemptId: uuid(9_435), runId, actorId: ninetyNineId,
+      expectedRevision: reoffered.newSnapshot.revision, objectHandle: 'h-envelope' }),
+    actorKnowledge: ninetyNineKnowledge, ids: idSource(9_440) });
+  assert.equal(placed.kind, 'applied');
+  if (placed.kind !== 'applied') return;
+  const placementEvent = placed.events.find((event) => event.kind === 'objectPlaced');
+  assert.ok(placementEvent?.kind === 'objectPlaced');
+  if (placementEvent?.kind !== 'objectPlaced') return;
+  assert.deepEqual({ entityId: placementEvent.entityId, objectEntityId: placementEvent.objectEntityId,
+    placeId: placementEvent.placeId, position: placementEvent.position },
+    { entityId: ninetyNineEntity, objectEntityId: envelopeEntity, placeId: roomId, position: { x: 2, y: 1 } });
+  assert.deepEqual(placed.newSnapshot.inventory.find((entry) => entry.objectEntityId === envelopeEntity)?.location,
+    { kind: 'atPlace', placeId: roomId, position: { x: 2, y: 1 } });
+  assert.ok(placed.events.some((event) => event.kind === 'offerInvalidated'
+    && event.objectEntityId === envelopeEntity && event.cause === 'objectUnavailable'));
+  const recipients = placed.perceptions.filter((perception) => perception.kind === 'worldEvent')
+    .map((perception) => perception.recipientCharacterId).sort();
+  assert.deepEqual(recipients, [maxId, ninetyNineId].sort(), 'sólo el actor y el testigo presente reciben percepción');
+  const ownPerception = placed.perceptions.find((perception) => perception.kind === 'worldEvent'
+    && perception.recipientCharacterId === ninetyNineId);
+  assert.equal(ownPerception?.kind === 'worldEvent' ? ownPerception.detail : undefined, 'Dejaste Sobre en Sala de control.');
+
+  const moved = resolveWorldAttempt({ snapshot: placed.newSnapshot,
+    attempt: attempt({ kind: 'move', attemptId: uuid(9_441), runId, actorId: ninetyNineId,
+      expectedRevision: placed.newSnapshot.revision, destinationHandle: 'p-file' }),
+    actorKnowledge: ninetyNineKnowledge, ids: idSource(9_442) });
+  assert.equal(moved.kind, 'applied');
+  if (moved.kind !== 'applied') return;
+  assert.deepEqual(moved.newSnapshot.inventory.find((entry) => entry.objectEntityId === envelopeEntity)?.location,
+    { kind: 'atPlace', placeId: roomId, position: { x: 2, y: 1 } }, 'el objeto queda donde lo dejó el actor al alejarse');
+
+  const taken = resolveWorldAttempt({ snapshot: moved.newSnapshot,
+    attempt: attempt({ kind: 'take', attemptId: uuid(9_443), runId, actorId: maxId,
+      expectedRevision: moved.newSnapshot.revision, objectHandle: 'h-envelope' }),
+    actorKnowledge: maxKnowledge, ids: idSource(9_444) });
+  assert.equal(taken.kind, 'applied', 'otro participante puede tomarlo donde quedó');
+  if (taken.kind === 'applied') {
+    assert.deepEqual(taken.newSnapshot.inventory.find((entry) => entry.objectEntityId === envelopeEntity)?.location,
+      { kind: 'heldBy', entityId: maxEntity });
+  }
+
+  const nonPortable = WorldSnapshotSchema.parse({ ...initial,
+    inventory: initial.inventory.map((entry) => entry.objectEntityId === radioEntity
+      ? { ...entry, location: { kind: 'heldBy' as const, entityId: maxEntity } } : entry),
+    entities: initial.entities.map((entity) => entity.kind === 'object' && entity.entityId === radioEntity
+      ? { ...entity, portable: false } : entity),
+  });
+  const refused = resolveWorldAttempt({ snapshot: nonPortable,
+    attempt: attempt({ kind: 'putDown', attemptId: uuid(9_445), runId, actorId: maxId,
+      expectedRevision: nonPortable.revision, objectHandle: 'h-radio' }),
+    actorKnowledge: maxKnowledge, ids: idSource(9_446) });
+  assert.equal(refused.kind, 'notApplied');
+  if (refused.kind === 'notApplied') assert.equal(refused.reason, 'object-not-portable');
+});
+
 test('el catálogo cerrado de dispositivo fija el efecto y el reloj ficticio avanza por duración', () => {
   const snapshot = worldFixture();
   const unknownOperation = attempt({
@@ -893,6 +1062,11 @@ test('el catálogo cerrado de dispositivo fija el efecto y el reloj ficticio ava
   const powered = resolveWorldAttempt({ snapshot, attempt: power, actorKnowledge: maxKnowledge, ids: idSource(12_000) });
   assert.equal(powered.kind, 'applied');
   if (powered.kind !== 'applied') return;
+  const powerEvent = powered.events.find((event) => event.kind === 'deviceUsed');
+  const ownPowerUse = powered.perceptions.find((perception) => perception.kind === 'worldEvent' && perception.recipientCharacterId === maxId);
+  assert.ok(ownPowerUse?.kind === 'worldEvent');
+  assert.equal(ownPowerUse?.kind === 'worldEvent' ? ownPowerUse.eventId : undefined, powerEvent?.id);
+  assert.equal(ownPowerUse?.kind === 'worldEvent' ? ownPowerUse.detail : undefined, 'Usaste Panel de luz: Encender panel.');
   assert.equal(powered.newSnapshot.clock.instant, 100);
   const device = powered.newSnapshot.entities.find((entity) => entity.entityId === deviceEntity);
   assert.equal(device?.kind === 'device' ? device.power : undefined, 'on');
@@ -904,8 +1078,25 @@ test('el catálogo cerrado de dispositivo fija el efecto y el reloj ficticio ava
   const lit = resolveWorldAttempt({ snapshot: powered.newSnapshot, attempt: light, actorKnowledge: maxKnowledge, ids: idSource(13_000) });
   assert.equal(lit.kind, 'applied');
   if (lit.kind !== 'applied') return;
+  const lightEvent = lit.events.find((event) => event.kind === 'deviceUsed');
+  const ownLightUse = lit.perceptions.find((perception) => perception.kind === 'worldEvent' && perception.recipientCharacterId === maxId);
+  assert.ok(ownLightUse?.kind === 'worldEvent');
+  assert.equal(ownLightUse?.kind === 'worldEvent' ? ownLightUse.eventId : undefined, lightEvent?.id);
   assert.equal(lit.newSnapshot.clock.instant, 250);
   assert.equal(lit.newSnapshot.places.find((place) => place.id === roomId)?.lighting, 'bright');
+});
+
+test('esperar y descansar no generan una percepción propia que reactive al actor', () => {
+  const snapshot = worldFixture();
+  for (const [index, kind] of (['wait', 'rest'] as const).entries()) {
+    const result = resolveWorldAttempt({ snapshot, actorKnowledge: maxKnowledge, ids: idSource(13_500 + index * 100),
+      attempt: attempt({ kind, attemptId: uuid(13_600 + index), runId, actorId: maxId,
+        expectedRevision: snapshot.revision, durationMs: 100 }) });
+    assert.equal(result.kind, 'applied');
+    if (result.kind !== 'applied') continue;
+    assert.equal(result.events[0]?.kind, kind === 'wait' ? 'waited' : 'rested');
+    assert.deepEqual(result.perceptions, []);
+  }
 });
 
 test('los cambios subjetivos sólo actualizan recuerdos propios con evidencia propia', () => {
@@ -970,8 +1161,10 @@ test('una intervención humana se convierte en evento y testimonio sólo para qu
     pendingPerceptions: resolution.perceptions.filter((perception) => perception.recipientCharacterId === maxId),
     ids: idSource(21_000),
   }).view;
+  const perceivedSpeaker = maxView.humanParticipants?.find((participant) => participant.label === 'Alex');
+  assert.ok(perceivedSpeaker, 'el testimonio recibido habilita un destinatario humano situado');
   assert.deepEqual(maxView.inbox.at(-1), {
-    kind: 'testimony', speakerDisplayName: 'Alex', channelLabel: 'Voz cercana',
+    kind: 'testimony', speakerHandle: perceivedSpeaker.handle, speakerDisplayName: 'Alex', channelLabel: 'Voz cercana',
     content: { kind: 'speech', text: 'Encontré el informe, pero no sé si es auténtico.' }, fictitiousAt: 200,
   });
   assert.equal(JSON.stringify(maxView).includes('Historia privada completa'), false);

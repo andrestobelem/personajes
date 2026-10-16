@@ -8,6 +8,7 @@ import {
   DramaticStructureViewSchema,
   DramaticStructureWriteSchema,
 } from '../domain/world-journal.ts';
+import { DramaticStructurePresentationSchema } from '../domain/dramatic-structure.ts';
 import { RunIdSchema, RevisionSchema, WorldSeqSchema } from '../domain/values.ts';
 import { WorldSnapshotSchema } from '../domain/world-schema.ts';
 
@@ -31,21 +32,38 @@ const StructureLookupRequestSchema = z.strictObject({
 });
 
 type Journal = Pick<ReturnType<typeof openJournal>,
-  'readDramaticStructure' | 'readDramaticStructureAtCut' | 'readDramaticStructureEvents' | 'readDramaticStructureOperation' | 'applyDramaticStructureCommand' | 'loadWorld'>;
+  'readDramaticStructure' | 'readDramaticStructureAtCut' | 'readDramaticStructureEvents' | 'readDramaticStructureOperation' | 'applyDramaticStructureCommand' | 'loadWorld' | 'readInspectorWorldCut'>;
+
+function presentStructure(rawStructure: unknown, rawSnapshot: unknown) {
+  const structure = DramaticStructureViewSchema.parse(rawStructure);
+  const snapshot = WorldSnapshotSchema.parse(rawSnapshot);
+  const assigned = new Set(structure.episodes.flatMap((episode) => episode.sceneIds));
+  for (const scene of structure.unassignedLegacyScenes) assigned.add(scene.id);
+  return DramaticStructurePresentationSchema.parse({
+    ...structure,
+    sceneLabels: snapshot.scenes.filter((scene) => assigned.has(scene.id)).map(({ id, label }) => ({ id, label })),
+  });
+}
 
 /** Operator-facing dramatic structure, backed only by the journal's durable receipts. */
 export function createDramaticStructureApplication(input: { journal: Journal }) {
   function read(rawInput: unknown) {
     const request = StructureReadRequestSchema.parse(rawInput);
     const value = input.journal.readDramaticStructure(request);
-    return value === undefined ? undefined : DramaticStructureViewSchema.parse(value);
+    if (value === undefined) return undefined;
+    const snapshot = input.journal.loadWorld(request);
+    if (snapshot === undefined) return undefined;
+    return presentStructure(value, snapshot);
   }
 
   function readAtCut(rawInput: unknown) {
     const request = StructureCutReadRequestSchema.parse(rawInput);
     const value = input.journal.readDramaticStructureAtCut(request);
-    return value === undefined ? undefined : {
-      ...DramaticStructureViewSchema.parse(value.structure),
+    if (value === undefined) return undefined;
+    const cut = input.journal.readInspectorWorldCut({ runId: request.runId, atCommitIndex: value.commitIndex });
+    if (cut === undefined) return undefined;
+    return {
+      ...presentStructure(value.structure, cut.snapshot),
       worldRevision: RevisionSchema.parse(value.worldRevision),
       worldSeq: WorldSeqSchema.parse(value.worldSeq),
       commitIndex: RevisionSchema.parse(value.commitIndex),

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { InventoryItemIdSchema } from '../domain/preparation.ts';
+import { InventoryItemIdSchema, WorldActionSchema } from '../domain/preparation.ts';
 import { WorldSnapshotDraftSchema, type RunConfigurationDraft } from '../domain/production.ts';
 import { WorldSnapshotSchema, type WorldEntity } from '../domain/world-schema.ts';
 import { changeDraftField } from './draft-form.ts';
@@ -131,7 +131,7 @@ export const CharacterPlacementSchema = z.strictObject({
   routine: WorldSnapshotSchema.shape.entities.element.options[0].shape.routine,
   recognitionConfirmed: z.literal(true),
   recognizedCharacterIds: z.array(WorldSnapshotSchema.shape.entities.element.options[0].shape.characterId).max(10_000),
-  additionalCapabilities: z.array(z.enum(['observe', 'take', 'offer', 'wait', 'rest'])).max(5),
+  additionalCapabilities: z.array(WorldActionSchema).max(WorldActionSchema.options.length),
   materialChoices: z.array(z.strictObject({ itemId: InventoryItemIdSchema, visibleLabel: z.string().trim().min(1).max(500), physicalDescription: z.string().max(2_000), collisionRadius: z.number().finite().min(0).max(100), blocksMovement: z.boolean(), portable: z.boolean() })).max(10_000).default([]),
 });
 export type CharacterPlacement = z.infer<typeof CharacterPlacementSchema>;
@@ -152,7 +152,7 @@ export function placePreparedCharacter(input: { draft: RunConfigurationDraft; pl
   const capabilities = prepared.capabilities.value.flatMap((capability) => {
     switch (capability.kind) {
       case 'speech': return ['speak']; case 'gesture': return ['gesture']; case 'movement': return ['move'];
-      case 'nonverbal-sound': return ['animalSound']; case 'operate-device': return ['useDevice']; case 'other': return [];
+      case 'nonverbal-sound': return ['animalSound']; case 'operate-device': return ['useDevice']; case 'world-action': return [capability.action]; case 'other': return [];
       default: { const exhaustive: never = capability; return exhaustive; }
     }
   });

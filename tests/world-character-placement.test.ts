@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DossierSchema } from '../src/domain/catalog.ts';
-import { ContinuityContextSchema, GoalIdSchema, CapabilityIdSchema, InventoryItemIdSchema } from '../src/domain/preparation.ts';
+import { ContinuityContextSchema, GoalIdSchema, CapabilityIdSchema, InventoryItemIdSchema, WorldActionSchema } from '../src/domain/preparation.ts';
+import { DesireIdSchema } from '../src/domain/character-biography.ts';
 import { CharacterIdSchema } from '../src/domain/values.ts';
 import { createEmptyRunConfigurationDraft } from '../src/domain/production.ts';
 import { applyCuratedCharacter, characterCurationForm, curateCharacter } from '../src/web/character-preparation.ts';
@@ -13,17 +14,26 @@ const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0
 const actorId = CharacterIdSchema.parse('fixture-robot');
 const continuity = ContinuityContextSchema.parse({ continuityId: 'synthetic-cut', revision: 1, contentHash: 'a'.repeat(64), kind: 'adaptation', label: 'Synthetic placement test only', milestones: [], inclusions: [] });
 const dossier = DossierSchema.parse({ schemaVersion: 1, characterId: actorId, displayName: 'Synthetic robot', aliases: [], performers: ['RESEARCH-PRIVATE'], markdown: '# RESEARCH-SECRET-FUTURE', sections: [], sourceRefs: [], unknowns: [], contradictions: [], adaptations: [], avatarRef: { kind: 'unbound' }, voiceRecipe: { kind: 'unreviewed' }, revision: 1, contentHash: 'b'.repeat(64), curationStatus: 'unreviewed', unknownSections: [] });
-function preparedFixture(inventory = false) {
-  return curateCharacter({ dossier, continuity, recordedAt: '2026-10-14T00:00:00Z', uuid: () => uuid(90), form: { ...characterCurationForm(), selfReference: 'Synthetic robot', selfConcept: 'An explicitly authored robot fixture.', dispositions: 'Literal', voice: 'Brief synthetic fixture speech.', provenanceKind: 'curator-declaration', reason: 'Test fixture only', noInitialExperiences: true,
+function preparedFixture(inventory = false, includeWorldAction = false) {
+  return curateCharacter({ dossier, continuity, recordedAt: '2026-10-14T00:00:00Z', uuid: () => uuid(90), form: { ...characterCurationForm(), selfReference: 'Synthetic robot', selfConcept: 'An explicitly authored robot fixture.', dispositions: 'Literal', lifeNarrative: 'Synthetic life story for a placement test, with no canon or research claims.', lifeUnknowns: 'No earlier history is established by this fixture.', voice: 'Brief synthetic fixture speech.', provenanceKind: 'curator-declaration', reason: 'Test fixture only', noInitialExperiences: true,
+    desires: [{ desireId: DesireIdSchema.parse('synthetic-desire'), description: 'Understand the test room.', stakes: 'Choose a suitable next action.', tension: 'Some contents of the scene remain unknown.', goalIds: [GoalIdSchema.parse('own-goal')] }],
     goals: [{ goalId: GoalIdSchema.parse('own-goal'), kind: 'durable', ownerCharacterId: actorId, desiredOutcome: 'x'.repeat(3000), priority: 0.6, status: 'achieved', evidenceRefs: [], reviewConditions: [] }],
-    capabilities: [{ capabilityId: CapabilityIdSchema.parse('own-speech'), kind: 'speech', description: 'Speaks as curated.' }, { capabilityId: CapabilityIdSchema.parse('own-move'), kind: 'movement', description: 'Moves as curated.' }],
+    capabilities: [
+      { capabilityId: CapabilityIdSchema.parse('own-speech'), kind: 'speech', description: 'Speaks as curated.' },
+      { capabilityId: CapabilityIdSchema.parse('own-move'), kind: 'movement', description: 'Moves as curated.' },
+      ...(includeWorldAction ? [
+        { capabilityId: CapabilityIdSchema.parse('own-observe'), kind: 'world-action' as const, action: 'observe' as const, description: 'The prose mentions take; only observe is granted.' },
+        { capabilityId: CapabilityIdSchema.parse('own-put-down'), kind: 'world-action' as const, action: 'putDown' as const, description: 'Can put down an object currently held at the actor position.' },
+        { capabilityId: CapabilityIdSchema.parse('own-other'), kind: 'other' as const, description: 'take wait offer rest' },
+      ] : []),
+    ],
     inventory: inventory ? [{ itemId: InventoryItemIdSchema.parse('private-lot'), name: 'PRIVATE-NAME-' + 'x'.repeat(300), description: 'PRIVATE-OBJECT-CONTENTS', quantity: 5, condition: 'unknown' }] : [],
     relationships: [{ ownerCharacterId: actorId, otherCharacterId: CharacterIdSchema.parse('another-fixture'), otherReference: 'A privately known counterpart', descriptionFromOwnerPerspective: 'A relationship whose confidence must not become an invented stance.', confidence: 0.8 }],
   } });
 }
-function placementDraft(inventory = false) {
+function placementDraft(inventory = false, includeWorldAction = false) {
   const empty = createEmptyRunConfigurationDraft({ runId: uuid(1), revision: 0 });
-  let draft = applyCuratedCharacter({ draft: changeDraftField({ draft: empty, field: 'continuity', value: continuity }), character: preparedFixture(inventory) });
+  let draft = applyCuratedCharacter({ draft: changeDraftField({ draft: empty, field: 'continuity', value: continuity }), character: preparedFixture(inventory, includeWorldAction) });
   const moment = setDraftMoment({ draft, dateTime: '1965-01-01T12:00', offset: '-05:00' });
   assert.equal(moment.kind, 'applied'); if (moment.kind !== 'applied') throw new Error('Synthetic moment must parse'); draft = moment.draft;
   draft = applyWorldSection({ draft, section: 'places', value: [{ id: 'fixture-room', name: 'Synthetic room', description: 'Test only', width: 10, height: 8, lighting: 'normal' }] });
@@ -55,6 +65,13 @@ test('curation to explicit physical placement reaches a valid Ready candidate wi
   assert.ok(!JSON.stringify(view.view).includes('otherCharacterId'));
   assert.ok(!JSON.stringify(view.view).includes('RESEARCH-PRIVATE'));
 });
+test('manual placement maps only the chosen prepared world action, never capability prose', () => {
+  let counter = 250;
+  const placed = placePreparedCharacter({ draft: placementDraft(false, true), placement, uuid: () => uuid(counter++) });
+  const actor = worldCandidate(placed).entities?.find((entity) => entity.kind === 'character'); assert.ok(actor?.kind === 'character');
+  assert.deepEqual(actor.capabilities, ['speak', 'move', 'observe', 'putDown']);
+  assert.ok(!actor.capabilities.includes('take'));
+});
 test('placement refuses unprepared actors, implicit recognition, duplicates and out-of-map positions', () => {
   const draft = placementDraft(); let calls = 0; const ids = () => { calls++; return uuid(calls + 100); };
   assert.throws(() => placePreparedCharacter({ draft, placement: { ...placement, characterId: 'not-prepared' }, uuid: ids }));
@@ -67,6 +84,14 @@ test('placement refuses unprepared actors, implicit recognition, duplicates and 
   const actor = worldCandidate(placed).entities?.[0]; assert.ok(actor);
   assert.ok(actor.kind === 'character' && actor.capabilities.includes('observe'));
   assert.ok(!WorldCharacterSchema.safeParse({ ...actor, species: 'animal', capabilities: ['speak'] }).success);
+});
+
+test('placement admite todas las acciones explícitas actuales, incluida dejar un objeto propio',()=>{
+  let next=500;
+  const placed=placePreparedCharacter({draft:placementDraft(),placement:{...placement,additionalCapabilities:WorldActionSchema.options},uuid:()=>uuid(next++)});
+  const actor=WorldSnapshotSchema.parse(worldCandidate(placed)).entities.find(entity=>entity.kind==='character');
+  assert.ok(actor?.kind==='character');
+  for(const action of WorldActionSchema.options)assert.ok(actor.capabilities.includes(action));
 });
 
 test('actor goals preserve subjective circumstances while hiding source links and direction milestones', () => {

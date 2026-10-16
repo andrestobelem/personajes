@@ -1,7 +1,7 @@
 /** Browser-safe human participation contracts, separate from host world projection. */
 import { z } from 'zod';
 import { CharacterIdSchema, FictionalInstantSchema, HumanParticipantIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema } from './values.ts';
-import { ChannelIdSchema, PlaceIdSchema, SceneIdSchema, WorldPointSchema } from './world-schema.ts';
+import { ChannelIdSchema, PlaceIdSchema, SceneIdSchema, HumanParticipantPresenceSchema } from './world-schema.ts';
 
 const Utf8TextSchema = (maxBytes: number, minCodepoints = 0) => z.string().min(minCodepoints).refine(
   (text) => !text.includes('\0') && new TextEncoder().encode(text).byteLength <= maxBytes,
@@ -17,23 +17,8 @@ export const HumanParticipantIdentitySchema = z.strictObject({
 });
 export type HumanParticipantIdentity = z.infer<typeof HumanParticipantIdentitySchema>;
 
-/** The fictional participant's configured location and speech channel for one run. */
-export const HumanParticipantPresenceSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('inScene'),
-    sceneId: SceneIdSchema,
-    placeId: PlaceIdSchema,
-    position: WorldPointSchema,
-    channelId: ChannelIdSchema,
-  }),
-  z.strictObject({
-    kind: z.literal('remote'),
-    placeId: PlaceIdSchema,
-    position: WorldPointSchema,
-    channelId: ChannelIdSchema,
-  }),
-]);
-export type HumanParticipantPresence = z.infer<typeof HumanParticipantPresenceSchema>;
+export { HumanParticipantPresenceSchema } from './world-schema.ts';
+export type { HumanParticipantPresence } from './world-schema.ts';
 
 export const HumanParticipantProfileSchema = z.strictObject({
   identity: HumanParticipantIdentitySchema,

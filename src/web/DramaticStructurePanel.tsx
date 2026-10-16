@@ -126,6 +126,7 @@ export function DramaticStructurePanel({
     const value = sceneName(event);
     if (value !== undefined) labels.set(value.id, value.label);
   }
+  for (const scene of structure?.sceneLabels ?? []) labels.set(scene.id, scene.label);
   for (const scene of structure?.unassignedLegacyScenes ?? []) labels.set(scene.id, scene.label);
   const allScenes = currentEpisode?.sceneIds ?? [];
   const sceneCuts = state.kind === 'ready' ? sceneCutsById(state.events) : new Map<string, SceneCuts>();
@@ -241,7 +242,8 @@ export function DramaticStructurePanel({
         {actDraft.length > 0 && <><ol>{actDraft.map((act, index) => <li key={`${index}:${act.title}`}>{act.title}: {act.sceneIds.map((id) => labels.get(id) ?? id).join(', ')} <button type="button" onClick={() => setActDraft((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Quitar</button></li>)}</ol>
           <button type="button" disabled={!canEdit} onClick={() => void submit({ kind: 'setEpisodeActs', episodeId: currentEpisode.episodeId, acts: actDraft }, 'La organización de actos')}>Guardar actos opcionales</button></>}
       </section>}
-      {!historical && pending !== null && <div className="dramatic-pending"><p>{pending.bodyLabel} no tiene confirmación visible. El reintento usa la misma clave y contenido.</p><button type="button" disabled={saving} onClick={() => void submit(pending.mutation, pending.bodyLabel, pending)}>Reintentar misma operación</button><button type="button" disabled={saving} onClick={() => { setPending(null); setMessage('Operación local descartada; se vuelve a leer el estado durable.'); setStructureRefresh((value) => value + 1); }}>Descartar y recargar</button></div>}
+      {!historical && saving && <p role="status">Confirmando la operación estructural…</p>}
+      {!historical && pending !== null && !saving && <div className="dramatic-pending"><p>{pending.bodyLabel} no tiene confirmación visible. El reintento usa la misma clave y contenido.</p><button type="button" onClick={() => void submit(pending.mutation, pending.bodyLabel, pending)}>Reintentar misma operación</button><button type="button" onClick={() => { setPending(null); setMessage('Operación local descartada; se vuelve a leer el estado durable.'); setStructureRefresh((value) => value + 1); }}>Descartar y recargar</button></div>}
       <details className="dramatic-event-log"><summary>Registro de cambios estructurales ({state.events.length})</summary><ol>{state.events.map((event) => <li key={event.operationId}><strong>Rev. {event.structureRevision}</strong> · {eventNames[event.kind]} · commit {event.commitIndex} · {new Date(event.recordedAt).toLocaleString()}{onSelectCommit !== undefined && <button type="button" onClick={() => onSelectCommit(event.commitIndex)}>Ver este corte</button>}</li>)}</ol></details>
       {!historical && !canEdit && <p className="muted">La estructura se puede editar en curso, en pausa, detenida o durante la preparación de una bifurcación, sin trabajos actorales activos.</p>}
     </>}

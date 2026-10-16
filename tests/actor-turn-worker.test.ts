@@ -304,7 +304,7 @@ function deterministicFactory(fixture: Fixture, options: { omitProposal?: boolea
           const tool = input.tools.find((item) => item.name === 'propose_action');
           assert.ok(tool);
           // The fake transport invokes the real tool exactly as the SDK would; unused SDK context is absent.
-          await Reflect.apply(tool.execute, tool, ['tool-fixture', { action: { kind: 'wait', durationMs: 1 } }]);
+          await Reflect.apply(tool.execute, tool, ['tool-fixture', { action: { kind: 'wait', durationMs: 1 }, nextInitiative: 'yield' }]);
         }
         await port.transitionReservation({ purpose, scope: prompt.scope, requestSeq: reservation.requestSeq, target: 'completed', wallTime: { clockEpochId: input.runtime.clockEpochId, monotonicNs: process.hrtime.bigint().toString() } });
         const leaf = frames.appendTerminal();
@@ -329,7 +329,9 @@ function worker(fixture: Fixture, session: ReturnType<typeof deterministicFactor
     continuista: { async review({ proposal }) { const response = review(proposal.version); return {
       kind: 'continuista', proposalId: proposal.proposalId, version: proposal.version,
       runId: proposal.runId, actorId: proposal.actorId, stateRevision: proposal.baseRevision,
-      exactContentHash: proposal.exactContentHash, verdict: response.verdict, complete: response.complete ?? true,
+      exactContentHash: proposal.exactContentHash,
+      ...(proposal.nextInitiative === undefined ? {} : { nextInitiative: proposal.nextInitiative }),
+      verdict: response.verdict, complete: response.complete ?? true,
       criterionCodes: response.criteria ?? ContinuistaCriterionSchema.options,
       ...(response.verdict === 'reformulate' ? { failedCriterionCodes: ['voice'] } : {}),
       evidenceRefs: response.evidence ?? ['fixture-context'],
@@ -407,6 +409,7 @@ test('worker usa SDK Pi real y tools/resultados/checkpoints reales con transport
       sessionFactory: sdk.factory, memoryForActor: () => ({ async recall() { return { source: 'ranked-recall', throughWorldSeq: WorldSeqSchema.parse(0), experiences: [], rejectedCount: 0 }; } }),
       continuista: { async review({ proposal }) { return { kind: 'continuista', proposalId: proposal.proposalId, version: proposal.version,
         runId, actorId, stateRevision: proposal.baseRevision, exactContentHash: proposal.exactContentHash,
+        ...(proposal.nextInitiative === undefined ? {} : { nextInitiative: proposal.nextInitiative }),
         verdict: 'allow', complete: true, criterionCodes: ContinuistaCriterionSchema.options, evidenceRefs: ['sdk-fixture'] }; } },
     });
     const result = await sdkWorker.run(fixture.claim);
@@ -475,6 +478,7 @@ test('reinicio entre aceptación y commit recupera propuesta exacta sin otra lla
       memoryForActor: () => ({ async recall() { return { source: 'ranked-recall', throughWorldSeq: WorldSeqSchema.parse(0), experiences: [], rejectedCount: 0 }; } }),
       continuista: { async review({ proposal }) { return { kind: 'continuista', proposalId: proposal.proposalId, version: proposal.version,
         runId, actorId, stateRevision: proposal.baseRevision, exactContentHash: proposal.exactContentHash,
+        ...(proposal.nextInitiative === undefined ? {} : { nextInitiative: proposal.nextInitiative }),
         verdict: 'allow', complete: true, criterionCodes: ContinuistaCriterionSchema.options, evidenceRefs: ['fixture-accepted'] }; } },
     });
     await assert.rejects(interrupted.run(fixture.claim), /crash-after-accept/);
@@ -538,6 +542,7 @@ test('el callback de entrega puede repetirse con un commit existente y la misma 
       memoryForActor: () => ({ async recall() { return { source: 'ranked-recall', throughWorldSeq: WorldSeqSchema.parse(0), experiences: [], rejectedCount: 0 }; } }),
       continuista: { async review({ proposal }) { return { kind: 'continuista', proposalId: proposal.proposalId, version: proposal.version,
         runId, actorId, stateRevision: proposal.baseRevision, exactContentHash: proposal.exactContentHash,
+        ...(proposal.nextInitiative === undefined ? {} : { nextInitiative: proposal.nextInitiative }),
         verdict: 'allow', complete: true, criterionCodes: ContinuistaCriterionSchema.options, evidenceRefs: ['fixture-delivery'] }; } },
       onCommitted({ scope, commit }) {
         attempts += 1;
@@ -574,7 +579,9 @@ function recoveryAdminFactory(fixture: Fixture, reformulate = false) {
           const proposal = context.payload.proposal;
           const response = { contextHash: context.contextHash, review: { kind: 'continuista', proposalId: proposal.proposalId,
             version: proposal.version, runId: proposal.runId, actorId: proposal.actorId, stateRevision: proposal.baseRevision,
-            exactContentHash: proposal.exactContentHash, verdict: reformulate ? 'reformulate' : 'allow',
+            exactContentHash: proposal.exactContentHash,
+            ...(proposal.nextInitiative === undefined ? {} : { nextInitiative: proposal.nextInitiative }),
+            verdict: reformulate ? 'reformulate' : 'allow',
             ...(reformulate ? { failedCriterionCodes: ['voice'] } : {}), criterionCodes: ContinuistaCriterionSchema.options,
             evidenceRefs: ['ctx:proposal', 'ctx:projection'], complete: true } };
           const tool = input.tools[0];
@@ -753,7 +760,7 @@ function sdkActorFactory(fixture: Fixture, controls?: { clock: NonNullable<Param
               requests += 1;
               const first = requests === 1;
               const message: AssistantMessage = { role: 'assistant', api: actualModel.api, provider: actualModel.provider, model: actualModel.id,
-                content: first ? [{ type: 'toolCall', id: 'local-proposal', name: 'propose_action', arguments: { action: { kind: 'wait', durationMs: 1 } } }] : [],
+                content: first ? [{ type: 'toolCall', id: 'local-proposal', name: 'propose_action', arguments: { action: { kind: 'wait', durationMs: 1 }, nextInitiative: 'yield' } }] : [],
                 stopReason: first ? 'toolUse' : 'stop', timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
               stream.push({ type: 'done', reason: first ? 'toolUse' : 'stop', message });
               return stream;
@@ -845,7 +852,7 @@ test('SDK actor + SQLite: deadline conserva concurrencia hasta late close y reap
     now = 35_500_000_000n;
     const profile = resolveReadyInferenceProfile(fixture.configuration);
     const late: AssistantMessage = { role: 'assistant', api: profile.api, provider: profile.provider, model: profile.model,
-      content: [{ type: 'toolCall', id: 'late-proposal', name: 'propose_action', arguments: { action: { kind: 'wait', durationMs: 1 } } }], stopReason: 'toolUse', timestamp: Date.now(),
+      content: [{ type: 'toolCall', id: 'late-proposal', name: 'propose_action', arguments: { action: { kind: 'wait', durationMs: 1 }, nextInitiative: 'yield' } }], stopReason: 'toolUse', timestamp: Date.now(),
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     source.push({ type: 'done', reason: 'toolUse', message: late });
     const result = await acting;

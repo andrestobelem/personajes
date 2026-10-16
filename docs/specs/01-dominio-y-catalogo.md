@@ -4,6 +4,12 @@ Versión 1.0. Requisitos principales: CAT01–09, ESC01–10, MEM02–04/10, DIR
 
 ## Tipos y fronteras
 
+### Recepción humana situada — revisión del 15 de octubre
+
+Según [ADR 0017](../adr/0017-recepcion-humana-situada.md), `WorldSnapshot.humanParticipants` es opcional y conserva únicamente ID, etiqueta pública y presencia. El perfil privado permanece en preparación. Las puestas nuevas incorporan el roster en el commit de inicio; una intervención posterior puede incorporar al emisor. Los cortes históricos sin ese campo permanecen sin registro, sin reconstruir presencia ni audiencia.
+
+El conocimiento actoral puede contener un binding humano opaco adquirido por percepción situada o testimonio recibido. El alias declarado no certifica identidad. `communicated` separa `requestedHumanAudience` y `effectiveHumanAudience` de las audiencias de personajes; son opcionales para preservar eventos anteriores. La recepción humana se resuelve por escena, canal, alcance y modalidad y no genera percepciones ICM humanas. La presencia en escena admite gestos visuales por canal compatible distinto del habla; la remota conserva su enlace configurado.
+
 Una definición de runtime schema por DTO y valor persistido, con tipos derivados. Entrada HTTP/JSON/archivo/SQLite/SDK es `unknown` hasta parsearse. Los objetos internos no son bolsas de opcionales: variantes tienen `kind`. IDs de corrida, personaje, escena, propuesta, evento, percepción, recuerdo y job tienen significado distinto y validación de frontera. UUIDs de corrida no se reciclan.
 
 Objetos compuestos: `Personaje` (núcleo/versiones), `Actor` (sesión/contexto/puertos), `Escenario` (estado/resolución/percepción), `Mensaje` (origen/canal/payload), `Objetivo`, `Capacidad`, `Memoria`, `Episodio`, `Acto`, `Escena` y `Línea dramática`. No `extends` en el dominio propio. Puertos funcionales/objetos inyectados mantienen SDK/SQL/HTTP fuera del dominio.

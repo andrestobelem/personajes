@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ExperienceSchema } from './experience.ts';
 import type { Experience } from './experience.ts';
+import type { HumanParticipantId } from './values.ts';
 import {
   CharacterIdSchema, EntityHandleSchema, EventIdSchema, ExperienceIdSchema,
   FictionalInstantSchema, HashSchema, PerceptionIdSchema, RevisionSchema,
@@ -26,7 +27,7 @@ import type {
   WorldDevice, WorldEntity, InventoryEntry, WorldScene,
   WorldOffer, WorldSnapshot, ActorHandleBinding, ActorKnowledge,
   CommunicationContent, WorldAttempt, WorldIdSource, WorldEvent,
-  WorldPerception, WorldResolution, ActorWorldView,
+  WorldPerception, WorldResolution, ActorWorldView, WorldHumanParticipant,
 } from './world-schema.ts';
 
 export * from './world-schema.ts';
@@ -217,6 +218,7 @@ function existingBinding(
   return knowledge.bindings.find((binding) => {
     if (binding.kind !== kind) return false;
     switch (binding.kind) {
+      case 'human': return binding.participantId === targetId;
       case 'entity': return binding.entityId === targetId;
       case 'place': return binding.placeId === targetId;
       case 'channel': return binding.channelId === targetId;
@@ -227,6 +229,32 @@ function existingBinding(
       }
     }
   });
+}
+
+function addHumanBinding(knowledge: ActorKnowledge, participantId: HumanParticipantId, ids: WorldIdSource, perceivedLabel?: string): { knowledge: ActorKnowledge; handle: z.infer<typeof EntityHandleSchema> } {
+  const existing = existingBinding(knowledge, 'human', participantId);
+  if (existing?.kind === 'human') {
+    return {
+      knowledge: perceivedLabel === undefined ? knowledge : {
+        ...knowledge, bindings: knowledge.bindings.map((binding) => binding === existing ? { ...existing, perceivedLabel } : binding),
+      },
+      handle: existing.handle,
+    };
+  }
+  const handle = EntityHandleSchema.parse(ids.entityHandle());
+  return { knowledge: { ...knowledge, bindings: [...knowledge.bindings, { kind: 'human', handle, participantId, ...(perceivedLabel === undefined ? {} : { perceivedLabel }) }] }, handle };
+}
+
+function humanInActiveScene(world: WorldSnapshot, human: WorldHumanParticipant): boolean {
+  return human.presence.kind === 'remote' || human.presence.sceneId === world.activeSceneId;
+}
+
+/** The configured speech link is exclusive for remote participants. Situated
+ * participants can additionally see visual gestures through compatible local
+ * channels; their speech profile does not remove their visual presence. */
+function humanCanReceiveChannel(human: WorldHumanParticipant, channel: WorldChannel): boolean {
+  return human.presence.channelId === channel.id
+    || (human.presence.kind === 'inScene' && channel.kind === 'gesture' && channel.modality === 'visual');
 }
 
 function addEntityBinding(knowledge: ActorKnowledge, entityId: z.infer<typeof WorldEntityIdSchema>, ids: WorldIdSource): { knowledge: ActorKnowledge; handle: z.infer<typeof EntityHandleSchema> } {
@@ -492,7 +520,7 @@ export function buildActorWorldView(input: {
     if (!supported) continue;
     const binding = addChannelBinding(knowledge, channel.id, input.ids);
     knowledge = binding.knowledge;
-    channels.push({ handle: binding.handle, kind: channel.kind, scope: channel.scope, label: channel.label });
+    channels.push({ handle: binding.handle, kind: channel.kind, ...(channel.kind === 'gesture' ? {modality: channel.modality} : {}), scope: channel.scope, label: channel.label });
   }
   const offers: z.infer<typeof ActorWorldViewSchema>['offers'] = [];
   const inbox: z.infer<typeof ActorWorldViewSchema>['inbox'] = [];
@@ -505,6 +533,14 @@ export function buildActorWorldView(input: {
         const binding = addEntityBinding(knowledge, subject.entityId, input.ids);
         knowledge = binding.knowledge;
         inbox.push({ kind: 'observation', subjectHandle: binding.handle, modality: perception.modality, detail: perception.detail, fictitiousAt: perception.fictitiousAt });
+        break;
+      }
+      case 'actionFeedback': {
+        inbox.push({
+          kind: 'actionFeedback', result: 'notApplied', reason: perception.reason,
+          message: 'Resultado de ejecución: la acción anterior no se aplicó al Escenario. Esto no es un suceso de la ficción; reconsidera tu próxima acción desde la percepción actual.',
+          fictitiousAt: perception.fictitiousAt,
+        });
         break;
       }
       case 'communication': {
@@ -531,8 +567,11 @@ export function buildActorWorldView(input: {
       case 'testimony': {
         const channel = snapshot.channels.find((item) => item.id === perception.channelId);
         if (channel?.kind !== 'speech' || !channel.enabled) break;
+        const human = snapshot.humanParticipants?.find((candidate) => candidate.participantId === perception.sourceParticipantId);
+        const binding = human === undefined ? undefined : addHumanBinding(knowledge, human.participantId, input.ids, perception.speakerDisplayName);
+        if (binding !== undefined) knowledge = binding.knowledge;
         inbox.push({
-          kind: 'testimony', speakerDisplayName: perception.speakerDisplayName,
+          kind: 'testimony', ...(binding === undefined ? {} : { speakerHandle: binding.handle }), speakerDisplayName: perception.speakerDisplayName,
           channelLabel: channel.label, content: perception.content, fictitiousAt: perception.fictitiousAt,
         });
         break;
@@ -573,6 +612,26 @@ export function buildActorWorldView(input: {
       }
     }
   }
+  const humanParticipants: NonNullable<ActorWorldView['humanParticipants']> = [];
+  for (const human of snapshot.humanParticipants ?? []) {
+    if (!humanInActiveScene(snapshot, human)) continue;
+    const visual = human.presence.kind === 'inScene' && canPerceive(snapshot, locationOfCharacter(observer), human.presence, 'visual');
+    let binding = existingBinding(knowledge, 'human', human.participantId);
+    if (binding === undefined && visual) {
+      const added = addHumanBinding(knowledge, human.participantId, input.ids);
+      knowledge = added.knowledge;
+      binding = existingBinding(knowledge, 'human', human.participantId);
+    }
+    if (binding?.kind !== 'human') continue;
+    const reachableChannels = snapshot.channels.filter((channel) => channel.enabled && humanCanReceiveChannel(human, channel)
+      && canPerceive(snapshot, locationOfCharacter(observer), human.presence, channel.kind === 'speech' ? 'auditory' : channel.modality, channel));
+    const handles = reachableChannels.flatMap((channel) => {
+      const bound = existingBinding(knowledge, 'channel', channel.id);
+      return bound?.kind === 'channel' ? [bound.handle] : [];
+    });
+    if (!visual && handles.length === 0) continue;
+    humanParticipants.push({ handle: binding.handle, label: binding.perceivedLabel ?? 'Persona sin nombre percibido', channels: handles });
+  }
   const environment: NonNullable<ActorWorldView['environment']> = [];
   for (const current of snapshot.environment ?? []) {
     const place = placeById(snapshot, current.placeId);
@@ -603,6 +662,7 @@ export function buildActorWorldView(input: {
       experiences: observer.mind.experiences.map((experience) => ({ experienceId: experience.experienceId, kind: experience.kind, content: experience.content, fictitiousAt: experience.fictitiousAt, confidence: experience.confidence })),
     },
     entities, channels, offers, inbox,
+    ...(snapshot.humanParticipants === undefined ? {} : { humanParticipants }),
     ...(environment.length === 0 ? {} : { environment }),
   });
   return { view, knowledge: ActorKnowledgeSchema.parse(knowledge) };
@@ -833,11 +893,17 @@ function visibleWitnesses(input: {
   ids: WorldIdSource;
   event: WorldEvent;
   detail: string;
+  selfActionDetail?: string;
 }): WorldPerception[] {
   const scene = input.world.scenes.find((candidate) => candidate.id === input.world.activeSceneId);
   if (scene === undefined) return [];
   const sourceLocation = { placeId: input.actor.placeId, position: input.actor.position };
   const output: WorldPerception[] = [];
+  if (input.selfActionDetail !== undefined) {
+    output.push(eventPerception({
+      ...input, recipient: input.actor, modality: 'visual', detail: input.selfActionDetail,
+    }));
+  }
   for (const characterId of scene.participantIds) {
     if (characterId === input.actor.characterId) continue;
     const recipient = characterById(input.world, characterId);
@@ -853,9 +919,16 @@ function requestedAudience(input: {
   knowledge: ActorKnowledge;
   world: WorldSnapshot;
   channel: WorldChannel;
-}): { kind: 'valid'; requested: z.infer<typeof CharacterIdSchema>[]; candidates: WorldCharacter[] } | { kind: 'invalid' } {
+}): { kind: 'valid'; requested: z.infer<typeof CharacterIdSchema>[]; candidates: WorldCharacter[]; requestedHumans: HumanParticipantId[]; humanCandidates: WorldHumanParticipant[] } | { kind: 'invalid' } {
   const requested: z.infer<typeof CharacterIdSchema>[] = [];
+  const requestedHumans: HumanParticipantId[] = [];
   for (const handle of input.attempt.audienceHandles) {
+    const humanBinding = input.knowledge.bindings.find((binding) => binding.kind === 'human' && binding.handle === handle);
+    if (humanBinding?.kind === 'human') {
+      if (!input.world.humanParticipants?.some((human) => human.participantId === humanBinding.participantId) || requestedHumans.includes(humanBinding.participantId)) return { kind: 'invalid' };
+      requestedHumans.push(humanBinding.participantId);
+      continue;
+    }
     const entityId = entityBindingForHandle(input.knowledge, handle);
     if (entityId === undefined) return { kind: 'invalid' };
     const entity = entityById(input.world, entityId);
@@ -864,8 +937,8 @@ function requestedAudience(input: {
   }
   const scene = input.world.scenes.find((candidate) => candidate.id === input.world.activeSceneId);
   if (scene === undefined) return { kind: 'invalid' };
-  if (input.channel.scope === 'addressed' && requested.length === 0) return { kind: 'invalid' };
-  if (input.channel.scope === 'broadcast' && requested.length > 0) return { kind: 'invalid' };
+  if (input.channel.scope === 'addressed' && requested.length + requestedHumans.length === 0) return { kind: 'invalid' };
+  if (input.channel.scope === 'broadcast' && requested.length + requestedHumans.length > 0) return { kind: 'invalid' };
   const requestedAudience = input.channel.scope === 'broadcast'
     ? scene.participantIds.filter((id) => id !== input.attempt.actorId)
     : requested;
@@ -882,7 +955,13 @@ function requestedAudience(input: {
     );
     return audible ? [recipient] : [];
   });
-  return { kind: 'valid', requested: requestedAudience, candidates };
+  const requestedHumanAudience = input.channel.scope === 'broadcast'
+    ? (input.world.humanParticipants ?? []).filter((human) => humanInActiveScene(input.world, human) && humanCanReceiveChannel(human, input.channel)).map((human) => human.participantId)
+    : requestedHumans;
+  const humanCandidates = (input.world.humanParticipants ?? []).filter((human) => requestedHumanAudience.includes(human.participantId)
+    && humanInActiveScene(input.world, human) && humanCanReceiveChannel(human, input.channel)
+    && canPerceive(input.world, locationOfCharacter(actor), human.presence, channelModality, input.channel));
+  return { kind: 'valid', requested: requestedAudience, candidates, requestedHumans: requestedHumanAudience, humanCandidates };
 }
 
 function updateCharacter(world: WorldSnapshot, character: WorldCharacter): WorldEntity[] {
@@ -985,6 +1064,7 @@ export function resolveWorldAttempt(input: {
       const perceptions = visibleWitnesses({
         world: changedWorld, event, actor: movedActor, at: world.clock.instant,
         ids: input.ids, detail: `Movimiento hacia ${placeById(world, destinationId)?.name ?? 'otro lugar'}.`,
+        selfActionDetail: `Te desplazaste hacia ${placeById(world, destinationId)?.name ?? 'otro lugar'}.`,
       });
       return commitApplied({ world, attempt, ids: input.ids, events: [event], perceptions, changes: { entities }, endAt, stateChanged: true });
     }
@@ -1032,11 +1112,17 @@ export function resolveWorldAttempt(input: {
         const targetLocation = target === undefined ? undefined : entityLocation(world, target);
         return targetLocation !== undefined && canPerceive(world, locationOfCharacter(recipient), targetLocation, 'visual', channel);
       })());
+      const effectiveHumans = audience.humanCandidates.filter((human) => pointTarget === null || (() => {
+        const target = entityById(world, pointTarget);
+        const location = target === undefined ? undefined : entityLocation(world, target);
+        return location !== undefined && canPerceive(world, human.presence, location, 'visual', channel);
+      })());
       const base = nextEventBase({ world, actorId: actor.characterId, attemptId: attempt.attemptId, ids: input.ids, eventCount: 0, at: world.clock.instant, durationMs });
       const event = WorldEventSchema.parse({
         ...base, kind: 'communicated', entityId: actor.entityId, channelId: channel.id,
         content: attempt.content, approvedContentHash: expectedHash, requestedAudience: audience.requested,
         effectiveAudience: effectiveRecipients.map((recipient) => recipient.characterId),
+        ...(world.humanParticipants === undefined ? {} : { requestedHumanAudience: audience.requestedHumans, effectiveHumanAudience: effectiveHumans.map((human) => human.participantId) }),
         targetEntityId: pointTarget,
       });
       const perceptions = effectiveRecipients.map((recipient) => WorldPerceptionSchema.parse({
@@ -1066,8 +1152,61 @@ export function resolveWorldAttempt(input: {
       const base = nextEventBase({ world, actorId: actor.characterId, attemptId: attempt.attemptId, ids: input.ids, eventCount: 0, at: world.clock.instant, durationMs });
       const event = WorldEventSchema.parse({ ...base, kind: 'objectTaken', objectEntityId: object.entityId, from: entry.location.placeId, toHolderEntityId: actor.entityId });
       const inventory = changeInventory(world, object.entityId, { kind: 'heldBy', entityId: actor.entityId });
-      const perceptions = visibleWitnesses({ world, event, actor, at: world.clock.instant, ids: input.ids, detail: `Tomó ${object.label}.` });
+      const perceptions = visibleWitnesses({ world, event, actor, at: world.clock.instant, ids: input.ids,
+        detail: `Tomó ${object.label}.`, selfActionDetail: `Tomaste ${object.label}.` });
       return commitApplied({ world, attempt, ids: input.ids, events: [event], perceptions, changes: { inventory }, endAt, stateChanged: true });
+    }
+    case 'putDown': {
+      if (!hasCapability(actor, 'putDown')) return notApplied(world, attempt, 'capability-missing');
+      const object = getEntity(attempt.objectHandle);
+      if (object === undefined) return notApplied(world, attempt, 'unknown-handle');
+      if (object.kind !== 'object') return notApplied(world, attempt, 'object-not-available');
+      if (!object.portable) return notApplied(world, attempt, 'object-not-portable');
+      const entry = world.inventory.find((candidate) => candidate.objectEntityId === object.entityId);
+      if (entry?.location.kind !== 'heldBy' || entry.location.entityId !== actor.entityId) {
+        return notApplied(world, attempt, 'object-not-available');
+      }
+
+      // Put-down uses the existing handling duration. Its placement is always
+      // the actor's confirmed position; callers cannot supply coordinates.
+      const durationMs = world.actionDurations.takeMs;
+      const endAt = clockAfter(world, durationMs);
+      if (endAt === undefined) return notApplied(world, attempt, 'clock-overflow');
+      const placedAt = { placeId: actor.placeId, position: actor.position };
+      const placedEvent = WorldEventSchema.parse({
+        ...nextEventBase({ world, actorId: actor.characterId, attemptId: attempt.attemptId,
+          ids: input.ids, eventCount: 0, at: world.clock.instant, durationMs }),
+        kind: 'objectPlaced', entityId: actor.entityId, objectEntityId: object.entityId,
+        placeId: placedAt.placeId, position: placedAt.position,
+      });
+      const events: WorldEvent[] = [placedEvent];
+      const inventory = changeInventory(world, object.entityId, { kind: 'atPlace', ...placedAt });
+      let offers = world.offers;
+      const outstanding = offers
+        .filter((offer): offer is Extract<WorldOffer, { state: 'open' }> => offer.state === 'open' && offer.objectEntityId === object.entityId)
+        .sort((left, right) => left.id.localeCompare(right.id));
+      for (const offer of outstanding) {
+        const base = nextEventBase({ world, actorId: actor.characterId, attemptId: attempt.attemptId,
+          ids: input.ids, eventCount: events.length, at: world.clock.instant, durationMs: 0 });
+        const invalidation = WorldEventSchema.parse({
+          ...base, kind: 'offerInvalidated', offerId: offer.id, objectEntityId: object.entityId,
+          cause: 'objectUnavailable',
+        });
+        events.push(invalidation);
+        offers = offers.map((current) => current.id === offer.id && current.state === 'open'
+          ? WorldOfferSchema.parse({ ...current, state: 'invalidated', cause: 'objectUnavailable',
+              eventId: invalidation.id, objectRevision: RevisionSchema.parse(entry.revision + 1) })
+          : current);
+      }
+      const placeName = placeById(world, actor.placeId)?.name ?? 'tu ubicación actual';
+      const changedWorld = WorldSnapshotSchema.parse({ ...world, inventory, offers });
+      const perceptions = visibleWitnesses({
+        world: changedWorld, event: placedEvent, actor, at: world.clock.instant, ids: input.ids,
+        detail: `Dejó ${object.label} en ${placeName}.`,
+        selfActionDetail: `Dejaste ${object.label} en ${placeName}.`,
+      });
+      return commitApplied({ world, attempt, ids: input.ids, events, perceptions,
+        changes: { inventory, offers }, endAt, stateChanged: true });
     }
     case 'offer': {
       if (!hasCapability(actor, 'offer')) return notApplied(world, attempt, 'capability-missing');
@@ -1148,6 +1287,7 @@ export function resolveWorldAttempt(input: {
       const perceptions = visibleWitnesses({
         world: WorldSnapshotSchema.parse({ ...world, inventory, offers }), event: acceptedEvent,
         actor, at: world.clock.instant, ids: input.ids, detail: `Aceptación de la oferta del objeto ${object.label}.`,
+        selfActionDetail: `Aceptaste la oferta y ahora tienes ${object.label}.`,
       });
       return commitApplied({ world, attempt, ids: input.ids, events, perceptions, changes: { inventory, offers }, endAt, stateChanged: true });
     }
@@ -1176,7 +1316,9 @@ export function resolveWorldAttempt(input: {
           ? WorldDeviceSchema.parse({ ...entity, power: operation.state })
           : entity);
         const changedWorld = WorldSnapshotSchema.parse({ ...world, entities });
-        const perceptions = visibleWitnesses({ world: changedWorld, event, actor, at: world.clock.instant, ids: input.ids, detail: `Usó ${target.label}: ${operation.label}.` });
+        const perceptions = visibleWitnesses({ world: changedWorld, event, actor, at: world.clock.instant, ids: input.ids,
+          detail: `Usó ${target.label}: ${operation.label}.`,
+          selfActionDetail: `Usaste ${target.label}: ${operation.label}.` });
         return commitApplied({ world, attempt, ids: input.ids, events: [event], perceptions, changes: { entities }, endAt, stateChanged: true });
       }
       const place = placeById(world, operation.placeId);
@@ -1188,7 +1330,9 @@ export function resolveWorldAttempt(input: {
       const event = WorldEventSchema.parse({ ...base, kind: 'deviceUsed', deviceEntityId: target.entityId, operationId: operation.id, effect: { kind: 'lightChanged', placeId: place.id, level: operation.level } });
       const places = world.places.map((current) => current.id === place.id ? WorldPlaceSchema.parse({ ...current, lighting: operation.level }) : current);
       const changedWorld = WorldSnapshotSchema.parse({ ...world, places });
-      const perceptions = visibleWitnesses({ world: changedWorld, event, actor, at: world.clock.instant, ids: input.ids, detail: `Usó ${target.label}: ${operation.label}.` });
+      const perceptions = visibleWitnesses({ world: changedWorld, event, actor, at: world.clock.instant, ids: input.ids,
+        detail: `Usó ${target.label}: ${operation.label}.`,
+        selfActionDetail: `Usaste ${target.label}: ${operation.label}.` });
       return commitApplied({ world, attempt, ids: input.ids, events: [event], perceptions, changes: { places }, endAt, stateChanged: true });
     }
     case 'wait':

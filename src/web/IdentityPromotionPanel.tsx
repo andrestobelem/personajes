@@ -1,10 +1,17 @@
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
 import {RunIdSchema} from '../domain/values.ts';
 import type {z} from 'zod';
 import type {CuratedIdentity} from '../domain/preparation.ts';
 import type {ConfiguratorEvidenceSchema} from '../domain/configurator.ts';
-const identityFields=[{key:'selfReference',label:'Cómo se nombra'},{key:'selfConcept',label:'Concepto de sí mismo'},{key:'values',label:'Valores'},{key:'dispositions',label:'Disposiciones'},{key:'contradictions',label:'Contradicciones'}] satisfies Array<{key:keyof CuratedIdentity;label:string}>;
-function IdentityValue({value}:{value:CuratedIdentity[keyof CuratedIdentity]}){return typeof value==='string'?<p>{value}</p>:value.length===0?<p>Ninguno declarado.</p>:<ul>{value.map((item,index)=><li key={index}>{item}</li>)}</ul>;}
+const identityFields=[{key:'selfReference',label:'Cómo se nombra'},{key:'selfConcept',label:'Concepto de sí mismo'},{key:'values',label:'Valores'},{key:'dispositions',label:'Disposiciones'},{key:'contradictions',label:'Contradicciones'},{key:'lifeHistory',label:'Historia de vida encarnada'},{key:'desires',label:'Deseos profundos'}] satisfies Array<{key:keyof CuratedIdentity;label:string}>;
+function IdentityValue({value}:{value:CuratedIdentity[keyof CuratedIdentity]}){
+ if(value===undefined)return <p>Sin definición completa en esta versión heredada.</p>;
+ if(typeof value==='string')return <p>{value}</p>;
+ if(!Array.isArray(value))return <div><ReactMarkdown>{value.narrative}</ReactMarkdown><p>Antecedentes: {value.antecedentIds.join(', ')||'Sin enlaces declarados'}</p><p>Vacíos: {value.unknowns.join('; ')||'Ninguno declarado'}</p><p>Contradicciones: {value.contradictions.join('; ')||'Ninguna declarada'}</p></div>;
+ if(value.length===0)return <p>Ninguno declarado.</p>;
+ return <ul>{value.map((item,index)=>typeof item==='string'?<li key={index}>{item}</li>:<li key={item.desireId}><strong>{item.description}</strong><p>En juego: {item.stakes}</p><p>Tensión: {item.tension}</p><p>Objetivos vinculados: {item.goalIds.join(', ')||'Sin objetivos vinculados'}</p></li>)}</ul>;
+}
 export function IdentityCoreDiff({before,after,applied=false}:{before:CuratedIdentity;after:CuratedIdentity;applied?:boolean}){return <table><caption>{applied?'Identidad en el corte fuente y versión aplicada, según el recibo del journal':'Identidad actual y cambio propuesto; todavía no aplicado'}</caption><thead><tr><th>Campo</th><th>{applied?'En el corte fuente':'Antes'}</th><th>{applied?'Versión aplicada':'Propuesta'}</th></tr></thead><tbody>{identityFields.map(field=><tr key={field.key}><th scope="row">{field.label}</th><td><IdentityValue value={before[field.key]}/></td><td><IdentityValue value={after[field.key]}/></td></tr>)}</tbody></table>;}
 export function IdentityEvolutionEvidence({items,actorId}:{items:z.infer<typeof ConfiguratorEvidenceSchema>[];actorId:string}){
  const statuses={perceived:'percepción propia',reported:'testimonio recibido',inferred:'inferencia propia',believed:'creencia propia',remembered:'recuerdo propio'};

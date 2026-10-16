@@ -1,0 +1,12 @@
+import {z} from 'zod';
+import {HashSchema,SourceRefIdSchema} from './values.ts';
+import {IcmWorkspaceAudienceSchema,IcmWorkspaceRoleSchema,IcmWorkspaceSectionIdSchema,IcmWorkspaceSnapshotStructureSchema,IcmWorkspaceSourceSelectionSchema} from './icm-workspace-schema.ts';
+const UniqueSourceIdsSchema=z.array(SourceRefIdSchema).min(1).max(32).refine(ids=>new Set(ids).size===ids.length);
+const UniqueSectionIdsSchema=z.array(IcmWorkspaceSectionIdSchema).min(1).max(64).refine(ids=>new Set(ids).size===ids.length);
+export const IcmWorkspaceSourcesResponseSchema=z.strictObject({kind:z.literal('icm-workspace-sources'),audience:IcmWorkspaceAudienceSchema,sources:z.array(z.strictObject({sourceId:SourceRefIdSchema,role:IcmWorkspaceRoleSchema,label:z.string().min(1).max(300),sectionIds:UniqueSectionIdsSchema})).max(64)});
+export const IcmWorkspacePreviewGroupSchema=z.strictObject({audience:IcmWorkspaceAudienceSchema,sourceIds:UniqueSourceIdsSchema,sectionIdsBySource:z.record(SourceRefIdSchema,UniqueSectionIdsSchema)}).superRefine((group,context)=>{const keys=Object.keys(group.sectionIdsBySource);if(keys.length!==group.sourceIds.length||keys.some(id=>!group.sourceIds.some(sourceId=>sourceId===id)))context.addIssue({code:'custom',path:['sectionIdsBySource'],message:'Cada fuente seleccionada requiere secciones explícitas.'});});
+export const IcmWorkspacePreviewRequestSchema=z.strictObject({groups:z.array(IcmWorkspacePreviewGroupSchema).min(1).max(64)});
+export const IcmWorkspacePreviewResponseSchema=z.strictObject({kind:z.literal('icm-workspace-preview'),workspaceRevision:HashSchema,snapshot:IcmWorkspaceSnapshotStructureSchema,selections:z.array(IcmWorkspaceSourceSelectionSchema).min(1).max(512)});
+export type IcmWorkspaceSourcesResponse=z.infer<typeof IcmWorkspaceSourcesResponseSchema>;
+export type IcmWorkspacePreviewRequest=z.infer<typeof IcmWorkspacePreviewRequestSchema>;
+export type IcmWorkspacePreviewResponse=z.infer<typeof IcmWorkspacePreviewResponseSchema>;

@@ -1,5 +1,7 @@
 # S02 — Persistencia, ICM y recuperación
 
+Revisión del 15 de octubre: journal v42 conserva enlaces de activación por invitación y generación y un marcador nullable `parked_for_pulse_id` en pulsos. La recuperación explícita puede apartar un pulso drenado dependiente y retomarlo con el mismo ID al completarse su dependencia; conserva cuota, intenciones, cortes y payloads históricos. Un marcador ausente no autoriza esa reanudación. Ver [contrato, evidencia y límites](../auditoria/recuperacion-activaciones-y-diagnosticos.md).
+
 Versión 1.0. MEM01–10, ESC03/08, ACT01/11, TIM02/03, UI03/05/10 y NFR03/04/07/09. [ADR de autoridad](../adr/0001-journal-y-proyecciones.md).
 
 ## Almacenes y ownership
@@ -131,6 +133,8 @@ Topes iniciales de host: query 1–2.048 bytes UTF-8, limit entero 1–20 (defau
 ## ICM Markdown
 
 Exportar setup/contextos, propuestas/versiones, revisiones, resolución, distribución, memoria, dirección y observación conforme a las ocho etapas. El runtime puede generar estas proyecciones desde journal, con último seq/hash y marca de fuente. Reimportar configuración pasa por Configurador y versión; no aceptar edición de un output como hecho ejecutado. Export de operador puede incluir memoria/dossier según selección explícita; nunca credenciales, thinking ni archivos ajenos al contrato.
+
+Estado parcial del 15 de octubre: [fundación](../auditoria/icm-markdown-fundacion.md) e [integración v43](../auditoria/icm-markdown-runtime.md) conservan snapshots opcionales Draft/Ready y paquetes inmutables por job/generación antes de reservar/despachar inferencia. Actor, Continuista, Director, Narrador, Revisor y Configurador de evolución reciben su paquete propio. El selector gráfico consulta fuentes por audiencia, previsualiza secciones y guarda con revisión y admisión del host. El importador externo inspecciona los paquetes contra la configuración/corte congelados. Corte posterior del 16 de octubre: las nuevas puestas exigen selección explícita y [una preparación nueva llegó al cierre del episodio con paquetes ICM reales](../representaciones/pregunta-a-tiempo-icm.md). Corte posterior: el [Inspector privado](../auditoria/inspector-icm-y-base-configurador.md) muestra paquetes y cortes por rol/job sin textos de prompts. Todavía faltan el workflow de Configurador anterior a Ready y aceptación de transferencia con paquetes poblados. MEM-07 sigue abierto.
 
 ## Recuperación y snapshots
 

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
+import { downgradeCoordinatorPulsesTo44 } from './fixtures/journal-v45-downgrade.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -23,7 +24,7 @@ test('v27 publication migrates without reinference; frozen legacy hash rejects a
     const lookup={jobId:result.receipt.publication.scope.jobId,generation:result.receipt.publication.scope.generation};
     f.journal.close();
     const db=new DatabaseSync(join(f.directory,'journal.sqlite'));
-    try {db.exec(`PRAGMA foreign_keys=OFF;
+    try {downgradeCoordinatorPulsesTo44(db);db.exec(`DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; PRAGMA foreign_keys=OFF;
       DROP TABLE legacy_narration_publications;DROP TABLE narration_review_receipts;DROP TABLE narration_review_candidates;
       DELETE FROM administrative_checkpoint_integrity WHERE checkpoint_hash IN(
         SELECT checkpoint_hash FROM administrative_checkpoints WHERE job_id IN(SELECT job_id FROM administrative_jobs WHERE role='narration-reviewer'));
@@ -32,7 +33,7 @@ test('v27 publication migrates without reinference; frozen legacy hash rejects a
       DELETE FROM administrative_jobs WHERE role='narration-reviewer';
       DROP TABLE IF EXISTS actor_activation_invitation_jobs;DROP TABLE IF EXISTS actor_activation_invitations;DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances;
       DROP TABLE circumstance_operations;
-      DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(28,29,30,31,32,33,34,35,36,37,38,39,40,41);`);}
+      DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44);`);}
     finally {db.close();}
     reopened=openJournal({path:join(f.directory,'journal.sqlite')});
     assert.deepEqual(reopened.readNarrationReceipt(lookup),result.receipt);

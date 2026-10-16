@@ -11,6 +11,7 @@ export const PublicSpeakerSchema = z.discriminatedUnion('kind',[
   z.strictObject({kind:z.literal('character'),entityId:WorldEntityIdSchema,label}),
   z.strictObject({kind:z.literal('human'),participantId:HumanParticipantIdSchema,label}),
 ]);
+export const PublicHumanReferenceSchema = z.strictObject({participantId:HumanParticipantIdSchema,label});
 const entityBase = {entityId:WorldEntityIdSchema,label};
 export const StageEntitySchema = z.discriminatedUnion('kind',[
   z.strictObject({...entityBase,kind:z.literal('character'),placeId:PlaceIdSchema,position:WorldPointSchema,
@@ -31,11 +32,11 @@ export const RunStageViewSchema = z.strictObject({kind:z.literal('run-stage'),ru
   doors:z.array(z.strictObject({id:DoorIdSchema,label,state:z.enum(['open','closed','locked'])})).max(10_000),
   connections:z.array(z.strictObject({from:PlaceIdSchema,to:PlaceIdSchema,doorId:DoorIdSchema.nullable(),arrivalPoint:WorldPointSchema,durationMs:z.number().int().nonnegative()})).max(100_000),
   channels:z.array(StageChannelSchema).max(1_000),
-  humanParticipants:z.array(z.strictObject({participantId:HumanParticipantIdSchema,label,presence:z.enum(['inScene','remote']),placeId:PlaceIdSchema.nullable(),position:WorldPointSchema.nullable()})).max(100),
+  humanParticipants:z.array(z.strictObject({participantId:HumanParticipantIdSchema,label,presence:z.enum(['inScene','remote']),presenceConfirmation:z.enum(['confirmed','prepared']).optional(),placeId:PlaceIdSchema.nullable(),position:WorldPointSchema.nullable()})).max(100),
 });
 export type RunStageView = z.infer<typeof RunStageViewSchema>;
 
-export const PublicEventTypeSchema = z.enum(['moved','communicated','humanIntervention','objectTaken','offerCreated','offerAccepted','offerInvalidated','deviceUsed','waited','rested','clockAdvanced','circumstanceChanged']);
+export const PublicEventTypeSchema = z.enum(['moved','communicated','humanIntervention','objectTaken','objectPlaced','offerCreated','offerAccepted','offerInvalidated','deviceUsed','waited','rested','clockAdvanced','circumstanceChanged']);
 export const ConfirmedEventViewSchema = z.strictObject({kind:z.literal('confirmed-event'),eventId:EventIdSchema,runId:RunIdSchema,
   worldSeq:WorldSeqSchema,commitIndex:RevisionSchema,fictionalAt:FictionalInstantSchema,durationMs:z.number().int().nonnegative(),sceneId:SceneIdSchema,
   eventType:PublicEventTypeSchema,speaker:PublicSpeakerSchema.nullable(),summary:z.string().min(1).max(2_000)});
@@ -43,6 +44,8 @@ export const ConversationViewSchema = z.strictObject({kind:z.literal('published-
   worldSeq:WorldSeqSchema,commitIndex:RevisionSchema,fictionalAt:FictionalInstantSchema,sceneId:SceneIdSchema,speaker:PublicSpeakerSchema,
   channel:z.strictObject({id:ChannelIdSchema,label}),content:CommunicationContentSchema,emission:z.literal('emitted'),
   requestedRecipients:z.array(PublicCharacterReferenceSchema).max(100),effectiveAudience:z.array(PublicCharacterReferenceSchema).max(100),
+  requestedHumanRecipients:z.array(PublicHumanReferenceSchema).max(100).optional(),
+  effectiveHumanAudience:z.array(PublicHumanReferenceSchema).max(100).optional(),
   requestedRecipientCount:z.number().int().nonnegative(),effectiveAudienceCount:z.number().int().nonnegative(),
   deliveries:z.array(z.strictObject({recipient:PublicCharacterReferenceSchema,state:z.enum(['planned','delivering','delivered','failed']),
     memoryProjection:z.enum(['pending','projected','notDelivered'])})).max(100),
@@ -52,6 +55,14 @@ const pageBase = {runId:RunIdSchema,fromWorldSeq:WorldSeqSchema,toWorldSeq:World
   nextCursor:z.string().min(1).max(2048).nullable()};
 export const ConfirmedEventPageSchema = z.strictObject({...pageBase,kind:z.literal('confirmed-event-page'),items:z.array(ConfirmedEventViewSchema).max(100)});
 export const ConversationPageSchema = z.strictObject({...pageBase,kind:z.literal('conversation-page'),items:z.array(ConversationViewSchema).max(100)});
+export const HumanReceptionPageSchema = z.strictObject({...pageBase,kind:z.literal('human-reception-page'),participantId:HumanParticipantIdSchema,items:z.array(ConversationViewSchema).max(100)})
+  .superRefine((page,context)=>{
+    for(const [index,item] of page.items.entries()){
+      if(item.runId!==page.runId||item.effectiveHumanAudience?.some(human=>human.participantId===page.participantId)!==true)
+        context.addIssue({code:'custom',path:['items',index],message:'La emisión no confirma recepción para esta identidad y representación.'});
+    }
+  });
+export type HumanReceptionPage = z.infer<typeof HumanReceptionPageSchema>;
 export const TechnicalJobViewSchema = z.strictObject({jobId:JobIdSchema,runId:RunIdSchema,kind:z.enum(['actor','continuista','pulse','step','preflight','director','narrator','configurator','narration-reviewer']),
   generation:RevisionSchema,pulseId:PulseIdSchema.nullable(),state:z.enum(['queued','running','accepted','blocked','completed','succeeded','failed','canceled','interrupted','cancel-requested']),
   actor:PublicCharacterReferenceSchema.nullable(),createdAt:z.number().int().nonnegative(),updatedAt:z.number().int().nonnegative(),

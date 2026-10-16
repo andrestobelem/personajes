@@ -279,6 +279,9 @@ export interface PiSessionHandle {
 
 export type PiStreamFunction = AgentSession['agent']['streamFunction'];
 
+/** Bounded input validation, without shortening actor biographies or ICM text.
+ * Accommodates the full160k actor compilation plus its Markdown role contracts. */
+export const MAX_PI_SYSTEM_PROMPT_CHARACTERS=2_000_000;
 export async function createPiSession(input: CreatePiSessionInput): Promise<PiSessionHandle> {
   const identity = PiIdentitySchema.parse(input.identity);
   const runId = RunIdSchema.parse(input.runId);
@@ -298,7 +301,7 @@ export async function createPiSession(input: CreatePiSessionInput): Promise<PiSe
     tools: input.tools,
     adminToolAllowlist: input.adminToolAllowlist,
   });
-  if (input.systemPrompt.trim().length === 0 || input.systemPrompt.length > 50_000) {
+  if (input.systemPrompt.trim().length === 0 || input.systemPrompt.length > MAX_PI_SYSTEM_PROMPT_CHARACTERS) {
     throw piAdapterFailure('INVALID_PROMPT', 'El prompt de sistema no cumple el límite configurado.');
   }
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { ICM_CONTEXT_COMPILER_VERSION } from './icm-context-compiler.ts';
 import { createPiSession, type PiRuntime } from '../adapters/pi.ts';
 import { ICM_VERSION } from '../adapters/icm.ts';
 import { listCharacters, type LoadedCatalog } from '../adapters/catalog.ts';
@@ -38,7 +39,7 @@ function icmRead(binary: string, args: readonly string[], env: NodeJS.ProcessEnv
   return new Promise((resolve, reject) => execFile(binary, [...args], { timeout: 2_000, maxBuffer: 1_000_000, encoding: 'utf8', env }, (error, stdout) => error ? reject(new Error('ICM readonly check is unavailable.')) : resolve(stdout.trim())));
 }
 /** Reads actual host resources. It never creates sessions/ICM databases, refreshes auth or probes paid providers. */
-export function createProductionPreflightHost(input: { journal: Journal; catalog: LoadedCatalog; piRuntime: PiRuntime; authentication: ReturnType<typeof createPiAuthFingerprint>; icmBinaryPath?: string; readVoiceReadiness?: ProductionPreflightHostPort['readVoiceReadiness']; roleReadiness?: () => {actor:boolean;continuista:boolean;director:boolean;narrator:boolean} }): ProductionPreflightHostPort & { readPrivateEvidence(input: { configuration: ReadyRunConfiguration }): RunPreflightPrivateEvidence } {
+export function createProductionPreflightHost(input: { journal: Journal; catalog: LoadedCatalog; piRuntime: PiRuntime; authentication: ReturnType<typeof createPiAuthFingerprint>; icmBinaryPath?: string; readVoiceReadiness?: ProductionPreflightHostPort['readVoiceReadiness']; roleReadiness?: () => {actor:boolean;continuista:boolean;director:boolean;narrator:boolean}; icmContextPacketsReady?:()=>boolean }): ProductionPreflightHostPort & { readPrivateEvidence(input: { configuration: ReadyRunConfiguration }): RunPreflightPrivateEvidence } {
   const journal = input.journal;
   const captured = new Map<InferenceProvider, RunPreflightPrivateEvidence>();
   function evidence(provider: InferenceProvider) {
@@ -48,6 +49,11 @@ export function createProductionPreflightHost(input: { journal: Journal; catalog
   }
   function ready(runId: unknown) { return ReadyRunConfigurationSchema.parse(journal.readWorldConfiguration({ runId: RunIdSchema.parse(runId) })); }
   return {
+    async readIcmContextRuntimeReadiness() {
+      return input.icmContextPacketsReady?.() === true
+        ? { kind: 'ready', compilerVersion: ICM_CONTEXT_COMPILER_VERSION }
+        : { kind: 'unavailable', code: 'icm-context-runtime-not-connected' };
+    },
     async readCurrentConfigurationRevision({ runId }) {
       const draft = journal.readRunConfigurationDraft({ runId });
       if (draft !== undefined) {

@@ -6,10 +6,11 @@ const IsoDateSchema = z.string().datetime({ offset: true });
 const SafeCheckIdSchema = z.enum([
   'configuration', 'configuration-version', 'world-snapshot', 'prepared-contexts', 'catalog-eligibility',
   'inference-profile', 'pi-sdk', 'pi-profile', 'provider-authentication', 'provider-access-check',
-  'pi-runtime', 'icm-memory', 'budget', 'voice', 'participant-availability',
+  'pi-runtime', 'icm-memory', 'icm-context-runtime', 'budget', 'voice', 'participant-availability',
 ]);
 const SafeCheckCodeSchema = z.string().min(1).max(100).regex(/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/);
 const KnownPreflightCheckCodes = new Set([
+  'icm-context-runtime-not-connected',
   'director-runtime-unavailable', 'director-and-narrator-runtime-unavailable', 'provider-disconnected', 'provider-expired',
   'pi-sdk-version-mismatch', 'icm-readonly-sidecars-not-provisioned',
   'actor-context-mismatch', 'actor-not-eligible', 'audio-requires-confirmed-variety', 'authentication-method-incompatible',
@@ -76,11 +77,12 @@ export const RunPreflightResultSchema = z.strictObject({
     const counts = new Map<string, number>();
     for (const entry of result.checks) counts.set(entry.checkId, (counts.get(entry.checkId) ?? 0) + 1);
     const missing = RequiredPassedCheckIds.filter((checkId) => counts.get(checkId) !== 1);
-    if (missing.length > 0 || result.checks.length !== RequiredPassedCheckIds.length) {
+    const icmCount=counts.get('icm-context-runtime')??0;
+    if (missing.length > 0 || icmCount>1 || result.checks.length !== RequiredPassedCheckIds.length+(icmCount===1?1:0)) {
       context.addIssue({
         code: 'custom',
         path: ['checks'],
-        message: `Un preflight aprobado requiere exactamente una comprobación pasada por gate: ${RequiredPassedCheckIds.join(', ')}.`,
+        message: `Un preflight aprobado requiere exactamente una comprobación pasada por gate: ${RequiredPassedCheckIds.join(', ')}; el gate icm-context-runtime es adicional cuando está seleccionado.`,
       });
     }
   }

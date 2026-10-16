@@ -41,7 +41,7 @@ export const WorldPointSchema = z.strictObject({ x: finite, y: finite });
 const LightingSchema = z.enum(['dark', 'dim', 'normal', 'bright']);
 export const ModalitySchema = z.enum(['visual', 'auditory']);
 export const CharacterCapabilitySchema = z.enum([
-  'move', 'observe', 'speak', 'gesture', 'animalSound', 'take', 'offer', 'useDevice', 'wait', 'rest',
+  'move', 'observe', 'speak', 'gesture', 'animalSound', 'take', 'offer', 'putDown', 'useDevice', 'wait', 'rest',
 ]);
 
 const LocalMinuteSchema = z.number().int().min(0).max(1439);
@@ -396,6 +396,15 @@ export const CircumstanceCatalogSchema = z.strictObject({
 });
 export const WorldEnvironmentSchema = z.array(z.strictObject({ placeId: PlaceIdSchema, conditionId: slug, stateId: slug })).max(100000);
 
+/** Public situated presence; biography remains outside the world projection. */
+export const HumanParticipantPresenceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('inScene'), sceneId: SceneIdSchema, placeId: PlaceIdSchema, position: WorldPointSchema, channelId: ChannelIdSchema }),
+  z.strictObject({ kind: z.literal('remote'), placeId: PlaceIdSchema, position: WorldPointSchema, channelId: ChannelIdSchema }),
+]);
+export type HumanParticipantPresence = z.infer<typeof HumanParticipantPresenceSchema>;
+export const WorldHumanParticipantSchema = z.strictObject({ participantId: HumanParticipantIdSchema, label: z.string().min(1).max(120), presence: HumanParticipantPresenceSchema });
+export type WorldHumanParticipant = z.infer<typeof WorldHumanParticipantSchema>;
+
 export const WorldSnapshotSchema = z.strictObject({
   schemaVersion: z.union([z.literal(1), z.literal(2)]),
   runId: RunIdSchema,
@@ -413,6 +422,7 @@ export const WorldSnapshotSchema = z.strictObject({
   activeSceneId: SceneIdSchema.nullable(),
   offers: z.array(WorldOfferSchema).max(100_000),
   actionDurations: ActionDurationsSchema,
+  humanParticipants: z.array(WorldHumanParticipantSchema).max(100).optional(),
   circumstanceCatalog: CircumstanceCatalogSchema.optional(),
   environment: WorldEnvironmentSchema.optional(),
 }).superRefine((world, context) => {
@@ -433,6 +443,17 @@ export const WorldSnapshotSchema = z.strictObject({
   const entities = new Map(world.entities.map((entity) => [entity.entityId, entity]));
   const chars = new Map(world.entities.filter((entity) => entity.kind === 'character').map((entity) => [entity.characterId, entity]));
   const scenes = new Map(world.scenes.map((scene) => [scene.id, scene]));
+  if (world.humanParticipants !== undefined) {
+    if (!uniqueBy(world.humanParticipants, (human) => human.participantId)) issue(['humanParticipants'], 'Participante humano duplicado');
+    for (const [index, human] of world.humanParticipants.entries()) {
+      const presence = human.presence;
+      const place = world.places.find((candidate) => candidate.id === presence.placeId);
+      const channel = world.channels.find((candidate) => candidate.id === presence.channelId);
+      if (place === undefined || presence.position.x < 0 || presence.position.y < 0 || presence.position.x > place.width || presence.position.y > place.height) issue(['humanParticipants', index, 'presence'], 'Ubicación humana inválida');
+      if (channel === undefined || !channel.placeIds.includes(presence.placeId)) issue(['humanParticipants', index, 'presence', 'channelId'], 'Canal humano inválido');
+      if (presence.kind === 'inScene' && !scenes.get(presence.sceneId)?.placeIds.includes(presence.placeId)) issue(['humanParticipants', index, 'presence', 'sceneId'], 'Escena humana inválida');
+    }
+  }
   const catalog = world.circumstanceCatalog;
   if (catalog !== undefined) {
     if (!uniqueBy(catalog.environmentConditions, (item) => item.id)) issue(['circumstanceCatalog', 'environmentConditions'], 'Condición duplicada');
@@ -562,6 +583,7 @@ export function parseWorldSnapshot(input: unknown): WorldSnapshot {
 }
 
 export const ActorHandleBindingSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('human'), handle: EntityHandleSchema, participantId: HumanParticipantIdSchema, perceivedLabel: z.string().min(1).max(120).optional() }),
   z.strictObject({ kind: z.literal('entity'), handle: EntityHandleSchema, entityId: WorldEntityIdSchema }),
   z.strictObject({ kind: z.literal('place'), handle: PlaceHandleSchema, placeId: PlaceIdSchema }),
   z.strictObject({ kind: z.literal('channel'), handle: ChannelHandleSchema, channelId: ChannelIdSchema }),
@@ -577,7 +599,7 @@ export const ActorKnowledgeSchema = z.strictObject({
   if (!uniqueBy(knowledge.bindings, (binding) => binding.handle)) {
     context.addIssue({ code: 'custom', path: ['bindings'], message: 'Handle opaco duplicado en conocimiento host' });
   }
-  if (!uniqueBy(knowledge.bindings, (binding) => `${binding.kind}:${'entityId' in binding ? binding.entityId : 'placeId' in binding ? binding.placeId : 'channelId' in binding ? binding.channelId : binding.offerId}`)) {
+  if (!uniqueBy(knowledge.bindings, (binding) => `${binding.kind}:${'participantId' in binding ? binding.participantId : 'entityId' in binding ? binding.entityId : 'placeId' in binding ? binding.placeId : 'channelId' in binding ? binding.channelId : binding.offerId}`)) {
     context.addIssue({ code: 'custom', path: ['bindings'], message: 'Target duplicado en conocimiento host' });
   }
 });
@@ -634,6 +656,10 @@ export const WorldAttemptSchema = z.discriminatedUnion('kind', [
     expectedRevision: RevisionSchema, objectHandle: EntityHandleSchema,
   }),
   z.strictObject({
+    kind: z.literal('putDown'), attemptId: WorldAttemptIdSchema, runId: RunIdSchema, actorId: CharacterIdSchema,
+    expectedRevision: RevisionSchema, objectHandle: EntityHandleSchema,
+  }),
+  z.strictObject({
     kind: z.literal('offer'), attemptId: WorldAttemptIdSchema, runId: RunIdSchema, actorId: CharacterIdSchema,
     expectedRevision: RevisionSchema, objectHandle: EntityHandleSchema, recipientHandle: EntityHandleSchema,
   }),
@@ -679,12 +705,12 @@ export const WorldAttemptSchema = z.discriminatedUnion('kind', [
 export type WorldAttempt = z.infer<typeof WorldAttemptSchema>;
 
 /** Model-visible action parameters; identity and revision remain host-owned. */
-const [observeAttempt, moveAttempt, communicateAttempt, takeAttempt, offerAttempt, acceptOfferAttempt,
+const [observeAttempt, moveAttempt, communicateAttempt, takeAttempt, putDownAttempt, offerAttempt, acceptOfferAttempt,
   useDeviceAttempt, waitAttempt, restAttempt, reviseGoalAttempt, reviseBeliefAttempt, reviseRelationshipAttempt] = WorldAttemptSchema.options;
 const hostAttemptFields = { attemptId: true, runId: true, actorId: true, expectedRevision: true } as const;
 export const WorldActorActionSchema = z.discriminatedUnion('kind', [
   observeAttempt.omit(hostAttemptFields), moveAttempt.omit(hostAttemptFields), communicateAttempt.omit(hostAttemptFields),
-  takeAttempt.omit(hostAttemptFields), offerAttempt.omit(hostAttemptFields), acceptOfferAttempt.omit(hostAttemptFields),
+  takeAttempt.omit(hostAttemptFields), offerAttempt.omit(hostAttemptFields), putDownAttempt.omit(hostAttemptFields), acceptOfferAttempt.omit(hostAttemptFields),
   useDeviceAttempt.omit(hostAttemptFields), waitAttempt.omit(hostAttemptFields), restAttempt.omit(hostAttemptFields),
   reviseGoalAttempt.omit(hostAttemptFields), reviseBeliefAttempt.omit(hostAttemptFields), reviseRelationshipAttempt.omit(hostAttemptFields),
 ]);
@@ -731,7 +757,7 @@ const eventCommon = {
 export const WorldEventSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...eventBase, kind: z.literal('circumstanceChanged'), durationMs: WorldDurationMsSchema.refine((value) => value === 0), origin: z.strictObject({ kind: z.literal('direction'), operationId: z.uuid() }), effect: CircumstanceEffectSchema, effectiveAudience: z.array(CharacterIdSchema).max(100000) }),
   z.strictObject({ ...eventCommon, kind: z.literal('moved'), entityId: WorldEntityIdSchema, from: PlaceIdSchema, to: PlaceIdSchema, arrivalPoint: WorldPointSchema }),
-  z.strictObject({ ...eventCommon, kind: z.literal('communicated'), entityId: WorldEntityIdSchema, channelId: ChannelIdSchema, content: CommunicationContentSchema, approvedContentHash: HashSchema, requestedAudience: z.array(CharacterIdSchema).max(100), effectiveAudience: z.array(CharacterIdSchema).max(100), targetEntityId: WorldEntityIdSchema.nullable() }),
+  z.strictObject({ ...eventCommon, kind: z.literal('communicated'), entityId: WorldEntityIdSchema, channelId: ChannelIdSchema, content: CommunicationContentSchema, approvedContentHash: HashSchema, requestedAudience: z.array(CharacterIdSchema).max(100), effectiveAudience: z.array(CharacterIdSchema).max(100), requestedHumanAudience: z.array(HumanParticipantIdSchema).max(100).optional(), effectiveHumanAudience: z.array(HumanParticipantIdSchema).max(100).optional(), targetEntityId: WorldEntityIdSchema.nullable() }),
   z.strictObject({
     ...eventBase,
     origin: z.strictObject({ kind: z.literal('human'), participantId: HumanParticipantIdSchema, interventionId: HumanInterventionIdSchema }),
@@ -741,6 +767,7 @@ export const WorldEventSchema = z.discriminatedUnion('kind', [
     requestedAudience: z.array(CharacterIdSchema).max(100), effectiveAudience: z.array(CharacterIdSchema).max(100),
   }),
   z.strictObject({ ...eventCommon, kind: z.literal('objectTaken'), objectEntityId: WorldEntityIdSchema, from: PlaceIdSchema, toHolderEntityId: WorldEntityIdSchema }),
+  z.strictObject({ ...eventCommon, kind: z.literal('objectPlaced'), entityId: WorldEntityIdSchema, objectEntityId: WorldEntityIdSchema, placeId: PlaceIdSchema, position: WorldPointSchema }),
   z.strictObject({ ...eventCommon, kind: z.literal('offerCreated'), offerId: OfferIdSchema, objectEntityId: WorldEntityIdSchema, ownerEntityId: WorldEntityIdSchema, recipientCharacterId: CharacterIdSchema, expiresAt: FictionalInstantSchema }),
   z.strictObject({ ...eventCommon, kind: z.literal('offerAccepted'), offerId: OfferIdSchema, objectEntityId: WorldEntityIdSchema, fromHolderEntityId: WorldEntityIdSchema, toHolderEntityId: WorldEntityIdSchema }),
   z.strictObject({ ...eventBase, origin: z.union([
@@ -768,12 +795,29 @@ export const WorldEventSchema = z.discriminatedUnion('kind', [
 });
 export type WorldEvent = z.infer<typeof WorldEventSchema>;
 
+export const ResolutionReasonSchema = z.enum([
+  'run-mismatch', 'actor-not-found', 'actor-not-prepared', 'actor-not-participant', 'scene-not-open',
+  'actor-unavailable', 'capability-missing', 'unknown-handle', 'target-not-perceptible',
+  'destination-not-connected', 'door-blocked', 'collision', 'outside-scene', 'device-effect-outside-scene', 'device-effect-not-accessible', 'channel-unavailable', 'approval-receipt-invalid',
+  'channel-kind-mismatch', 'content-not-supported', 'approval-hash-mismatch', 'audience-invalid',
+  'object-not-available', 'object-not-portable', 'out-of-reach', 'offer-not-received', 'offer-expired',
+  'offer-not-open', 'offer-recipient-mismatch', 'offer-owner-changed', 'device-unavailable',
+  'operation-not-in-catalog', 'device-power-required', 'duration-exceeds-limit', 'clock-overflow',
+  'device-state-unchanged', 'goal-not-found', 'goal-transition-invalid', 'belief-not-found', 'relationship-target-invalid',
+  'evidence-not-owned',
+]);
+
 export const WorldPerceptionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('circumstance'), id: PerceptionIdSchema, runId: RunIdSchema, recipientCharacterId: CharacterIdSchema, eventId: EventIdSchema, placeId: PlaceIdSchema, modality: ModalitySchema, detail: z.string().min(1).max(2000), fictitiousAt: FictionalInstantSchema }),
   z.strictObject({
     kind: z.literal('observation'), id: PerceptionIdSchema, runId: RunIdSchema, recipientCharacterId: CharacterIdSchema,
     attemptId: WorldAttemptIdSchema, subjectEntityId: WorldEntityIdSchema, modality: ModalitySchema,
     detail: z.string().min(1).max(2_000), fictitiousAt: FictionalInstantSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('actionFeedback'), id: PerceptionIdSchema, runId: RunIdSchema, recipientCharacterId: CharacterIdSchema,
+    attemptId: WorldAttemptIdSchema, chainId: PerceptionIdSchema, actionSignature: HashSchema,
+    worldRevision: RevisionSchema, reason: ResolutionReasonSchema, fictitiousAt: FictionalInstantSchema,
   }),
   z.strictObject({
     kind: z.literal('communication'), id: PerceptionIdSchema, runId: RunIdSchema, recipientCharacterId: CharacterIdSchema,
@@ -799,18 +843,6 @@ export const WorldPerceptionSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 export type WorldPerception = z.infer<typeof WorldPerceptionSchema>;
-
-export const ResolutionReasonSchema = z.enum([
-  'run-mismatch', 'actor-not-found', 'actor-not-prepared', 'actor-not-participant', 'scene-not-open',
-  'actor-unavailable', 'capability-missing', 'unknown-handle', 'target-not-perceptible',
-  'destination-not-connected', 'door-blocked', 'collision', 'outside-scene', 'device-effect-outside-scene', 'device-effect-not-accessible', 'channel-unavailable', 'approval-receipt-invalid',
-  'channel-kind-mismatch', 'content-not-supported', 'approval-hash-mismatch', 'audience-invalid',
-  'object-not-available', 'object-not-portable', 'out-of-reach', 'offer-not-received', 'offer-expired',
-  'offer-not-open', 'offer-recipient-mismatch', 'offer-owner-changed', 'device-unavailable',
-  'operation-not-in-catalog', 'device-power-required', 'duration-exceeds-limit', 'clock-overflow',
-  'device-state-unchanged', 'goal-not-found', 'goal-transition-invalid', 'belief-not-found', 'relationship-target-invalid',
-  'evidence-not-owned',
-]);
 
 export const WorldEmissionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('none') }),
@@ -901,12 +933,17 @@ const ActorInboxItemSchema = z.discriminatedUnion('kind', [
     detail: z.string().min(1).max(2_000), fictitiousAt: FictionalInstantSchema,
   }),
   z.strictObject({
+    kind: z.literal('actionFeedback'), result: z.literal('notApplied'), reason: ResolutionReasonSchema,
+    message: z.literal('Resultado de ejecución: la acción anterior no se aplicó al Escenario. Esto no es un suceso de la ficción; reconsidera tu próxima acción desde la percepción actual.'),
+    fictitiousAt: FictionalInstantSchema,
+  }),
+  z.strictObject({
     kind: z.literal('communication'), speakerHandle: EntityHandleSchema,
     channelLabel: z.string().min(1).max(120), content: CommunicationContentSchema,
     targetHandle: EntityHandleSchema.nullable(), fictitiousAt: FictionalInstantSchema,
   }),
   z.strictObject({
-    kind: z.literal('testimony'), speakerDisplayName: z.string().min(1).max(120),
+    kind: z.literal('testimony'), speakerHandle: EntityHandleSchema.optional(), speakerDisplayName: z.string().min(1).max(120),
     channelLabel: z.string().min(1).max(120),
     content: z.strictObject({ kind: z.literal('speech'), text: z.string().min(1).max(16_384).refine((text) => !text.includes('\0')) }),
     fictitiousAt: FictionalInstantSchema,
@@ -950,8 +987,9 @@ export const ActorWorldViewSchema = z.strictObject({
     relationships: z.array(z.strictObject({ targetHandle: EntityHandleSchema, stance: z.enum(['unknown', 'wary', 'neutral', 'warm', 'trusting']), confidence: z.number().finite().min(0).max(1), revision: RevisionSchema })).max(20_000),
     experiences: z.array(z.strictObject({ experienceId: ExperienceIdSchema, kind: z.enum(['perception', 'testimony', 'inference', 'belief', 'recollection']), content: z.string().min(1), fictitiousAt: FictionalInstantSchema, confidence: z.number().finite().min(0).max(1) })).max(100_000),
   }),
+  humanParticipants: z.array(z.strictObject({ handle: EntityHandleSchema, label: z.string().min(1).max(120), channels: z.array(ChannelHandleSchema).max(1000) })).max(100).optional(),
   entities: z.array(ActorViewEntitySchema).max(100_000),
-  channels: z.array(z.strictObject({ handle: ChannelHandleSchema, kind: z.enum(['speech', 'gesture']), scope: AudienceScopeSchema.optional(), label: z.string().min(1).max(120) })).max(1_000),
+  channels: z.array(z.strictObject({ handle: ChannelHandleSchema, kind: z.enum(['speech', 'gesture']), modality: z.enum(['visual', 'auditory']).optional(), scope: AudienceScopeSchema.optional(), label: z.string().min(1).max(120) })).max(1_000),
   offers: z.array(z.strictObject({
     handle: OfferHandleSchema, objectHandle: EntityHandleSchema, objectLabel: z.string().min(1).max(500),
     fromHandle: EntityHandleSchema, expiresAt: FictionalInstantSchema,

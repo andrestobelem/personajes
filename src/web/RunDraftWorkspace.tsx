@@ -11,6 +11,8 @@ const VoiceWorkspace = React.lazy(async () => ({ default: (await import('./Voice
 import { RunStageWorkspace } from './RunStageWorkspace.tsx';
 import { RunControlsPanel } from './RunControlsPanel.tsx';
 import { RunPreflightPanel } from './RunPreflightPanel.tsx';
+import { PreparationSessionPanel } from './PreparationSessionPanel.tsx';
+import { PreparationConfiguratorPanel } from './PreparationConfiguratorPanel.tsx';
 import { createDraftSaveIntent, listRunDrafts, readRunDraft, saveRunDraft, validateRunDraft, readDraftHttpFailure, type DraftDocument, type DraftSaveIntent } from './run-drafts-client.ts';
 
 type Screen = { kind: 'none' } | { kind: 'choosing' } | { kind: 'preparing-preset' } | { kind: 'loading'; id: string }
@@ -39,6 +41,7 @@ export function RunDraftValidationResult({validation,state}:{validation:RunConfi
 
 export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRequest?: {runId:string} }) {
   const [voiceOpened, setVoiceOpened] = React.useState(false);
+  const [preparationSessionRevision, setPreparationSessionRevision] = React.useState(0);
   const [runView, setRunView] = React.useState<'preparation' | 'stage' | 'live' | 'voice'>('preparation');
   const [currentRun, setCurrentRun] = React.useState<RunDocument | undefined>();
   const acceptRun = React.useCallback((value: RunDocument) => setCurrentRun(value), []);
@@ -49,6 +52,7 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
   const [dirty, setDirty] = React.useState(false);
+  const dirtyRef = React.useRef(dirty); dirtyRef.current = dirty;
   const [replacePrompt, setReplacePrompt] = React.useState<string | 'new' | undefined>();
   const epoch = React.useRef(0);
   const setDirtyState = React.useCallback((value: boolean) => setDirty(value), []);
@@ -101,7 +105,7 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
       setScreen({ kind: 'new', configuration, epoch: currentEpoch });
       setMessage(selection.kind === 'documented'
         ? 'Corte documental propuesto. Revisá sus fuentes y vacíos; elegí fecha, lugar y reparto, y curá por separado lo que cada actor puede recordar.'
-        : selection.preset === 'fibonacci' ? 'Ensayo sintético propuesto. Revisá y confirmá cada sección; la curación de los actores y tu identidad ficticia siguen a tu cargo.' : 'Puesta en blanco. Definí las circunstancias de esta representación.');
+        : selection.preset === 'blank' ? 'Puesta en blanco. Definí las circunstancias de esta representación.' : selection.preset === 'fibonacci' ? 'Ensayo sintético propuesto. Revisá y confirmá cada sección; la curación de los actores y tu identidad ficticia siguen a tu cargo.' : 'Puesta de CONTROL propuesta. Revisá las circunstancias y curá por separado identidad, historia, deseos y conocimiento de Max, 99 y el Jefe. El aviso no acredita una alarma real.');
     } catch (failure) {
       if (currentEpoch !== epoch.current) return;
       setScreen({ kind: 'choosing' }); setError(errorMessage(failure));
@@ -160,7 +164,9 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
   }
   function reconcile() {
     if (saving.kind !== 'conflict' || !['draft', 'ready'].includes(saving.remote.view.state.lifecycle)) return;
-    const configuration = reconcileDraft({ local: saving.local, remote: saving.remote.view.configuration, keepLocal: saving.keepLocal });
+    let configuration:RunConfigurationDraft;
+    try{configuration=reconcileDraft({ local: saving.local, remote: saving.remote.view.configuration, keepLocal: saving.keepLocal });}
+    catch(failure){setError(errorMessage(failure));return;}
     setScreen({ kind: 'reconciled', document: saving.remote, configuration, epoch: ++epoch.current }); setSaving({ kind: 'idle' }); setDirty(true);
     setMessage('Edición reconciliada localmente. Guardá para crear una revisión nueva.');
   }
@@ -187,11 +193,13 @@ export function RunDraftWorkspace(props: { catalog: CatalogPage['items']; openRe
       {screen.kind === 'loading' && <p role="status">Abriendo preparación…</p>}
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <><nav className="run-view-nav" aria-label="Vista de la representación"><button aria-current={runView === 'preparation' ? 'page' : undefined} onClick={() => setRunView('preparation')}>Preparación y requisitos</button><button onClick={() => setRunView('live')}>Ver representación en vivo</button><button aria-current={runView === 'stage' ? 'page' : undefined} onClick={() => setRunView('stage')}>Escenario, conversación e historia</button><button aria-current={runView === 'voice' ? 'page' : undefined} onClick={() => { setVoiceOpened(true); setRunView('voice'); }}>Voces y sonido</button></nav><RunControlsPanel runId={screen.document.view.configuration.runId} onRead={acceptRun} disabled={dirty || saving.kind !== 'idle'} /></>}
       <div hidden={runView !== 'preparation'}>
-      {draft && <RunDraftEditor key={`${draft.runId}:${screen.kind === 'editing' || screen.kind === 'new' || screen.kind === 'reconciled' ? screen.epoch : 0}`} draft={draft} catalog={props.catalog} saving={saving.kind !== 'idle'} {...(screen.kind === 'editing' ? { lifecycle: screen.document.view.state.lifecycle, readOnly: screen.document.view.state.editability === 'fork-published' || screen.document.view.state.editability === 'identity-promoted' || !['draft', 'ready'].includes(currentRun?.view.runId === draft.runId ? currentRun.view.lifecycle.kind : screen.document.view.state.lifecycle), ...(screen.document.view.state.editability === 'fork-published' ? { readOnlyReason: 'fork-published' as const } : screen.document.view.state.editability === 'identity-promoted' ? { readOnlyReason: 'identity-promoted' as const } : {}) } : {})} {...(message ? { message } : {})} initialDirty={screen.kind === 'new' || screen.kind === 'reconciled'} onDirty={setDirtyState} onSave={save} onValidate={() => void validate()} />}
+      {draft && (screen.kind === 'new' || screen.kind === 'reconciled' || screen.kind === 'editing' && !['fork-published', 'identity-promoted'].includes(screen.document.view.state.editability ?? 'editable') && ['draft', 'ready'].includes(currentRun?.view.runId === draft.runId ? currentRun.view.lifecycle.kind : screen.document.view.state.lifecycle)) && <PreparationSessionPanel onReady={() => setPreparationSessionRevision(value => value + 1)} />}
+      {draft && <RunDraftEditor sourceRefresh={preparationSessionRevision} {...(screen.kind==='editing'||screen.kind==='reconciled'?{baselineDraft:screen.document.view.configuration}:screen.kind==='new'?{baselineDraft:{...draft,icmWorkspace:undefined}}:{})} key={`${draft.runId}:${screen.kind === 'editing' || screen.kind === 'new' || screen.kind === 'reconciled' ? screen.epoch : 0}`} draft={draft} catalog={props.catalog} saving={saving.kind !== 'idle'} {...(screen.kind === 'editing' ? { lifecycle: screen.document.view.state.lifecycle, readOnly: screen.document.view.state.editability === 'fork-published' || screen.document.view.state.editability === 'identity-promoted' || !['draft', 'ready'].includes(currentRun?.view.runId === draft.runId ? currentRun.view.lifecycle.kind : screen.document.view.state.lifecycle), ...(screen.document.view.state.editability === 'fork-published' ? { readOnlyReason: 'fork-published' as const } : screen.document.view.state.editability === 'identity-promoted' ? { readOnlyReason: 'identity-promoted' as const } : {}) } : {})} {...(message ? { message } : {})} initialDirty={screen.kind === 'new' || screen.kind === 'reconciled'} onDirty={setDirtyState} onSave={save} onValidate={() => void validate()} />}
       {validation && (screen.kind==='editing'||screen.kind==='reconciled') && <RunDraftValidationResult validation={validation} state={screen.document.view.state}/>}
+      {screen.kind === 'editing' && screen.document.view.state.lifecycle === 'draft' && screen.document.view.state.worldRevision === null && <PreparationConfiguratorPanel key={`${screen.document.view.configuration.runId}:${preparationSessionRevision}`} document={screen.document} disabled={saving.kind !== 'idle'} dirty={dirty} onApplied={async () => { const runId = screen.document.view.configuration.runId; if (dirtyRef.current) { setReplacePrompt(runId); setMessage('Se aplicó la selección al borrador guardado. Tu edición local sigue conservada; revisá antes de abrir la revisión nueva.'); } else await openConfirmed(runId); }} />}
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && <RunPreflightPanel key={screen.document.view.configuration.runId} document={screen.document} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { currentRun } : {})} disabled={dirty || saving.kind !== 'idle'} />}
       </div>
-      {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <div hidden={runView !== 'stage' && runView !== 'live'}><RunStageWorkspace key={screen.document.view.configuration.runId} runId={screen.document.view.configuration.runId} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { knownLifecycle: currentRun.view.lifecycle.kind } : {})} active={runView === 'stage' || runView === 'live'} live={runView === 'live'} onExitLive={() => setRunView('stage')} derivedPreparation={screen.document.view.state.editability === 'fork-published'} onOpenRun={(id) => void open(id)} /></div>}
+      {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && <div hidden={runView !== 'stage' && runView !== 'live'}><RunStageWorkspace configuredHumanParticipants={screen.document.view.configuration.humanParticipants.kind==='empty'?[]:screen.document.view.configuration.humanParticipants.value.map(profile=>({participantId:profile.identity.participantId,label:profile.identity.displayName}))} key={screen.document.view.configuration.runId} runId={screen.document.view.configuration.runId} {...(currentRun?.view.runId === screen.document.view.configuration.runId ? { knownLifecycle: currentRun.view.lifecycle.kind } : {})} active={runView === 'stage' || runView === 'live'} live={runView === 'live'} onExitLive={() => setRunView('stage')} derivedPreparation={screen.document.view.state.editability === 'fork-published'} onOpenRun={(id) => void open(id)} /></div>}
       {(screen.kind === 'editing' || screen.kind === 'reconciled') && screen.document.view.state.worldRevision !== null && voiceOpened && <div hidden={runView !== 'voice'}><React.Suspense fallback={<p role="status">Cargando herramientas de voz y sonido. No se solicita generación de audio.</p>}><VoiceWorkspace key={screen.document.view.configuration.runId} runId={screen.document.view.configuration.runId} active={runView === 'voice'} /></React.Suspense></div>}
     </section>
   </div>;

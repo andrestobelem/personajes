@@ -1,4 +1,5 @@
 import React from "react";
+import { ScriptExportPanel } from './ScriptExportPanel.tsx';
 import { LivePerformance } from "./LivePerformance.tsx";
 import { RunRefreshSchema } from "../domain/run-refresh.ts";
 import type { z } from "zod";
@@ -18,6 +19,7 @@ import { ForkPanel } from './ForkPanel.tsx';
 import { NarrationPanel } from './NarrationPanel.tsx';
 import {IdentityPromotionPanel} from './IdentityPromotionPanel.tsx';
 import { InspectorPanel } from "./InspectorPanel.tsx";
+import type {HumanInteractionClient} from "./human-interaction-client.ts";
 import { HumanInteractionPanel } from "./HumanInteractionPanel.tsx";
 import { DramaticStructurePanel } from './DramaticStructurePanel.tsx';
 import { DirectorObservationsPanel } from './DirectorObservationsPanel.tsx';
@@ -107,10 +109,10 @@ export function stageMapData(stage: RunStageView): StageMapData {
             : { placeId: person.placeId, position: person.position },
         status:
           person.presence === "remote"
-            ? "Participación remota preparada"
-            : "Participación en escena preparada",
+            ? person.presenceConfirmation === "confirmed" ? "Participación remota confirmada en el corte" : "Participación remota preparada"
+            : person.presenceConfirmation === "confirmed" ? "Presencia en escena confirmada en el corte" : "Participación en escena preparada",
         details:
-          "Identidad humana configurada. Su presencia no afirma que haya enviado una intervención.",
+          person.presenceConfirmation === "confirmed" ? "Presencia registrada en el mundo observado; no afirma lectura, intervención ni memoria ICM." : "Identidad humana configurada: ubicación preparada, sin confirmación histórica de presencia.",
       })),
     ],
   };
@@ -136,6 +138,8 @@ export function RunStageWorkspace({
   runId,
   active = true,
   knownLifecycle,
+  configuredHumanParticipants,
+  humanInteractionApi,
   api = client,
   onOpenRun,
   derivedPreparation = false,
@@ -145,6 +149,8 @@ export function RunStageWorkspace({
   runId: string;
   active?: boolean;
   knownLifecycle?: RunStageView["lifecycle"];
+  humanInteractionApi?: HumanInteractionClient;
+  configuredHumanParticipants?: Array<Pick<RunStageView["humanParticipants"][number],"participantId"|"label">>;
   api?: RunObservationClient;
   onOpenRun?: (runId: string) => void;
   derivedPreparation?: boolean;
@@ -368,8 +374,8 @@ export function RunStageWorkspace({
   if (live) return observation === null
     ? <section className="live-performance"><button onClick={onExitLive}>Volver a los controles</button><p role="status">{message ?? 'Conectando con la representación…'}</p></section>
     : <LivePerformance stage={observation.stage} items={observation.conversations} jobs={observation.jobs}
-        map={stageMapData(observation.stage)} connected={streamState === 'active'} error={message} onExit={onExitLive}>
-        <HumanInteractionPanel runId={runId} participants={observation.stage.humanParticipants}
+        map={stageMapData(observation.stage)} connected={streamState === 'active'} error={message} onExit={onExitLive} exportControl={<ScriptExportPanel runId={runId} commitIndex={observation.stage.commitIndex} />}>
+        <HumanInteractionPanel {...(humanInteractionApi===undefined?{}:{api:humanInteractionApi})} runId={runId} participants={configuredHumanParticipants??observation.stage.humanParticipants}
           lifecycle={effectiveInterventionLifecycle(observation.stage.lifecycle, knownLifecycle)} />
       </LivePerformance>;
   return (
@@ -416,6 +422,7 @@ export function RunStageWorkspace({
         </p>
       ) : (
         <>
+          <ScriptExportPanel runId={runId} commitIndex={observation.stage.commitIndex} />
           <p className="stage-caption">
             Representación {runId} · configuración{" "}
             {observation.stage.configRevision} · Escenario{" "}
@@ -487,8 +494,9 @@ export function RunStageWorkspace({
           <IdentityPromotionPanel key={runId} runId={runId} active={active} historical={cut!==undefined} inspectionAllowed={inspection.runId===runId&&inspection.allowed}/>
           {cut === undefined && (
             <HumanInteractionPanel
+              {...(humanInteractionApi===undefined?{}:{api:humanInteractionApi})}
               runId={runId}
-              participants={observation.stage.humanParticipants}
+              participants={configuredHumanParticipants??observation.stage.humanParticipants}
               lifecycle={effectiveInterventionLifecycle(
                 observation.stage.lifecycle,
                 knownLifecycle,

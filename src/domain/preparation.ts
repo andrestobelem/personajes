@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ExperienceSchema } from './experience.ts';
 import { ForkSourceSchema } from './fork-origin.ts';
 import { DossierSourceSchema, addPreparationDossierSourceIssues } from './dossier-source.ts';
+import {CuratedLifeHistorySchema,CuratedCharacterDesiresSchema,addCharacterBiographyLinkIssues} from './character-biography.ts';
 import {
   CharacterIdSchema, ExperienceIdSchema, FictionalInstantSchema, HashSchema,
   JobIdSchema, OperationIdSchema, RevisionSchema, RunIdSchema, SourceRefIdSchema, WorldSeqSchema,
@@ -127,7 +128,9 @@ export const CuratedIdentitySchema = z.strictObject({
   values: z.array(z.string().min(1).max(2_000)).max(100),
   dispositions: z.array(z.string().min(1).max(2_000)).min(1).max(100),
   contradictions: z.array(z.string().min(1).max(2_000)).max(100),
-});
+  lifeHistory:CuratedLifeHistorySchema.optional(),
+  desires:CuratedCharacterDesiresSchema.optional(),
+}).superRefine((identity,ctx)=>{if((identity.lifeHistory===undefined)!==(identity.desires===undefined))ctx.addIssue({code:'custom',path:['lifeHistory'],message:'La historia de vida y los deseos deben declararse juntos; su ausencia conjunta sólo conserva una identidad legacy'});});
 export type CuratedIdentity = z.infer<typeof CuratedIdentitySchema>;
 
 export const VoiceProfileSchema = z.discriminatedUnion('kind', [
@@ -205,12 +208,17 @@ export const RelationshipSchema = z.strictObject({
 });
 export type Relationship = z.infer<typeof RelationshipSchema>;
 
+/** Operational world actions are explicit grants, never inferred from prose. */
+export const WorldActionSchema = z.enum(['observe', 'take', 'offer', 'putDown', 'wait', 'rest']);
+export type WorldAction = z.infer<typeof WorldActionSchema>;
+
 export const CapabilitySchema = z.discriminatedUnion('kind', [
   z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('speech'), description: z.string().min(1).max(2_000) }),
   z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('gesture'), description: z.string().min(1).max(2_000) }),
   z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('movement'), description: z.string().min(1).max(2_000) }),
   z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('nonverbal-sound'), description: z.string().min(1).max(2_000) }),
   z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('operate-device'), deviceId: z.string().min(1).max(120), description: z.string().min(1).max(2_000) }),
+  z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('world-action'), action: WorldActionSchema, description: z.string().min(1).max(2_000) }),
   z.strictObject({ capabilityId: CapabilityIdSchema, kind: z.literal('other'), description: z.string().min(1).max(2_000) }),
 ]);
 export type Capability = z.infer<typeof CapabilitySchema>;
@@ -431,6 +439,8 @@ function addPreparedCharacterIssues(character: PreparedCharacterObject, context:
       }
     }
   }
+
+  addCharacterBiographyLinkIssues({identity:character.identity.value,antecedentIds,ownGoalIds:new Set(character.goals.value.filter(goal=>goal.kind==='shared'?goal.participantIds.includes(character.characterId):goal.ownerCharacterId===character.characterId).map(goal=>goal.goalId))},context);
 
   for (const [index, relationship] of character.relationships.value.entries()) {
     if (relationship.ownerCharacterId !== character.characterId) {

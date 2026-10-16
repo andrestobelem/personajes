@@ -5,14 +5,16 @@ import { WorldClockSchema, WorldPlaceSchema } from '../domain/world-schema.ts';
 
 export const DRAFT_SECTIONS = [
   ['name', 'Nombre'], ['fictionalAt', 'Fecha y hora ficticias'], ['worldSnapshot', 'Escenario inicial'],
-  ['continuity', 'Continuidad'], ['roster', 'Reparto y preparación'], ['humanParticipants', 'Interlocutores humanos'],
+  ['icmWorkspace', 'Contexto ICM por audiencia'], ['continuity', 'Continuidad'], ['roster', 'Reparto y preparación'], ['humanParticipants', 'Interlocutores humanos'],
   ['dramaticLine', 'Línea dramática'], ['dramaticReferences', 'Referencias dramáticas'], ['circadianPolicy', 'Reloj'], ['spanishVariety', 'Español'],
   ['narrationMode', 'Narrador'], ['inferenceProfile', 'Modelo de los agentes'], ['budget', 'Presupuesto'], ['maxReformulations', 'Reformulaciones'], ['audio', 'Audio'],
 ] satisfies readonly (readonly [keyof RunConfigurationDraft, string])[];
 export type DraftSection = typeof DRAFT_SECTIONS[number][0];
 
 export function draftFieldState(field: RunConfigurationDraft[DraftSection], section?: DraftSection) {
-  if (field === undefined) return section === 'dramaticReferences'
+  if (field === undefined) return section === 'icmWorkspace'
+    ? { kind: 'empty' as const, label: 'Sin selección ICM', detail: 'Sin snapshot de contexto ICM seleccionado; la ausencia no identifica por sí sola una preparación histórica.' }
+    : section === 'dramaticReferences'
     ? { kind: 'empty' as const, label: 'Sin referencias', detail: 'Esta preparación histórica no registra referencias dramáticas.' }
     : { kind: 'empty' as const, label: 'Perfil histórico', detail: 'Esta preparación no registra una selección nueva de modelo.' };
   switch (field.kind) {
@@ -97,11 +99,13 @@ export function changedDraftSections(left: RunConfigurationDraft, right: RunConf
 }
 export function reconcileDraft(input: { local: RunConfigurationDraft; remote: RunConfigurationDraft; keepLocal: readonly DraftSection[] }) {
   if (input.local.runId !== input.remote.runId) throw new Error('No se pueden reconciliar representaciones distintas.');
+  if(input.keepLocal.includes('icmWorkspace')&&input.remote.icmWorkspace?.kind==='configured'&&input.local.icmWorkspace?.kind!=='configured')throw new Error('La revisión guardada ya tiene un snapshot ICM admitido. Conservá esa sección remota o reemplazala por otra selección explícita; no se puede retirarla. Tu edición local se conserva.');
   return input.keepLocal.reduce((draft, field) => RunConfigurationDraftSchema.parse({ ...draft, [field]: input.local[field] }), input.remote);
 }
 
 export function describeDraftSection(draft: RunConfigurationDraft, section: DraftSection): string {
   switch (section) {
+    case 'icmWorkspace': return draft.icmWorkspace===undefined||draft.icmWorkspace.kind==='empty'?'Sin selección ICM registrada':`${draft.icmWorkspace.value.sources.length} fuentes por audiencia · snapshot ${draft.icmWorkspace.value.snapshotHash}`;
     case 'inferenceProfile': return draft.inferenceProfile === undefined || draft.inferenceProfile.kind === 'empty'
       ? 'Modelo pendiente de selección explícita' : `${draft.inferenceProfile.value.model} · ${draft.inferenceProfile.value.reasoningEffort}`;
     case 'name': return draft.name.kind === 'empty' ? 'Sin nombre' : draft.name.value;

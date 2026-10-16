@@ -15,8 +15,9 @@ const RecallParametersSchema = z.strictObject({
   query: z.string().trim().min(1).max(2_048),
   limit: z.number().int().min(1).max(5).default(3),
 });
-const ProposalParametersSchema = z.strictObject({ action: z.unknown() });
-const PublishedProposalParametersSchema = z.strictObject({ action: WorldActorActionSchema });
+const ProposalParametersSchema = z.strictObject({ action: z.unknown(), nextInitiative: z.enum(['yield', 'after-resolution']) });
+const PublishedProposalParametersSchema = z.strictObject({ action: WorldActorActionSchema,
+  nextInitiative: z.enum(['yield', 'after-resolution']).describe('Elige yield para esperar una percepción/convocatoria normal, o after-resolution para pedir una única nueva oportunidad tras resolverse esta propuesta. No obliga a actuar ni crea una percepción.') });
 const PublishedProposalParameters = Type.Unsafe(z.toJSONSchema(PublishedProposalParametersSchema, { io: 'input' }));
 const ProposalContextSchema = z.strictObject({
   runId: RunIdSchema,
@@ -94,8 +95,11 @@ export function createActorTools(input: {
     description: [
       'Registra una sola acción tipada para esta generación. No afirma que ya ocurrió: queda pendiente de revisión del Continuista y resolución de Escenario.',
       'El parámetro action contiene un objeto WorldAttempt sin attemptId, runId, actorId ni expectedRevision; el host agrega esos campos desde el corte y el job autenticados.',
-      'Para communicate, revisa el scope del canal: addressed requiere uno o más audienceHandles de personajes conocidos; broadcast requiere la lista vacía. No inventes handles para personas humanas que carecen de ellos.',
-      'Kinds: observe (target visual/auditory), move (destinationHandle), communicate (channelHandle, audienceHandles, content), take (objectHandle), offer (objectHandle, recipientHandle), acceptOffer (offerHandle), useDevice (deviceHandle, operationId), wait/rest (durationMs), reviseGoal (goalId, change), reviseBelief (change, evidenceExperienceIds), reviseRelationship (targetHandle, stance, confidence, evidenceExperienceIds).',
+      'Para communicate, revisa el scope del canal: addressed requiere uno o más audienceHandles de participantes conocidos; broadcast requiere la lista vacía. No inventes handles para personas humanas que carecen de ellos.',
+      'El contenido speech requiere un canal speech; un gesto requiere un canal gesture de la modalidad correspondiente (visual para asentir o señalar, auditory para ladridos o gemidos). Si no tienes un canal compatible, elige otra acción disponible; no uses un canal de habla para enviar un gesto ni inventes canales.',
+      'Un resultado privado notApplied significa que tu intento no ocurrió. Úsalo para reconsiderar una acción posible; no lo conviertas en un parlamento recibido, un acontecimiento público ni una explicación física que el Escenario no te haya permitido conocer.',
+      'Junto con action elige nextInitiative: yield para esperar una percepción o convocatoria normal, after-resolution para pedir una única nueva oportunidad tras resolver esta propuesta. La continuación es una invitación técnica, no una percepción ni una obligación de actuar; la fecha la determina el reloj ficticio resultante, nunca elijas un timestamp.',
+      'Kinds: observe (target visual/auditory), move (destinationHandle), communicate (channelHandle, audienceHandles, content), take (objectHandle), putDown (objectHandle; places an object you currently hold at your current position), offer (objectHandle, recipientHandle), acceptOffer (offerHandle), useDevice (deviceHandle, operationId), wait/rest (durationMs), reviseGoal (goalId, change), reviseBelief (change, evidenceExperienceIds), reviseRelationship (targetHandle, stance, confidence, evidenceExperienceIds).',
     ].join(' '),
     parameters: PublishedProposalParameters,
     async execute(_toolCallId: string, rawParameters: unknown) {
@@ -108,15 +112,25 @@ export function createActorTools(input: {
       }
       const attempt = WorldAttemptSchema.parse({
         ...action,
-        attemptId: stableUuidV5(`attempt:${context.runId}:${context.jobId}:${context.generation}:${proposalContext.proposalVersion}:${canonicalJson(action)}`),
+        attemptId: stableUuidV5(`attempt:${context.runId}:${context.jobId}:${context.generation}:${proposalContext.proposalVersion}:${canonicalJson({action,nextInitiative:parameters.nextInitiative})}`),
         runId: context.runId,
         actorId: context.actorId,
         expectedRevision: context.worldRevision,
       });
       if (attempt.kind === 'communicate') {
         const channel = input.communicationChannels?.find(item => item.handle === attempt.channelHandle);
+        if (input.communicationChannels !== undefined && channel === undefined)
+          throw new Error('El canal no pertenece a los canales disponibles de tu situación. Elegí un channelHandle de tu contexto; la propuesta no fue registrada.');
+        const requiredKind = attempt.content.kind === 'speech' ? 'speech' : 'gesture';
+        if (channel !== undefined && channel.kind !== requiredKind)
+          throw new Error(`El contenido ${attempt.content.kind} requiere un canal ${requiredKind}. Elegí un canal compatible o una acción disponible distinta; la propuesta no fue registrada.`);
+        if (channel?.kind === 'gesture' && channel.modality !== undefined && attempt.content.kind === 'gesture') {
+          const requiredModality = attempt.content.gesture.kind === 'bark' || attempt.content.gesture.kind === 'whine' ? 'auditory' : 'visual';
+          if (channel.modality !== requiredModality)
+            throw new Error(`Este gesto requiere un canal gesture de modalidad ${requiredModality}. La propuesta no fue registrada.`);
+        }
         if (channel?.scope === 'addressed' && attempt.audienceHandles.length === 0)
-          throw new Error('El canal es dirigido (addressed): indica al menos un audienceHandle de un personaje conocido. La propuesta no fue registrada.');
+          throw new Error('El canal es dirigido (addressed): indica al menos un audienceHandle de un participante conocido. La propuesta no fue registrada.');
         if (channel?.scope === 'broadcast' && attempt.audienceHandles.length > 0)
           throw new Error('El canal es de difusión (broadcast): audienceHandles debe estar vacío. La propuesta no fue registrada.');
       }
@@ -128,6 +142,7 @@ export function createActorTools(input: {
         generation: context.generation,
         proposalSlot: proposalContext.proposalSlot,
         ...(context.lease === undefined ? {} : { lease: context.lease }),
+        nextInitiative: parameters.nextInitiative,
         attempt,
       });
       const result = input.journal.registerWorldProposal(registration);

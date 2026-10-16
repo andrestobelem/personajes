@@ -61,7 +61,7 @@ function physicalSessions(input: { host: ReturnType<typeof openLocalHost>; stats
           onRequestReserved(request) { lastRequest = request; }, original(actualModel) {
             input.stats.requests++; rounds++;
             const toolName = actor ? rounds === 1 ? 'recall_memory' : 'propose_action' : sessionInput.tools[0]?.name; assert.ok(toolName);
-            const argumentsValue = actor ? rounds === 1 ? { query: 'escuchar' } : { action: { kind: 'wait', durationMs: 1 } }
+            const argumentsValue = actor ? rounds === 1 ? { query: 'escuchar' } : { nextInitiative: 'yield', action: { kind: 'wait', durationMs: 1 } }
               : responseFor(validateContinuistaReviewContext({ kind: 'continuista-review-context', schemaVersion: 1, ...JSON.parse(prompt.text) }));
             const tool = rounds <= (actor ? 2 : 1) ? { type: 'toolCall' as const, id: randomUUID(), name: toolName, arguments: z.record(z.string(), z.json()).parse(JSON.parse(JSON.stringify(argumentsValue))) } : undefined;
             const message: AssistantMessage = { role: 'assistant', api: actualModel.api, provider: actualModel.provider, model: actualModel.id, content: tool === undefined ? [] : [tool], stopReason: tool === undefined ? 'stop' : 'toolUse', timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };

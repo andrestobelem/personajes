@@ -9,6 +9,7 @@ import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsMana
 import {
   createBudgetedStreamFunction,
   createPiSession,
+  MAX_PI_SYSTEM_PROMPT_CHARACTERS,
   openIdentitySessionManager,
   PiRuntime,
   isPiAdapterFailure,
@@ -761,6 +762,21 @@ test('factory reabre OAuth sintético persistido sin depender del snapshot vací
     assert.deepEqual([...handle.activeToolNames].sort(), ['propose_action', 'recall_memory']);
     // No prompt: this verifies local re-opening/gates only, never provider access.
   } finally { await handle?.abortAndDispose(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('factory conserva biografía extensa completa y contratos ICM dentro del límite explícito sin contactar proveedor',async(t)=>{
+  const directory=mkdtempSync(join(tmpdir(),'personajes-pi-full-biography-'));let handle:Awaited<ReturnType<typeof createPiSession>>|undefined,requests=0;
+  t.mock.method(globalThis,'fetch',async()=>{requests++;throw new Error('Provider network forbidden in this fixture');});
+  try{
+    await PiRuntime.create({privateDataRoot:directory});
+    const access=`e30.${Buffer.from(JSON.stringify({'https://api.openai.com/auth':{chatgpt_account_id:'synthetic-biography-test'}})).toString('base64url')}.synthetic`;
+    writeFileSync(join(directory,'pi','auth','auth.json'),JSON.stringify({'openai-codex':{type:'oauth',refresh:'synthetic-refresh',access,expires:Date.now()+86400000}}),{mode:0o600});
+    const runtime=await PiRuntime.create({privateDataRoot:directory}),systemPrompt=`# Historia de vida\n${'Historia admitida. '.repeat(8000)}\nEND_OF_COMPLETE_BIOGRAPHY\n# Contrato ICM\nActuar desde el punto de vista propio.`;
+    assert.ok(systemPrompt.length>131072);assert.ok(systemPrompt.length<=160000);
+    handle=await createPiSession({runtime,runId,identity:{kind:'admin',role:'continuista'},profile:DEFAULT_INFERENCE_PROFILE,systemPrompt,checkpoint:{kind:'fresh'},tools:[],adminToolAllowlist:{continuista:[]},requestPort:makePort()});
+    assert.deepEqual(handle.activeToolNames,[]);assert.equal(requests,0,'construction does not run inference or OAuth refresh');
+    await assert.rejects(createPiSession({runtime,runId,identity:{kind:'admin',role:'continuista'},profile:DEFAULT_INFERENCE_PROFILE,systemPrompt:'x'.repeat(MAX_PI_SYSTEM_PROMPT_CHARACTERS+1),checkpoint:{kind:'fresh'},tools:[],adminToolAllowlist:{continuista:[]},requestPort:makePort()}),error=>isPiAdapterFailure(error)&&error.code==='INVALID_PROMPT');assert.equal(requests,0);
+  }finally{await handle?.abortAndDispose();rmSync(directory,{recursive:true,force:true});}
 });
 
 test('wall-time deadline devuelve terminal acotado, descarta done tardío y conserva ownership hasta cierre real', async () => {

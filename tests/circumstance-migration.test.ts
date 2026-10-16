@@ -5,19 +5,22 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { openJournal } from '../src/adapters/journal.ts';
 import { setup, runId } from './fixtures/continuista.ts';
+import { downgradeCoordinatorPulsesTo44 } from './fixtures/journal-v45-downgrade.ts';
 
 function downgradeTo32(database: DatabaseSync) {
+  downgradeCoordinatorPulsesTo44(database);
+  database.exec('DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id;');
   const stored = database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='coordinator_pulses'").get()?.sql;
   assert.equal(typeof stored, 'string');
   if (typeof stored !== 'string') throw new Error('Falta esquema del coordinador');
   const legacy = stored.replace('coordinator_pulses', 'coordinator_pulses_legacy').replace("'directionCircumstance',", '');
-  database.exec(`PRAGMA foreign_keys=OFF; BEGIN; ${legacy};
+  database.exec(`DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; PRAGMA foreign_keys=OFF; BEGIN; ${legacy};
     INSERT INTO coordinator_pulses_legacy SELECT * FROM coordinator_pulses;
     DROP TABLE coordinator_pulses;
     ALTER TABLE coordinator_pulses_legacy RENAME TO coordinator_pulses;
     CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
     DROP TABLE circumstance_operations;
-    DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(33,34,35,36,37,38,39,40,41);
+    DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(33,34,35,36,37,38,39,40,41,42,43,44);
     COMMIT; PRAGMA foreign_keys=ON;`);
 }
 
@@ -44,14 +47,14 @@ for (const corruptChild of [false, true]) {
           legacy.exec('PRAGMA foreign_keys=OFF');
           legacy.prepare('INSERT INTO migration_audit_child VALUES(?)').run('00000000-0000-4000-8000-999999999999');
         }
-        expected = legacy.prepare('SELECT * FROM coordinator_pulses').all();
+        expected = legacy.prepare('SELECT * FROM coordinator_pulses').all().map(row => ({ ...row, ...(corruptChild ? {} : { parked_for_pulse_id: null }) }));
       } finally { legacy.close(); }
       if (corruptChild) assert.throws(() => openJournal({ path }), /Migración v33 produjo referencias inválidas/);
       else { journal = openJournal({ path }); journal.close(); journal = openJournal({ path }); }
       const after = new DatabaseSync(path);
       try {
-        assert.deepEqual(after.prepare('SELECT * FROM coordinator_pulses').all(), expected);
-        assert.equal(after.prepare('SELECT MAX(version) AS n FROM schema_version').get()?.n, corruptChild ? 32 : 41);
+        assert.deepEqual(after.prepare('SELECT * FROM coordinator_pulses').all().map(row => ({ ...row })), expected);
+        assert.equal(after.prepare('SELECT MAX(version) AS n FROM schema_version').get()?.n, corruptChild ? 32 : 45);
         assert.equal(after.prepare("SELECT name FROM sqlite_master WHERE name='coordinator_pulses_v33'").get(), undefined);
         assert.equal(after.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='circumstance_operations'").get()?.n, corruptChild ? 0 : 1);
         if (!corruptChild) {

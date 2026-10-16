@@ -1,6 +1,6 @@
 # Continuar en otra máquina
 
-Leer primero el [handoff vigente: 15 de octubre de 2026](2026-10-15-representacion-en-vivo.md) y luego los documentos que ese archivo indique para la tarea elegida.
+Leer primero el [handoff vigente: continuar con Claude](2026-10-16-continuar-con-claude.md) y luego los documentos que ese archivo indique para la tarea elegida.
 
 ## Al retomar
 
@@ -12,6 +12,8 @@ Leer primero el [handoff vigente: 15 de octubre de 2026](2026-10-15-representaci
 ## Al dejar otro handoff
 
 Crear `AAAA-MM-DD-tema.md` —agregar hora o sufijo si ya existe— y actualizar el enlace vigente de este índice. Conservar los anteriores como historia, sin tratarlos como estado actual.
+
+Usar la [plantilla de entrega](PLANTILLA.md) para registrar cada corte sin omitir el estado Git, los pendientes ni las dependencias privadas.
 
 Cada entrega debe incluir:
 

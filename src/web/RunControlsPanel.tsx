@@ -15,10 +15,17 @@ import {
 } from "./run-controls-client.ts";
 import {
   createRunPreflightClient,
+  preflightRejection,
   type RunPreflightClient,
 } from "./run-preflight-client.ts";
+import { reconnectSession } from "./client.ts";
 const client = createRunControlsClient();
 const preflightClient = createRunPreflightClient();
+const restoreLocalSession = async () => { await reconnectSession(); };
+function needsSessionRecovery(error: unknown): boolean {
+  const rejection = runControlRejection(error) ?? preflightRejection(error);
+  return rejection?.status === 401 || rejection?.status === 403;
+}
 const labels = {
   draft: "Borrador",
   ready: "Lista para iniciar",
@@ -125,12 +132,14 @@ export function RunControlsPanel({
   disabled = false,
   api = client,
   preflight = preflightClient,
+  restoreSession = restoreLocalSession,
 }: {
   runId: string;
   onRead?: (document: RunDocument) => void;
   disabled?: boolean;
   api?: RunControlsClient;
   preflight?: Pick<RunPreflightClient, "history">;
+  restoreSession?: () => Promise<void>;
 }) {
   const [stepId, setStepId] = React.useState<string | null>(null);
   const [step, setStep] = React.useState<z.infer<
@@ -138,6 +147,8 @@ export function RunControlsPanel({
   > | null>(null);
   const [current, setCurrent] = React.useState<RunDocument | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
+  const [readProblem, setReadProblem] = React.useState<string | null>(null);
+  const [sessionRecoveryNeeded, setSessionRecoveryNeeded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [intent, setIntent] = React.useState<RunControlIntent | null>(null);
   const [closePrompt, setClosePrompt] = React.useState(false);
@@ -153,6 +164,8 @@ export function RunControlsPanel({
     mutation.current = false;
     setCurrent(null);
     setMessage(null);
+    setReadProblem(null);
+    setSessionRecoveryNeeded(false);
     setIntent(null);
     setBusy(false);
     setClosePrompt(false);
@@ -184,18 +197,20 @@ export function RunControlsPanel({
           !mutation.current
         ) {
           setCurrent(next);
+          setReadProblem(null);
           onRead?.(next);
         }
-      } catch {
+      } catch (error) {
         if (
           !controller.signal.aborted &&
           readEpoch.current === epoch &&
           !mutation.current
         ) {
           setCurrent(null);
-          setMessage(
+          setReadProblem(
             "No se pudo sincronizar la representación. Los controles requieren una lectura confirmada del host.",
           );
+          if (needsSessionRecovery(error)) setSessionRecoveryNeeded(true);
         }
       }
       if (!controller.signal.aborted)
@@ -245,7 +260,9 @@ export function RunControlsPanel({
     mutation.current = true;
     setBusy(true);
     setIntent(captured);
-    setMessage(null);
+    setMessage(captured.command.kind === "start"
+      ? "Solicitando el inicio de la representación…"
+      : "Confirmando el control solicitado…");
     ++readEpoch.current;
     try {
       const result = await api.mutate(captured, controller.signal);
@@ -277,8 +294,15 @@ export function RunControlsPanel({
       if (controller.signal.aborted) return;
       const rejected = runControlRejection(error);
       if (rejected) {
-        setIntent(null);
-        setMessage(`${rejected.message} Referencia: ${rejected.requestId}.`);
+        if (needsSessionRecovery(error)) {
+          setSessionRecoveryNeeded(true);
+          // The same key may already identify a committed effect whose reply
+          // was lost. An authentication rejection cannot disprove that effect.
+          setMessage(`Restablecé la sesión local y recuperá el mismo control. Referencia: ${rejected.requestId}.`);
+        } else {
+          setIntent(null);
+          setMessage(`${rejected.message} Referencia: ${rejected.requestId}.`);
+        }
         setRefresh((value) => value + 1);
       } else
         setMessage(
@@ -309,6 +333,7 @@ export function RunControlsPanel({
       const epoch = runEpoch.current;
       mutation.current = true;
       setBusy(true);
+      setMessage("Verificando requisitos de ejecución…");
       try {
         const history = await preflight.history(runId, controller.signal);
         if (controller.signal.aborted) return;
@@ -334,11 +359,10 @@ export function RunControlsPanel({
             command: { kind, preflightJobId: passed.job.jobId, ...(kind === "resume" && retryBlockedActors ? {retryBlockedActors:true} : {}) },
           }),
         );
-      } catch {
-        if (!controller.signal.aborted)
-          setMessage(
-            "No se pudo confirmar una comprobación vigente. No se envió el control.",
-          );
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (needsSessionRecovery(error)) setSessionRecoveryNeeded(true);
+        setMessage("No se pudo confirmar una comprobación vigente. No se envió el control.");
       } finally {
         if (runEpoch.current === epoch) {
           mutation.current = false;
@@ -354,6 +378,32 @@ export function RunControlsPanel({
         command: { kind },
       }),
     );
+  }
+  async function restoreConnection() {
+    const controller = lifetime.current;
+    if (controller === null || mutation.current) return;
+    const epoch = runEpoch.current;
+    mutation.current = true;
+    setBusy(true);
+    setMessage("Restableciendo la conexión local…");
+    try {
+      await restoreSession();
+      if (controller.signal.aborted) return;
+      setCurrent(null);
+      setReadProblem(null);
+      setSessionRecoveryNeeded(false);
+      setRefresh(value => value + 1);
+      setMessage(intent === null
+        ? "Conexión restablecida. Consultando el estado; no se inició ninguna acción."
+        : "Conexión restablecida. Recuperá la misma operación pendiente para confirmar su resultado.");
+    } catch {
+      if (!controller.signal.aborted) setMessage("No se pudo restablecer la sesión local. Podés volver a intentarlo; no se envió ningún control.");
+    } finally {
+      if (runEpoch.current === epoch) {
+        mutation.current = false;
+        if (!controller.signal.aborted) setBusy(false);
+      }
+    }
   }
   const lifecycle = current?.view.lifecycle.kind;
   const blocked = disabled || busy || intent !== null || current === null;
@@ -392,7 +442,7 @@ export function RunControlsPanel({
         >
           Reanudar
         </button>
-        <button disabled={blocked || lifecycle !== "paused"} onClick={() => void control("resume", true)}>
+        <button disabled={blocked || (lifecycle !== "paused" && lifecycle !== "stopped")} onClick={() => void control("resume", true)}>
           Reanudar y reintentar actores bloqueados
         </button>
         <button
@@ -422,6 +472,11 @@ export function RunControlsPanel({
           Actualizar estado
         </button>
       </div>
+      {readProblem !== null && <p role="alert">{readProblem}</p>}
+      {sessionRecoveryNeeded && <div>
+        <p>La sesión local requiere actualización. Restablecerla no repite controles ni recupera permisos privados automáticamente.</p>
+        <button disabled={busy} onClick={() => void restoreConnection()}>Restablecer sesión local</button>
+      </div>}
       <p>
         Iniciar, reanudar y avanzar pueden llamar al modelo según la
         configuración y los límites. Pausar congela nuevas convocatorias.

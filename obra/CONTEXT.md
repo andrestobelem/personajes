@@ -10,6 +10,7 @@
 | Definir o revisar interfaz gráfica | [Interfaz](interfaz/CONTEXT.md) | Prioridad funcional y visual, flujos completos y separación entre estado y presentación |
 | Preparar o inspeccionar una escena | [Escenas](references/escenas.md) | Uno o más personajes, incluida acción solitaria o silencio |
 | Narrar para el espectador | [Narrador opcional](narrador/CONTEXT.md) | Fuentes autorizadas, revisión y salida no diegética |
+| Revisar narración candidata | [Revisor de narración](revisor-narracion/CONTEXT.md) | Texto exacto, fuentes y categorías epistemológicas; sin publicar |
 | Revisar una respuesta propuesta | [Continuista](continuista/CONTEXT.md) | Versión exacta, evidencias y criterios antes de publicación |
 | Resolver una acción | [Escenario](escenario/CONTEXT.md) | Autoridad y estado material necesario |
 | Observar la obra | [Observación](observacion/CONTEXT.md) | Conversaciones, evolución y progreso dramático |
@@ -20,7 +21,7 @@
 
 Cada personaje tiene su propia instancia Pi según la [configuración de instancias](_config/instancias-pi.md). El Coordinador invoca esas instancias; no alterna las identidades dentro de una sola sesión.
 
-Todos los roles LLM respetan el perfil elegido por representación según la [configuración de modelo](_config/agentes.md): Sol 6.1 bajo, predeterminado, u Opus 5.5 medio. Cada proveedor requiere acceso propio. La selección y las pruebas controladas no acreditan login o inferencia live.
+Todos los roles LLM respetan el perfil elegido por representación según la [configuración de modelo](_config/agentes.md): Sol 6.1 bajo, predeterminado, u Opus 5.5 medio. Cada proveedor requiere login OAuth en el host. La selección y las pruebas controladas no acreditan por sí mismas login o inferencia live.
 
 ## Process
 

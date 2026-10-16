@@ -28,7 +28,7 @@ function uuidSequence() {
 
 test('blank preserves the empty draft, creates no UUIDs and needs no catalog', async () => {
   const result = await createPreparationPreset({ preset: 'blank', runId, catalog: [], uuid: () => { throw new Error('Unexpected UUID request'); } });
-  assert.deepEqual(result, createEmptyRunConfigurationDraft({ runId, revision: 0 }));
+  assert.deepEqual(result, { ...createEmptyRunConfigurationDraft({ runId, revision: 0 }), icmWorkspace: { kind: 'empty' } });
 });
 
 test('synthetic preset is editable, consistently scoped and blocks promotion until reviewed and curated', async () => {
@@ -150,4 +150,40 @@ test('explicit curation can place each selected character into the suggested sce
     assert.ok(entity.capabilities.includes('speak'));
     assert.deepEqual(entity.mind.experiences, []);
   }
+});
+
+test('CONTROL ensemble proposes three distinct actors and an unverified physical document without preparing their minds', async () => {
+  const ensembleCatalog = [...catalog, ...['agente-99', 'jefe'].map((slug) => CatalogCharacterSummarySchema.parse({
+    characterId: slug, displayName: slug, revision: 0, hash: 'b'.repeat(64),
+    curationStatus: 'unreviewed', avatarRef: { kind: 'catalog-reference', slug },
+  }))];
+  const before = structuredClone(ensembleCatalog);
+  const draft = await createPreparationPreset({ preset: 'control-ensemble', runId, catalog: ensembleCatalog, uuid: uuidSequence() });
+  assert.deepEqual(ensembleCatalog, before);
+  if (draft.roster.kind !== 'proposed' || draft.worldSnapshot.kind !== 'proposed' || draft.continuity.kind !== 'proposed') assert.fail('The ensemble must remain a proposal.');
+  assert.deepEqual(draft.roster.value.activeCharacterIds, ['maxwell-smart', 'agente-99', 'jefe']);
+  assert.deepEqual(draft.roster.value.preparedCharacters, []);
+  assert.deepEqual(draft.icmWorkspace, { kind: 'empty' });
+  assert.deepEqual(draft.characterDefinitionPolicy, { kind: 'embodied-v1' });
+  const world = WorldPreparationCandidateSchema.parse(draft.worldSnapshot.value);
+  assert.equal(world.scenes?.[0]?.participantIds, undefined);
+  assert.equal(world.entities?.length, 2);
+  const paper = world.entities?.[0];
+  assert.equal(paper?.kind, 'object');
+  if (paper?.kind !== 'object') assert.fail('Expected a physical prop, never a placeholder actor.');
+  assert.match(paper.description ?? '', /no una prueba/);
+  assert.equal(world.inventory?.[0]?.objectEntityId, paper.entityId);
+  assert.equal(world.places?.length, 3);
+  assert.equal(world.connections?.length, 4);
+  assert.deepEqual(world.perceptualPaths, [], 'Separate rooms never grant remote hearing or vision by default.');
+  const record = world.entities?.find((entity) => entity.kind === 'object' && entity.label === 'Registro de mantenimiento');
+  assert.equal(record?.kind, 'object');
+  assert.match(record?.description ?? '', /no acredita el estado actual/);
+  assert.equal(world.inventory?.[0]?.location.kind, 'atPlace');
+  assert.equal(world.clock?.instant, Date.parse('1966-06-20T09:00:00-04:00'));
+  assert.deepEqual(draft.continuity.value.inclusions, []);
+  assert.equal(WorldSnapshotSchema.safeParse(world).success, false);
+  assert.notEqual(validateRunConfiguration({ draft }).kind, 'ready');
+  assert.doesNotMatch(JSON.stringify(draft), /fibonacci/i);
+  await assert.rejects(createPreparationPreset({ preset: 'control-ensemble', runId, catalog, uuid: randomUUID }), /agente-99/);
 });

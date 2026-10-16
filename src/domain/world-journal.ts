@@ -16,7 +16,7 @@ import { HumanInterventionResolutionSchema } from './human-intervention.ts';
 import { ActorWorldProjectionRequestSchema, ContinuityReferenceSchema } from './preparation.ts';
 import {
   HashSchema, CharacterIdSchema, FictionalInstantSchema, HumanParticipantIdSchema, PerceptionIdSchema, ProposalIdSchema, RevisionSchema, RunIdSchema,
-  ActorActivationIdSchema, ActorActivationInvitationIdSchema,
+  ActorActivationIdSchema, ActorActivationInvitationIdSchema, ActorInitiativeIdSchema,
   JobIdSchema, PulseIdSchema, WorldSeqSchema,
 } from './values.ts';
 
@@ -124,6 +124,8 @@ export const WorldProposalRegistrationSchema = z.strictObject({
   proposalSlot: z.number().int().min(0).max(2),
   /** Required by the journal whenever this proposal belongs to a durable actor job. */
   lease: z.strictObject({ ownerToken: z.string().uuid(), claimToken: z.string().uuid() }).optional(),
+  /** New actor sessions choose explicitly; absent legacy payloads mean yield. */
+  nextInitiative: z.enum(['yield', 'after-resolution']).optional(),
   attempt: WorldAttemptSchema,
 });
 
@@ -140,6 +142,8 @@ export const WorldProposalRecordSchema = z.strictObject({
   baseRevision: RevisionSchema,
   exactContentHash: z.string().regex(/^[0-9a-f]{64}$/),
   attemptHash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Absent on historical records and interpreted as `yield`. */
+  nextInitiative: z.enum(['yield', 'after-resolution']).optional(),
   attempt: WorldAttemptSchema,
 }).superRefine((record, context) => {
   const scopeFields = [record.jobId, record.generation, record.proposalSlot];
@@ -171,6 +175,8 @@ const ContinuistaReviewFieldsSchema = z.strictObject({
   actorId: CharacterIdSchema,
   stateRevision: RevisionSchema,
   exactContentHash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Echoes the reviewed proposal choice, without changing the World action hash. */
+  nextInitiative: z.enum(['yield', 'after-resolution']).optional(),
   verdict: z.enum(['allow', 'reformulate', 'reject']),
   criterionCodes: z.array(ContinuistaCriterionSchema).max(8),
   /** Public diagnosis; excludes evidence and free text. Absent only in legacy data or non-reformulation reviews. */
@@ -394,6 +400,16 @@ export const ActorTurnJobViewSchema = z.strictObject({
   frozenWorldCut: FrozenActorWorldCutSchema.nullable(),
   /** Direction ledger revision frozen on the first claim; null means legacy/unavailable. */
   frozenDirectionRevision: RevisionSchema.nullable(),
+  /** Private, durable technical cause; it is not a World perception or memory. */
+  initiative: z.strictObject({
+    initiativeId: ActorInitiativeIdSchema,
+    sourceProposalId: ProposalIdSchema,
+    sourceVersion: z.number().int().min(1).max(3),
+    sourceCommitIndex: RevisionSchema,
+    sourceWorldRevision: RevisionSchema,
+    sourceWorldSeq: WorldSeqSchema,
+    eligibleAt: FictionalInstantSchema,
+  }).nullable().default(null),
   /** Present only when a technical invitation, rather than a perception, admitted this actor job. */
   activation: z.strictObject({
     activationId: ActorActivationIdSchema,
@@ -416,6 +432,7 @@ export const CoordinatorPulseViewSchema = z.strictObject({
   lifecycleRevision: RevisionSchema.nullable(),
   cause: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.enum(['humanIntervention', 'actorAttempt', 'directionCircumstance']), id: z.string().min(1).max(200), commitIndex: z.number().int().positive() }),
+    z.strictObject({ kind: z.literal('actorInitiative'), id: ActorInitiativeIdSchema, commitIndex: z.number().int().positive() }),
     z.strictObject({ kind: z.literal('actorActivation'), id: ActorActivationIdSchema, trigger: z.discriminatedUnion('kind', [
       z.strictObject({kind:z.literal('initial-goal')}),
       z.strictObject({kind:z.literal('routine-boundary'),boundaryAt:FictionalInstantSchema}),

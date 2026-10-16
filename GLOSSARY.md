@@ -33,9 +33,14 @@ _Evitar_: tratar aperturas y cierres heredados como acontecimientos nuevos.
 **Historia de vida**: Acontecimientos de la biografía de un personaje, incluidos los que no recuerda o interpreta de otra manera.
 _Evitar_: memoria como sinónimo de biografía.
 
+**Biografía encarnada**: Historia de vida admitida para una interpretación, con sus antecedentes, lagunas y contradicciones, que acompaña la identidad del personaje. Su alcance depende de la continuidad elegida y no convierte todos los datos de su expediente en recuerdos propios.
+_Evitar_: expediente documental completo como conocimiento automático del personaje.
+
 **Memoria**: Registro subjetivo de experiencias y relatos que un personaje conserva, interpreta y puede revisar.
 
 **Percepción**: Experiencia de algo que un personaje puede observar o recibir desde su situación y sus medios.
+
+**Resultado privado del intento**: Información que recibe el actor sobre si su acción pudo realizarse, para reconsiderar qué hacer. Un intento no realizado no se convierte por ello en un acontecimiento público ni en un testimonio de otro personaje.
 
 **Testimonio**: Relato que un participante comunica sobre algo que afirma conocer. Recibirlo no equivale a haber presenciado ni confirmado lo relatado.
 
@@ -45,6 +50,8 @@ _Evitar_: memoria como sinónimo de biografía.
 _Evitar_: conocimiento completo de la obra atribuido a cada personaje.
 
 **Deseo**: Aquello que un personaje busca, necesita o teme perder, y que puede orientar sus objetivos.
+
+**Tensión del deseo**: Conflicto entre lo que el personaje desea y sus valores, vínculos, temores u otros deseos.
 
 **Objetivo del personaje**: Resultado que el personaje intenta conseguir; puede ser duradero o pertenecer a una situación concreta.
 _Evitar_: premisa dramática como sinónimo de goal individual.
@@ -79,6 +86,10 @@ _Evitar_: escenografía como sinónimo de todas las reglas, acontecimientos y re
 
 **Acción**: Intento de un personaje de producir un efecto en el escenario o en otra persona. Su resultado puede diferir de su intención.
 
+**Custodia física**: Situación de un objeto que un personaje lleva consigo. No implica propiedad legal, conocimiento de su contenido ni consentimiento para que otro lo tome.
+
+**Dejar un objeto**: Acción por la que un personaje sitúa un objeto que lleva en el lugar donde se encuentra. No es una entrega a otro personaje ni certifica que alguien lo haya recibido.
+
 **Propuesta de acción**: Acción elegida para intentar, todavía pendiente de determinar qué sucede en el escenario.
 _Evitar_: propuesta como sinónimo de acontecimiento consumado.
 
@@ -97,6 +108,9 @@ _Evitar_: evento del mundo como nombre operativo.
 
 **Coordinador de la obra**: Responsable de marcar el pulso de la representación y ordenar la participación, el avance del tiempo y la resolución de acontecimientos, sin decidir en lugar de los personajes.
 _Evitar_: coordinador como intérprete único de todo el reparto.
+
+**Iniciativa propia**: Voluntad de un actor de volver a intervenir desde sus deseos y situación, sin necesitar que otro participante le comunique algo nuevo. Ceder la iniciativa deja abierta la posibilidad de reaccionar a lo que perciba después.
+_Evitar_: percepción nueva como sinónimo de iniciativa o convocatoria como obligación de actuar.
 
 **Regidor**: Responsable de moderar el paso entre intervenciones, indicaciones y acciones permitidas, preservando las fronteras de autoridad y de interpretación.
 

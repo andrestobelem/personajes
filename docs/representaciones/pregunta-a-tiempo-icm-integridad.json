@@ -1,0 +1,26 @@
+{
+  "runId": "9a9ab007-b4f8-4775-af16-5f5fb58480ae",
+  "configurationRevision": 1,
+  "workspaceSnapshotHash": "48fd6caccd735798cb64b94e903b25ff1de17fd370ef72b127ce7ab08541c3ae",
+  "sourceCount": 9,
+  "packetCount": 29,
+  "audiences": {
+    "actor:hymie": 5,
+    "actor:maxwell-smart": 6,
+    "continuista": 11,
+    "director": 7
+  },
+  "checks": [
+    "JSON canónico y checksums de configuración, scope, packet y receipt",
+    "audiencia, job, generación y revisión",
+    "corte de mundo persistido y checksum",
+    "contrato compilado y preparación actoral propia"
+  ],
+  "limits": "Inspección readonly de paquetes y cortes; no aceptación integral de relaciones con todas las sesiones/jobs ni transferencia entre hosts.",
+  "final": {
+    "lifecycle": "stopped",
+    "worldRevision": 17,
+    "worldSeq": 14,
+    "commitIndex": 17
+  }
+}

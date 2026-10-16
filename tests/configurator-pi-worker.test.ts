@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash,randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -9,9 +9,14 @@ import { configuratorValueHash } from '../src/application/configurator-context.t
 import { createConfiguratorPiWorker } from '../src/application/configurator-pi-worker.ts';
 import { configuratorEvolutionFixture } from './fixtures/configurator-evolution.ts';
 import { controlledConfiguratorSessionFactory, configuratorSessionStats } from './fixtures/configurator-session.ts';
+import {createIcmContextPacket,IcmContextPacketSchema,createIcmWorkspaceSnapshot,hashIcmMarkdown,type IcmWorkspaceSnapshot} from '../src/domain/icm-workspace.ts';
+import {IcmContextPacketReceiptSchema} from '../src/domain/icm-context-jobs.ts';
+import {actorId} from './fixtures/continuista.ts';
+import {CONFIGURATOR_ICM_PROMPT} from '../src/application/configurator-prompt.ts';
+import {canonicalDirectorValue} from '../src/application/director-context.ts';
 
-async function fixture() {
-  const f = await configuratorEvolutionFixture();
+async function fixture(icmWorkspace?:IcmWorkspaceSnapshot) {
+  const f = await configuratorEvolutionFixture(icmWorkspace===undefined?{}:{icmWorkspace});
   const world = f.base.journal.loadWorld({ runId: f.source.snapshot.runId }); assert.ok(world);
   f.base.journal.setWorldLifecycle({ runId: world.runId, expectedWorldRevision: world.revision, expectedConfigRevision: f.source.configuration.configRevision, target: 'paused' });
   const host = {
@@ -211,3 +216,102 @@ test('fallo al preparar cuota tras claim termina el job sin abrir Pi ni dejarlo 
     assert.equal(f.counts().reservations.length, 0);
   } finally { f.close(); }
 });
+
+function configuratorWorkspace(){
+  const audiences=[{role:'actor' as const,actorId},...(['continuista','director','configurator'] as const).map(role=>({role}))];
+  return createIcmWorkspaceSnapshot({sources:audiences.map(audience=>({sourceId:`synthetic.${audience.role}`,audience,revision:0,
+    sourceHash:hashIcmMarkdown(audience.role),sections:[{sectionId:'process',markdown:`ICM_PRIVATE_${audience.role}`}]}))});
+}
+
+test('Configurador ICM acepta dos requests SDK físicas y conserva aceptación tras reabrir sin reemplazar el prompt por JSON legacy',async()=>{
+  const f=await fixture(configuratorWorkspace());
+  try{
+    const before=f.f.base.journal.loadWorld({runId:f.job.runId});
+    let dispatchedPrompt='';
+    const worker=createConfiguratorPiWorker({ledger:f.ledger,journal:f.f.base.journal,runtime:f.runtime,
+      sessionFactory:controlledConfiguratorSessionFactory({root:f.f.base.directory,stats:f.stats,transformUserPrompt(text){dispatchedPrompt=text;return text;}})});
+    const result=await worker.run(f.job);assert.ok('job' in result,JSON.stringify(result));assert.equal(result.job.state,'accepted');
+    assert.equal(dispatchedPrompt,CONFIGURATOR_ICM_PROMPT);assert.equal(f.stats.requests,2);assert.equal(f.stats.disposed,1);
+    assert.deepEqual(f.f.base.journal.loadWorld({runId:f.job.runId}),before);
+    const sessionPath=f.counts().sessions[0]?.session_path;assert.equal(typeof sessionPath,'string');
+    const messages=readFileSync(String(sessionPath),'utf8');assert.ok(messages.includes(CONFIGURATOR_ICM_PROMPT));
+    f.reopen();assert.equal(f.ledger.readAccepted({jobId:f.job.jobId,principalId:f.job.principalId})?.job.state,'accepted');
+    assert.equal(f.stats.requests,2,'historical verification does not infer');
+  }finally{f.close();}
+});
+
+for(const prompt of ['foreign','legacy-context'] as const){
+  test(`Configurador ICM rechaza user prompt ${prompt} aunque tool y checkpoints físicos sean válidos`,async()=>{
+    const f=await fixture(configuratorWorkspace());
+    try{
+      const worker=createConfiguratorPiWorker({ledger:f.ledger,journal:f.f.base.journal,runtime:f.runtime,
+        sessionFactory:controlledConfiguratorSessionFactory({root:f.f.base.directory,stats:f.stats,
+          transformUserPrompt(_text,context){return prompt==='foreign'?'Texto de otro trabajo':canonicalDirectorValue(context);}})});
+      const result=await worker.run(f.job);assert.ok(!('job' in result));assert.equal(result.state,'failed');
+      assert.equal(result.failureCode,'CONFIGURATOR_INPUT_CONTEXT_MISMATCH');assert.equal(f.stats.requests,2);
+      assert.equal(f.ledger.readAccepted({jobId:f.job.jobId,principalId:f.job.principalId}),undefined);
+    }finally{f.close();}
+  });
+}
+
+test('Configurador ICM rechaza paquete durable alterado antes de aceptar y al releer aceptación',async()=>{
+  for(const when of ['before-acceptance','after-acceptance'] as const){
+    const f=await fixture(configuratorWorkspace());
+    try{
+      const corrupt=()=>f.mutate(db=>{db.exec('DROP TRIGGER icm_context_packets_no_update');
+        db.prepare("UPDATE icm_context_packets SET packet_json=replace(packet_json,'ICM_PRIVATE_configurator','CORRUPTED_configurator') WHERE job_id=?").run(f.job.jobId);});
+      const worker=createConfiguratorPiWorker({ledger:f.ledger,journal:f.f.base.journal,runtime:f.runtime,
+        sessionFactory:controlledConfiguratorSessionFactory({root:f.f.base.directory,stats:f.stats,...(when==='before-acceptance'?{afterTerminal:corrupt}:{})})});
+      const result=await worker.run(f.job);assert.equal(f.stats.requests,2);
+      if(when==='before-acceptance'){assert.ok(!('job' in result));assert.equal(result.state,'failed');assert.equal(result.failureCode,'CONFIGURATOR_INPUT_ICM_PACKET_MISMATCH');}
+      else{assert.ok('job' in result);assert.equal(result.job.state,'accepted');corrupt();
+        assert.throws(()=>f.ledger.readAccepted({jobId:f.job.jobId,principalId:f.job.principalId}),/CONFIGURATOR_INPUT_ICM_PACKET_MISMATCH/);}
+    }finally{f.close();}
+  }
+});
+
+for(const changed of ['foreign-generation','foreign-context'] as const){
+  test(`Configurador ICM rechaza paquete autoconsistente ${changed} aunque se recalculen todos sus sellos`,async()=>{
+    const f=await fixture(configuratorWorkspace());
+    try{
+      const worker=createConfiguratorPiWorker({ledger:f.ledger,journal:f.f.base.journal,runtime:f.runtime,
+        sessionFactory:controlledConfiguratorSessionFactory({root:f.f.base.directory,stats:f.stats,afterTerminal(){f.mutate(db=>{
+          const row=db.prepare('SELECT packet_json,receipt_json FROM icm_context_packets WHERE job_id=?').get(f.job.jobId);assert.ok(row);
+          const packet=IcmContextPacketSchema.parse(JSON.parse(String(row.packet_json)));
+          const receipt=IcmContextPacketReceiptSchema.parse(JSON.parse(String(row.receipt_json)));
+          const {kind:_kind,schemaVersion:_schemaVersion,packetHash:_packetHash,...body}=packet;
+          const replacement=createIcmContextPacket({...body,...(changed==='foreign-generation'?{scope:{...packet.scope,generation:packet.scope.generation+1}}:{diegeticContextMarkdown:'Otro contexto con sello recalculado'})});
+          const replacedReceipt={...receipt,scope:replacement.scope,packetHash:replacement.packetHash};
+          const scopeText=canonicalDirectorValue(replacement.scope),packetText=canonicalDirectorValue(replacement),receiptText=canonicalDirectorValue(replacedReceipt);
+          const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+          db.exec('DROP TRIGGER icm_context_packets_no_update');
+          db.prepare('UPDATE icm_context_packets SET scope_json=?,scope_hash=?,packet_json=?,packet_hash=?,receipt_json=?,receipt_hash=? WHERE job_id=?')
+            .run(scopeText,hash(scopeText),packetText,hash(packetText),receiptText,hash(receiptText),f.job.jobId);
+        });}})});
+      const result=await worker.run(f.job);assert.ok(!('job' in result));assert.equal(result.state,'failed');
+      assert.equal(result.failureCode,'CONFIGURATOR_INPUT_ICM_PACKET_MISMATCH');assert.equal(f.stats.requests,2);
+    }finally{f.close();}
+  });
+}
+
+for(const corruption of ['missing-commit','snapshot-hash','world-revision','world-seq'] as const){
+  test(`Configurador valida ancla ${corruption} en ICM y legacy al releer aceptación`,async()=>{
+    for(const workspace of [undefined,configuratorWorkspace()]){
+      const f=await fixture(workspace);
+      try{
+        const worker=createConfiguratorPiWorker({ledger:f.ledger,journal:f.f.base.journal,runtime:f.runtime,
+          sessionFactory:controlledConfiguratorSessionFactory({root:f.f.base.directory,stats:f.stats})});
+        const result=await worker.run(f.job);assert.ok('job' in result);assert.equal(result.job.state,'accepted');
+        assert.ok(f.job.source.commitIndex>0);
+        f.mutate(db=>{
+          if(corruption==='missing-commit'){db.exec('PRAGMA foreign_keys=OFF');db.prepare('DELETE FROM world_commits WHERE run_id=? AND commit_index=?').run(f.job.runId,f.job.source.commitIndex);}
+          else if(corruption==='snapshot-hash')db.prepare('UPDATE world_commits SET snapshot_hash=? WHERE run_id=? AND commit_index=?').run('0'.repeat(64),f.job.runId,f.job.source.commitIndex);
+          else if(corruption==='world-revision')db.prepare('UPDATE world_commits SET world_revision=world_revision+1 WHERE run_id=? AND commit_index=?').run(f.job.runId,f.job.source.commitIndex);
+          else db.prepare('UPDATE world_commits SET last_seq=last_seq+1 WHERE run_id=? AND commit_index=?').run(f.job.runId,f.job.source.commitIndex);
+        });
+        assert.throws(()=>f.ledger.readAccepted({jobId:f.job.jobId,principalId:f.job.principalId}),/CONFIGURATOR_INPUT_SOURCE_MISMATCH/);
+        assert.equal(f.stats.requests,2);
+      }finally{f.close();}
+    }
+  });
+}

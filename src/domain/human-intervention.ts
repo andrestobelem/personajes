@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HumanInterventionRequestSchema, HumanParticipantProfileSchema } from './interaction.ts';
+import { HumanInterventionRequestSchema, humanParticipantProfileAtSnapshot } from './interaction.ts';
 import {
   WorldEventSchema, WorldPerceptionSchema, WorldSnapshotSchema,
   canHearSpeechAt, characterCanReceiveAt,
@@ -50,7 +50,7 @@ export function resolveHumanIntervention(input: {
   ids: WorldIdSource;
 }): HumanInterventionResolution {
   const world = WorldSnapshotSchema.parse(input.snapshot);
-  const profile = HumanParticipantProfileSchema.parse(input.profile);
+  const profile = humanParticipantProfileAtSnapshot({snapshot:world,profile:input.profile});
   const request = HumanInterventionRequestSchema.parse(input.request);
   const interventionId = HumanInterventionIdSchema.parse(input.interventionId);
   const expectedRevision = RevisionSchema.parse(input.expectedRevision);
@@ -139,6 +139,8 @@ export function resolveHumanIntervention(input: {
     : offer);
   const newSnapshot = WorldSnapshotSchema.parse({
     ...world, revision, seq: WorldSeqSchema.parse(world.seq + events.length),
+    humanParticipants:[...(world.humanParticipants??[]).filter(item=>item.participantId!==profile.identity.participantId),
+      {participantId:profile.identity.participantId,label:profile.identity.displayName,presence:profile.presence}],
     clock: { ...world.clock, instant: endAt.data }, offers,
   });
   return HumanInterventionResolutionSchema.parse({

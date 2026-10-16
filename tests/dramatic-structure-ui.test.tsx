@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import React, { act } from 'react';
 import { JSDOM } from 'jsdom';
-import { DramaticStructureEventSchema, DramaticStructureSceneOptionsSchema, DramaticStructureViewSchema } from '../src/domain/dramatic-structure.ts';
+import { DramaticStructureEventSchema, DramaticStructureSceneOptionsSchema, DramaticStructureViewSchema, DramaticStructurePresentationSchema } from '../src/domain/dramatic-structure.ts';
 import { RunIdSchema, RevisionSchema } from '../src/domain/values.ts';
 import { createRunDramaticStructureClient, type DramaticStructureDocument, type RunDramaticStructureClient } from '../src/web/run-dramatic-structure-client.ts';
 
@@ -55,8 +55,8 @@ test('scene index opens exact local cuts and explains inherited scenes without i
     ];
     const structure = DramaticStructureViewSchema.parse({ runId, structureRevision: 4, activeEpisodeId: episodeId, activeSceneId: null,
       episodes: [{ episodeId, ordinal: 1, title: 'Prólogo', lifecycle: 'open', openingCut: { worldRevision: 1, worldSeq: 0, structureRevision: 1, commitIndex: 4 },
-        closingCut: null, consequenceEventIds: [], openLines: [], sceneIds, acts: [] }], unassignedLegacyScenes: [] });
-    const document: DramaticStructureDocument = { value: { ...structure, worldRevision: RevisionSchema.parse(4), worldSeq: RevisionSchema.parse(0), commitIndex: RevisionSchema.parse(18) }, etag: 'test-etag' };
+        closingCut: null, consequenceEventIds: [], openLines: [], sceneIds, acts: [{actId:'66666666-6666-4666-8666-666666666666',ordinal:1,title:'Primer acto',sceneIds:[sceneIds[0]]}] }], unassignedLegacyScenes: [] });
+    const document: DramaticStructureDocument = { value: { ...DramaticStructurePresentationSchema.parse({ ...structure, sceneLabels: sceneIds.map((id, index) => ({ id, label: ['La reunión', 'La persecución', 'Escena heredada'][index]! })) }), worldRevision: RevisionSchema.parse(4), worldSeq: RevisionSchema.parse(0), commitIndex: RevisionSchema.parse(18) }, etag: 'test-etag' };
     const structureClient: RunDramaticStructureClient = {
       async read() { return document; },
       async events() { return { events, hasMore: false, structureRevision: RevisionSchema.parse(4) }; },
@@ -76,7 +76,6 @@ test('scene index opens exact local cuts and explains inherited scenes without i
     await act(async () => {
       root.render(React.createElement(DramaticStructurePanel, {
         runId, lifecycle: 'closed', active: true, refreshToken: 'test', confirmedEvents: [],
-        sceneLabels: sceneIds.map((id, index) => ({ id, label: ['La reunión', 'La persecución', 'Escena heredada'][index]! })),
         onSelectCommit: (commitIndex: number) => selected.push(commitIndex), structureClient,
       }));
     });
@@ -85,6 +84,7 @@ test('scene index opens exact local cuts and explains inherited scenes without i
     const closing = container.querySelector<HTMLButtonElement>('[aria-label="Ver cierre de La reunión (commit 12)"]');
     const secondOpening = container.querySelector<HTMLButtonElement>('[aria-label="Ver apertura de La persecución (commit 14)"]');
     const secondClosing = container.querySelector<HTMLButtonElement>('[aria-label="Ver cierre de La persecución (commit 18)"]');
+    assert.match(container.textContent ?? '', /Primer acto: La reunión/);
     assert.ok(opening);
     assert.ok(closing);
     assert.ok(secondOpening);

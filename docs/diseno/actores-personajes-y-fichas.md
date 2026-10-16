@@ -8,6 +8,16 @@ Se lee junto con la [constitución](../constitucion.md), que consolida también 
 
 La adaptación agéntica descrita aquí es propia del proyecto. No constituye una definición histórica del Método ni supone que un modelo tenga experiencias humanas, conciencia, emociones o recuerdos autobiográficos propios. Cuando se habla de sentir, recordar o querer, se describe la vida ficticia del personaje y su representación en la actuación.
 
+## Aclaración de implementación: biografía dentro del personaje
+
+El pedido reiterado el 16 de octubre de 2026 exige incorporar la historia de vida a la preparación que recibe el actor. Conservar expedientes de investigación en `docs` no satisface por sí solo ese requisito. La implementación de esta ampliación está en curso; sus pruebas y la aceptación de una puesta completa deben acreditarse por separado.
+
+La identidad preparada reúne autoimagen, valores, disposiciones y contradicciones, además de una historia de vida extensa y deseos explícitos. La historia tiene narrativa, referencias a antecedentes admitidos, lagunas y contradicciones. Cada deseo expresa qué busca el personaje, qué está en juego, qué tensión lo atraviesa y qué objetivos propios o compartidos orienta. Las referencias deben resolver dentro de la preparación de ese personaje.
+
+El actor recibe esa biografía junto con su voz, vínculos, capacidades y situación. La memoria conserva por separado experiencias subjetivas efectivamente admitidas: una biografía no fabrica experiencias de la representación ni habilita recuerdos de otros personajes. El dossier de investigación puede contener datos de producción o acontecimientos futuros que quedan fuera de la continuidad elegida y del conocimiento del personaje.
+
+Las preparaciones históricas incompletas se conservan como tales. Las nuevas puestas deben exigir esta definición encarnada antes de quedar listas; completar una antigua exige una revisión explícita. Una biografía exhaustiva puede reconocer infancia o formación desconocidas, sin inventarlas como hechos de la serie.
+
 ## 1. Requisitos y propuestas
 
 ### Requisitos expresados por el usuario
@@ -394,3 +404,9 @@ Una ficha es útil cuando permite producir y revisar actuaciones coherentes, sit
 - Cambiar un detalle irrelevante de la escena y verificar que no reescribe arbitrariamente la identidad o la biografía.
 
 No se espera una frase exacta o una única acción correcta en cada escenario. Se evalúa un conjunto de conductas compatibles con el personaje y con la información a la que tuvo acceso.
+
+## Curación y conocimiento del actor
+
+La identidad preparada conserva los vacíos y contradicciones de la investigación para revisión y procedencia. Esos metadatos de `lifeHistory` pueden nombrar revelaciones de etapas posteriores del corpus; no forman parte del conocimiento que se entrega al actor. La proyección privada transmite la narración biográfica admitida, sus enlaces de antecedentes y los deseos propios, conservando los metadatos curatoriales en la configuración y para el Continuista. Esto no elimina la obligación de revisar la narración misma para excluir antecedentes futuros no admitidos.
+
+La regresión de biografía usa marcadores curatoriales de revelaciones futuras: verifica que permanezcan en la identidad preparada y no aparezcan en el prompt privado, mientras sí llegan historia, deseos, Goals y memoria propia. Los registros y sesiones históricos permanecen intactos; cambiar una proyección futura no borra lo que una sesión anterior ya recibió.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "get-smart-original-1965-1970-2026-10-14.1",
+  "catalogVersion": "get-smart-original-1965-1970-2026-10-16.1",
   "characters": [
     {
       "characterId": "maxwell-smart",
@@ -14,14 +14,14 @@
       "displayName": "Agente 99",
       "path": "docs/personajes/get-smart/agente-99.md",
       "avatarSlug": "agente-99",
-      "sha256": "db42ef27bfaa7959bcc89d9a7688f44e8c709cf1489a7854d1e6693d121ead31"
+      "sha256": "3557852efe077489e1131f9489a8e71e22c7492b569720f4fda58c49a100ed03"
     },
     {
       "characterId": "jefe",
       "displayName": "Jefe",
       "path": "docs/personajes/get-smart/jefe.md",
       "avatarSlug": "jefe",
-      "sha256": "e47f61cb024808a67976e77eefacf0946c25c4936238a0dc90d4ca3c10a8021a"
+      "sha256": "1bfd2f2f0f69274cd286b66bbc50ac881b31eb54eaf5fa1b1be2fb290395a496"
     },
     {
       "characterId": "larrabee",

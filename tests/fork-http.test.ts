@@ -1,7 +1,7 @@
 import {RevisionSchema} from '../src/domain/values.ts';
 import {createDramaticStructureApplication} from '../src/application/dramatic-structure.ts';
 import {createRunLifecycleApplication} from '../src/application/run-lifecycle.ts';
-import {DramaticStructureViewSchema} from '../src/domain/dramatic-structure.ts';
+import {DramaticStructurePresentationSchema} from '../src/domain/dramatic-structure.ts';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -99,7 +99,7 @@ test('HTTP-created episode and act identities can be forked with their real dete
  let world=f.host.journal.loadWorld({runId:f.source.runId});assert.ok(world);const initialScene=world.scenes[0];const actor=world.entities.find(entity=>entity.kind==='character');assert.ok(initialScene&&actor?.kind==='character');
  f.host.journal.setWorldLifecycle({runId:world.runId,expectedWorldRevision:world.revision,expectedConfigRevision:0,target:'running'});
  f.host.journal.setWorldLifecycle({runId:world.runId,expectedWorldRevision:world.revision,expectedConfigRevision:0,target:'paused'});
- async function structure(){const response=await fetch(`${f.origin}/api/v1/runs/${f.source.runId}/dramatic-structure`,{headers:f.headers});assert.equal(response.status,200);return {value:DramaticStructureViewSchema.extend({worldRevision:RevisionSchema}).parse(await response.json()),etag:response.headers.get('etag')??''};}
+ async function structure(){const response=await fetch(`${f.origin}/api/v1/runs/${f.source.runId}/dramatic-structure`,{headers:f.headers});assert.equal(response.status,200);return {value:DramaticStructurePresentationSchema.extend({worldRevision:RevisionSchema}).parse(await response.json()),etag:response.headers.get('etag')??''};}
  async function mutate(path:string,body:unknown,method='POST'){
   const current=await structure();const response=await fetch(`${f.origin}/api/v1/runs/${f.source.runId}/${path}`,{method,headers:{...f.headers,'Idempotency-Key':randomUUID(),'If-Match':current.etag},body:JSON.stringify(body)});
   assert.equal(response.status,200,await response.clone().text());return structure();
@@ -113,4 +113,8 @@ test('HTTP-created episode and act identities can be forked with their real dete
  const response=await f.post({...f.body,commitIndex:selected.commitIndex,worldRevision:selected.worldRevision,worldSeq:selected.worldSeq,operationId:randomUUID()},{'Idempotency-Key':randomUUID(),'If-Match':forkSourceEtag(selected)});
  assert.equal(response.status,202,await response.clone().text());const job=ForkJobViewSchema.parse(await response.json());await f.runtime.waitForIdle();assert.equal(f.runtime.read({operationId:job.operationId,principalId:'local-operator'})?.state,'ready');
  const inherited=f.host.journal.readDramaticStructure({runId:job.targetRunId});assert.ok(inherited);const episode=inherited.episodes[0];assert.ok(episode);assert.equal(episode.episodeId[14],'4');assert.equal(episode.acts[0]?.actId[14],'4');assert.equal(episode.forkOrigins?.[0]?.episodeId,episodeId);
+ const publicRead=await fetch(`${f.origin}/api/v1/runs/${job.targetRunId}/dramatic-structure`,{headers:f.headers});assert.equal(publicRead.status,200);
+ const inheritedPresentation=DramaticStructurePresentationSchema.extend({worldRevision:RevisionSchema}).parse(await publicRead.json());
+ assert.ok(inheritedPresentation.sceneLabels?.some(scene=>scene.label==='Escena declarada'));
+ assert.equal(inheritedPresentation.sceneLabels?.some(scene=>scene.id===next.value.activeSceneId),false,'la proyección usa los IDs remapeados de la bifurcación');
 });

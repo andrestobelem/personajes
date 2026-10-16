@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { PersistedInferenceProfileSchema } from './inference-profile.ts';
 import { ExperienceSchema } from './experience.ts';
-import { PreparedCharacterSchema, ContinuityContextSchema, SpanishVarietyForActingSchema } from './preparation.ts';
+import { PreparedCharacterSchema, ContinuityContextSchema, SpanishVarietyForActingSchema, WorldActionSchema,GoalSchema,AntecedentIdSchema } from './preparation.ts';
 import { HashSchema } from './values.ts';
 import { ActorTurnJobScopeSchema, ContinuistaCriterionSchema, ContinuistaReviewInputSchema, FrozenActorWorldCutSchema, WorldProposalRecordSchema } from './world-journal.ts';
 import { ActorWorldProjectionSchema } from './actor-world-projection.ts';
@@ -11,10 +11,16 @@ const PreparationSchema = z.strictObject({
   identity: PreparedCharacterSchema.shape.identity.shape.value,
   voice: PreparedCharacterSchema.shape.voice.shape.value,
   antecedents: z.array(z.strictObject({
+    antecedentId:AntecedentIdSchema.optional(),
     kind: z.enum(['biography', 'milestone', 'recollection', 'testimony']),
     statement: z.string().min(1).max(8_000),
   })).max(10_000),
-  capabilities: z.array(z.strictObject({ kind: z.enum(['speech', 'movement', 'gesture', 'nonverbal-sound', 'operate-device', 'other']), description: z.string().min(1).max(2_000) })).min(1).max(1_000),
+  preparedGoals:z.array(GoalSchema).min(1).max(1000).optional(),
+  capabilities: z.array(z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.enum(['speech', 'movement', 'gesture', 'nonverbal-sound', 'other']), description: z.string().min(1).max(2_000) }),
+    z.strictObject({ kind: z.literal('operate-device'), deviceId: z.string().min(1).max(120), description: z.string().min(1).max(2_000) }),
+    z.strictObject({ kind: z.literal('world-action'), action: WorldActionSchema, description: z.string().min(1).max(2_000) }),
+  ])).min(1).max(1_000),
   initialExperiences: z.array(ExperienceSchema).max(10_000),
   unknownPolicy: PreparedCharacterSchema.shape.unknownPolicy.shape.value,
 });
@@ -104,7 +110,8 @@ export function validateContinuistaContextReview(input: { context: unknown; resp
   const proposal = context.payload.proposal;
   if (response.contextHash !== context.contextHash || review.runId !== proposal.runId || review.actorId !== proposal.actorId
     || review.proposalId !== proposal.proposalId || review.version !== proposal.version
-    || review.stateRevision !== proposal.baseRevision || review.exactContentHash !== proposal.exactContentHash) throw new Error('La revisión no pertenece al contexto y propuesta exactos');
+    || review.stateRevision !== proposal.baseRevision || review.exactContentHash !== proposal.exactContentHash
+    || review.nextInitiative !== proposal.nextInitiative) throw new Error('La revisión no pertenece al contexto y propuesta exactos');
   if ((!review.complete && !input.allowIncomplete) || (review.complete && (review.evidenceRefs.length === 0
     || !ContinuistaCriterionSchema.options.every((code) => review.criterionCodes.includes(code))))) throw new Error('La revisión del Continuista está incompleta');
   for (const reference of review.evidenceRefs) if (!Object.hasOwn(context.evidence, reference)) throw new Error('La revisión cita evidencia no autorizada o inexistente');

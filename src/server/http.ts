@@ -1,3 +1,5 @@
+import { DramaticStructurePresentationSchema } from '../domain/dramatic-structure.ts';
+import { IcmWorkspaceSnapshotSchema } from '../domain/icm-workspace.ts';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -34,7 +36,7 @@ import {
   HumanInterventionCommitResultSchema, RunDraftMutationResultSchema, RunDraftPatchSchema,
   RunDraftStateSchema, RunDraftValidationResultSchema, RunStepJobViewSchema,
   DramaticLineEvidenceSchema, DramaticStructureCommandSchema, DramaticStructureEventSchema,
-  DramaticStructureMutationResultSchema, DramaticStructureSceneOptionsSchema, DramaticStructureViewSchema, EpisodeIdSchema,
+  DramaticStructureMutationResultSchema, DramaticStructureSceneOptionsSchema, EpisodeIdSchema,
 } from '../domain/world-journal.ts';
 import {
   CatalogCharacterEntrySchema, CatalogDocumentEntrySchema, DossierSchema,
@@ -50,7 +52,7 @@ import { ForkBeginBodySchema,ForkBeginResultSchema,ForkJobViewSchema,ForkRetryRe
 import type { ForkApplicationPort } from '../application/fork-application.ts';
 import type { RunInspectorApplication } from '../application/run-inspector.ts';
 
-import { RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema, DirectorObservationListSchema } from '../domain/run-observation.ts';
+import { HumanReceptionPageSchema, RunStageViewSchema, ConfirmedEventPageSchema, ConversationPageSchema, TechnicalJobPageSchema, DirectorObservationListSchema } from '../domain/run-observation.ts';
 import { WorldSeqSchema } from '../domain/values.ts';
 import { IdentityPromotionJobViewSchema } from '../domain/identity-promotion-http.ts';
 import { RunRefreshSchema, type RunRefresh } from '../domain/run-refresh.ts';
@@ -76,8 +78,8 @@ export type RunObservationApplicationPort = {
   readDirectorObservations(input:unknown):unknown|Promise<unknown>;
 };
 
-const DramaticStructureReadViewSchema = DramaticStructureViewSchema.extend({ worldRevision: RevisionSchema });
-const DramaticStructureHistoricalReadViewSchema = DramaticStructureViewSchema.extend({
+const DramaticStructureReadViewSchema = DramaticStructurePresentationSchema.extend({ worldRevision: RevisionSchema });
+const DramaticStructureHistoricalReadViewSchema = DramaticStructurePresentationSchema.extend({
   worldRevision: RevisionSchema, worldSeq: WorldSeqSchema, commitIndex: RevisionSchema,
 });
 const DramaticStructureQuerySchema = z.strictObject({
@@ -927,8 +929,31 @@ function runConfigurationDraftSummary(view: z.infer<typeof RunConfigurationDraft
 }
 
 function runDraftPatch(configuration: z.infer<typeof RunConfigurationDraftSchema>): Record<string, unknown> {
+  if (configuration.icmWorkspace?.kind === 'configured') parseSchema(IcmWorkspaceSnapshotSchema, configuration.icmWorkspace.value);
   const { kind: _kind, schemaVersion: _schemaVersion, runId: _runId, revision: _revision, ...patch } = configuration;
   return patch;
+}
+
+async function admitRunDraftMutation(operation: () => unknown | Promise<unknown>): Promise<unknown> {
+  try { return await operation(); }
+  catch (error) {
+    if(error instanceof Error&&['CHARACTER_BIOGRAPHY_REMOVAL_FORBIDDEN','CHARACTER_BIOGRAPHY_GAPS_REMOVAL_FORBIDDEN'].includes(error.message)){
+      fail({status:409,kind:'conflict',code:error.message,message:'La identidad ya curada conserva su historia de vida, sus deseos y los vacíos y contradicciones declarados. Revisá la versión anterior antes de guardar.'});
+    }
+    if (!(error instanceof Error) || !/^ICM_WORKSPACE_[A-Z_]+$/.test(error.message)) throw error;
+    if (['ICM_WORKSPACE_SOURCE_DRIFT', 'ICM_WORKSPACE_SNAPSHOT_HASH_CONFLICT',
+      'ICM_WORKSPACE_WORKSPACE_REVISION_CONFLICT', 'ICM_WORKSPACE_REMOVAL_FORBIDDEN'].includes(error.message)) {
+      fail({ status: 409, kind: 'conflict', code: 'ICM_WORKSPACE_SELECTION_CHANGED',
+        message: 'La selección Markdown cambió o no puede retirarse. Volvé a revisar sus fuentes antes de guardar.' });
+    }
+    if (['ICM_WORKSPACE_SOURCE_NOT_ALLOWED_FOR_AUDIENCE', 'ICM_WORKSPACE_SECTION_NOT_ALLOWED',
+      'ICM_WORKSPACE_REQUIRED_SOURCE_MISSING', 'ICM_WORKSPACE_ACTOR_NOT_ALLOWLISTED'].includes(error.message)) {
+      fail({ status: 422, kind: 'validation', code: 'ICM_WORKSPACE_SELECTION_INVALID',
+        message: 'La selección Markdown no corresponde a los roles, personajes o secciones permitidos.', issues: [] });
+    }
+    fail({ status: 503, kind: 'dependency', code: 'ICM_WORKSPACE_SOURCE_UNAVAILABLE',
+      message: 'El host no pudo verificar las fuentes Markdown seleccionadas.', safeCode: 'ICM_WORKSPACE_SOURCE_UNAVAILABLE', retryable: false });
+  }
 }
 
 function localOperatorPrincipalId(): string {
@@ -1445,6 +1470,24 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         startRefreshTimer();return;
       }
 
+      if (route.length === 3 && route[0] === 'runs' && route[2] === 'human-receptions' && method === 'GET') {
+        const runId = parseSchema(RunIdSchema,route[1]);
+        if (session.mode.kind !== 'interlocutor' || session.mode.runId !== runId) fail({status:403,kind:'forbidden',code:'CAPABILITY_REQUIRED',message:'La sesión no es interlocutora de esta corrida.'});
+        const participantId = session.mode.participantId;
+        const query = parseQuery(url,ObservationEventsQuerySchema);
+        const port = options.runObservation;
+        if (port === undefined) fail({status:503,kind:'dependency',code:'RUN_OBSERVATION_UNAVAILABLE',message:'La recepción humana no está disponible.',safeCode:'RUN_OBSERVATION_UNAVAILABLE',retryable:true});
+        const result = z.discriminatedUnion('kind',[
+          z.strictObject({kind:z.literal('found'),value:ConversationPageSchema}),z.strictObject({kind:z.literal('missing')}),
+          z.strictObject({kind:z.literal('invalidRequest'),code:z.enum(['invalid-cut','invalid-cursor'])}),
+        ]).parse(await port.readConversations({runId,...query}));
+        if(result.kind==='missing') fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
+        if(result.kind==='invalidRequest') fail({status:422,kind:'validation',code:'MALFORMED_REQUEST',message:'Intervalo o cursor inválido.',issues:[]});
+        if(result.value.runId!==runId) throw new Error('Recepción fuera del ámbito solicitado');
+        const value=HumanReceptionPageSchema.parse({...result.value,kind:'human-reception-page',participantId,items:result.value.items.filter((item)=>item.effectiveHumanAudience?.some((human)=>human.participantId===participantId)===true)});
+        sendJson(res,200,value);return;
+      }
+
       if (route.length === 3 && route[0] === 'runs' && ['stage','events','conversations','jobs','director-observations'].includes(route[2] ?? '') && method === 'GET') {
         const runId = parseSchema(RunIdSchema,route[1]);
         const port = options.runObservation;
@@ -1494,7 +1537,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         const run = RunViewSchema.parse(rawRun);
         const raw = await port.read({runId});
         if (raw === undefined || raw === null) fail({status:404,kind:'notFound',code:'NOT_FOUND',message:'Corrida no encontrada.'});
-        const structure = DramaticStructureViewSchema.parse(raw);
+        const structure = DramaticStructurePresentationSchema.parse(raw);
         if (structure.runId !== runId || structure.structureRevision !== run.structureRevision) throw new Error('La estructura leída no coincide con la revisión actual de la corrida');
         const value = DramaticStructureReadViewSchema.parse({...structure,worldRevision:run.worldRevision});
         sendJson(res,200,value,{ETag:dramaticStructureEtag(runId,run.worldRevision,run.structureRevision)});
@@ -1670,6 +1713,7 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
             const invalidInput = result.code === 'invalidParticipants' || result.code === 'invalidPlaceReference'
               || result.code === 'invalidConsequenceReference' || result.code === 'invalidActGrouping';
             if (invalidInput) fail({status:422,kind:'validation',code:'INVALID_DRAMATIC_STRUCTURE',message:'La solicitud refiere participantes, hechos o escenas que no corresponden al corte.',issues:[]});
+            if (result.code === 'actorJobsActive') fail({status:409,kind:'conflict',code:'ACTOR_JOBS_ACTIVE',message:'Hay trabajos actorales vigentes que impiden cambiar la estructura. Esperá que terminen o revisá su recuperación.'});
             fail({status:409,kind:'conflict',code:'DRAMATIC_STRUCTURE_CONFLICT',message:'La transición no es válida en el estado actual de la estructura.'});
           }
           default: {const exhaustive:never=result;throw new Error(String(exhaustive));}
@@ -2126,11 +2170,15 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         if (body.configuration.revision !== 0) {
           fail({ status: 422, kind: 'validation', code: 'VALIDATION_FAILED', message: 'Un borrador nuevo debe partir de la revisión cero.', issues: [{ path: ['configuration', 'revision'], code: 'HOST_OWNED_FIELD' }] });
         }
-        const result = RunDraftMutationResultSchema.parse(await options.runConfigurationDrafts.createRunConfigurationDraft({
+        const drafts = options.runConfigurationDrafts;
+        const result = RunDraftMutationResultSchema.parse(await admitRunDraftMutation(() => drafts.createRunConfigurationDraft({
           principalId: localOperatorPrincipalId(),
           idempotencyKey,
-          patch: parseSchema(RunDraftPatchSchema, runDraftPatch(body.configuration)),
-        }));
+          // New application preparations persist a pending ICM selection even
+          // for older clients. Historical reads/replacements never backfill it.
+          patch: parseSchema(RunDraftPatchSchema, runDraftPatch({ ...body.configuration,
+            icmWorkspace: body.configuration.icmWorkspace ?? { kind: 'empty' } })),
+        })));
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra operación de borrador.' });
         }
@@ -2183,13 +2231,14 @@ export function createLocalHttpServer(options: LocalHttpOptions): LocalHttpServe
         if (body.configuration.revision !== expectedRevision) {
           fail({ status: 412, kind: 'precondition', code: 'PRECONDITION_FAILED', message: 'El body y el ETag refieren revisiones distintas.', currentEtag: runConfigurationEtag(runId, body.configuration.revision) });
         }
-        const result = RunDraftMutationResultSchema.parse(await options.runConfigurationDrafts.updateRunConfigurationDraft({
+        const drafts = options.runConfigurationDrafts;
+        const result = RunDraftMutationResultSchema.parse(await admitRunDraftMutation(() => drafts.updateRunConfigurationDraft({
           principalId: localOperatorPrincipalId(),
           idempotencyKey,
           runId,
           expectedRevision,
           patch: parseSchema(RunDraftPatchSchema, runDraftPatch(body.configuration)),
-        }));
+        })));
         if (result.kind === 'idempotencyConflict') {
           fail({ status: 409, kind: 'conflict', code: 'IDEMPOTENCY_KEY_REUSE', message: 'La clave idempotente ya pertenece a otra operación de borrador.' });
         }

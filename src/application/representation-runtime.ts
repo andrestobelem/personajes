@@ -13,7 +13,7 @@ import { createActorTurnWorker } from './actor-turn-worker.ts';
 import { createNarratorPiWorker } from './narrator-pi-worker.ts';
 import { createNarrationReviewPiPort } from './narration-review-pi-worker.ts';
 import { createDirectorPiWorker } from './director-pi-worker.ts';
-import { createContinuistaPiWorker } from './continuista-pi-worker.ts';
+import { createContinuistaPiWorker, type ContinuistaFailureDiagnostic } from './continuista-pi-worker.ts';
 import { createCoordinatorPulseSupervisor } from './coordinator-pulse-supervisor.ts';
 import { openLocalHost } from './local-host.ts';
 import { createPiOAuthPort } from './pi-oauth.ts';
@@ -68,6 +68,7 @@ export interface ControlledPiTestTransport {
 }
 
 export type RepresentationRuntimeDiagnostic =
+  | ContinuistaFailureDiagnostic
   | {kind:'director-failure';stage:string;code:string}
   | { kind: 'memory-projection'; runId: RunId; actorId: ActorId; outcome: 'failed'; reason: 'busy' | 'store_failed' | 'journal_failed' | 'adapter_failed'; adapterCode?: string }
   | { kind: 'delivery'; runId: RunId; actorId: ActorId; outcome: 'failed'; reason: 'delivery_failed' | 'journal_failed' }
@@ -201,6 +202,7 @@ export async function createRepresentationRuntime(input: {
   });
 
   const continuista = createContinuistaPiWorker({
+    onDiagnostic:report,
     journal: input.host.journal,
     runtime,
     ids: createWorldIdSource(),

@@ -8,6 +8,22 @@ export type HumanForm = { participantId: string; displayName: string; identity: 
 export function humanForm(profile?: HumanParticipantProfile): HumanForm {
   return { participantId: profile?.identity.participantId ?? `humano-${crypto.randomUUID()}`, displayName: profile?.identity.displayName ?? '', identity: profile?.identity.identityMarkdown ?? '', lifeStory: profile?.identity.lifeStoryMarkdown ?? '', presence: profile?.presence.kind ?? '', sceneId: profile?.presence.kind === 'inScene' ? profile.presence.sceneId : '', placeId: profile?.presence.placeId ?? '', channelId: profile?.presence.channelId ?? '', x: profile === undefined ? '' : String(profile.presence.position.x), y: profile === undefined ? '' : String(profile.presence.position.y) };
 }
+export const HumanIdentitySuggestionSchema = z.enum(['visitor', 'reporter']);
+/** Fictional starting points chosen explicitly; never a claim about the real user. */
+export function suggestHumanForm(input: { draft: RunConfigurationDraft; kind: z.infer<typeof HumanIdentitySuggestionSchema> }): HumanForm {
+  const form = humanForm();
+  const world = input.draft.worldSnapshot.kind === 'empty' ? undefined : input.draft.worldSnapshot.value;
+  const scene = world?.scenes?.find(value => value.id === world.activeSceneId && value.lifecycle?.kind === 'open');
+  const place = world?.places?.find(value => scene?.placeIds?.some(id => id === value.id) && value.width !== undefined && value.height !== undefined
+    && world.channels?.some(channel => channel.kind === 'speech' && channel.enabled && channel.placeIds.some(id => id === value.id)));
+  const channel = world?.channels?.find(value => value.kind === 'speech' && value.enabled && place !== undefined && value.placeIds.some(id => id === place.id));
+  const identity = input.kind === 'visitor'
+    ? {displayName:'Visitante de CONTROL',identity:'Soy una persona visitante, curiosa y observadora. Puedo preguntar, escuchar y decidir qué contar. Mi presentación no me concede rango, acceso secreto ni autoridad sobre los demás.',lifeStory:'Biografía ficticia propuesta: mi experiencia cotidiana me enseñó a escuchar versiones distintas antes de sacar conclusiones. Busco conocer a quienes encuentre y formar mi propio criterio. No tengo recuerdos previos de esta representación ni conozco las conversaciones privadas del reparto.'}
+    : {displayName:'Cronista visitante',identity:'Soy una persona que observa y hace preguntas para comprender lo que sucede. Puedo contrastar testimonios, reservar mi opinión y cambiar de interpretación. Mi oficio no me permite conocer secretos ni obligar a nadie a responder.',lifeStory:'Biografía ficticia propuesta: aprendí a distinguir lo que vi de lo que me contaron. Me interesan las personas, sus decisiones y las consecuencias. No presencié acontecimientos anteriores de esta representación ni dispongo de recuerdos o información privada de los personajes.'};
+  return {...form,...identity,...(place?.width !== undefined && place.height !== undefined && place.id !== undefined && scene?.id !== undefined && channel !== undefined
+    ? {presence:'inScene',sceneId:scene.id,placeId:place.id,channelId:channel.id,x:String(Math.min(1,place.width/2)),y:String(Math.min(1,place.height/2))}
+    : {})};
+}
 export function compileHumanForm(input: { form: HumanForm; draft: RunConfigurationDraft }): HumanParticipantProfile {
   const { form } = input;
   if (!form.identity.trim() || !form.lifeStory.trim()) throw new Error('Redactá la identidad completa y la historia de vida; no se completan automáticamente.');
@@ -31,6 +47,7 @@ export function HumanPreparationEditor(props: { draft: RunConfigurationDraft; on
   const existing = props.draft.humanParticipants.kind === 'empty' ? [] : props.draft.humanParticipants.value;
   const [forms, setForms] = React.useState(() => existing.map((profile) => humanForm(profile)));
   const [error, setError] = React.useState('');
+  const [suggestion, setSuggestion] = React.useState<z.infer<typeof HumanIdentitySuggestionSchema>>('visitor');
   const world = props.draft.worldSnapshot.kind === 'empty' ? undefined : props.draft.worldSnapshot.value;
   function edit(next: HumanForm[]) { setForms(next); props.onPendingChange(true); setError(''); }
   function change(index: number, field: keyof HumanForm, value: string) { edit(forms.map((row, i) => i === index ? { ...row, [field]: value } : row)); }
@@ -38,7 +55,7 @@ export function HumanPreparationEditor(props: { draft: RunConfigurationDraft; on
     try { const profiles = HumanParticipantProfilesSchema.parse(forms.map((form) => compileHumanForm({ form, draft: props.draft }))); props.onChange(changeDraftField({ draft: props.draft, field: 'humanParticipants', value: profiles })); props.onPendingChange(false); setError(''); }
     catch (failure) { setError(failure instanceof z.ZodError ? failure.issues.map((issue) => { const labels: Record<string, string> = {"identity": "Identidad", "presence": "Presencia", "displayName": "Nombre ficticio", "identityMarkdown": "Identidad completa", "lifeStoryMarkdown": "Historia de vida", "sceneId": "Escena", "channelId": "Canal", "placeId": "Lugar", "position": "Posición"}; const field = issue.path.findLast((part) => typeof part === 'string'); return `${typeof field === 'string' ? labels[field] ?? field : 'Configuración'}: ${issue.message}`; }).join(' · ') : failure instanceof Error ? failure.message : 'Revisá los perfiles humanos.'); }
   }
-  return <section className="draft-section" id="draft-humanParticipants"><h3>Tu identidad dentro de la ficción</h3><p className="field-help">Cada perfil pertenece a una persona usuaria. Es una identidad ficticia propia: no crea un actor Pi ni importa la memoria del reparto. La ficha y la historia no se revelan completas al hablar con un personaje.</p>
+  return <section className="draft-section" id="draft-humanParticipants"><h3>Tu identidad dentro de la ficción</h3><div className="edit-notice"><label>Punto de partida para mi identidad<select value={suggestion} onChange={event => setSuggestion(HumanIdentitySuggestionSchema.parse(event.target.value))}><option value="visitor">Visitante de CONTROL · recomendado</option><option value="reporter">Cronista visitante</option></select></label><button type="button" onClick={() => edit([...forms,suggestHumanForm({draft:props.draft,kind:suggestion})])}>Proponer mi identidad ficticia</button><p>Agrega una identidad editable y propone ubicación sólo si hay una escena y un canal de habla disponibles. Es ficción elegida, no tu biografía real; no revela secretos ni te da permisos. Revisá y aplicá antes de guardar.</p></div><p className="field-help">Cada perfil pertenece a una persona usuaria. Es una identidad ficticia propia: no crea un actor Pi ni importa la memoria del reparto. La ficha y la historia no se revelan completas al hablar con un personaje.</p>
     {error && <p className="error" role="alert">{error}</p>}
     {forms.length === 0 && <p>No hay perfiles redactados. Agregá tu identidad ficticia o confirmá explícitamente una puesta sin interlocutores humanos.</p>}
     {forms.map((form, index) => <section className="draft-section" key={form.participantId}><h4>Perfil {index + 1}{form.displayName ? ` · ${form.displayName}` : ' · Nombre pendiente'}</h4><label>Nombre ficticio<input maxLength={120} value={form.displayName} onChange={(event) => change(index, 'displayName', event.target.value)} /></label>

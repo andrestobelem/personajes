@@ -13,11 +13,11 @@ import {freezeExperience} from '../src/application/experience-envelope.ts';
 import {ReadyRunConfigurationSchema} from '../src/application/production-preflight.ts';
 import {openJournal} from '../src/adapters/journal.ts';
 
-async function fixture(options:{memories?:number;drama?:boolean;empty?:boolean}={}){
+async function fixture(options:{memories?:number;drama?:boolean;empty?:boolean;embodied?:boolean}={}){
  const f=await setup();let journal=f.journal;let configuration=f.configuration;
- if((options.memories??1)>1||options.drama||options.empty){
+ if((options.memories??1)>1||options.drama||options.empty||options.embodied){
   journal=openJournal({path:join(f.directory,'fork-source-isolated.sqlite')});
-  configuration=ReadyRunConfigurationSchema.parse({...configuration,worldSnapshot:{...configuration.worldSnapshot,
+  configuration=ReadyRunConfigurationSchema.parse({...configuration,...(options.embodied?{characterDefinitionPolicy:{kind:'embodied-v1'}}:{}),worldSnapshot:{...configuration.worldSnapshot,
     entities:configuration.worldSnapshot.entities.map(actor=>actor.kind==='character'&&actor.mind.experiences.length>0
       ?{...actor,mind:{...actor.mind,experiences:Array.from({length:options.empty?0:options.memories??1},(_,index)=>freezeExperience({...actor.mind.experiences[0],experienceId:randomUUID(),content:`Recuerdo sintético ${index}.`}).envelope)}}:actor)}});
   const prepared=configuration.roster.preparedCharacters[0];assert.ok(prepared);
@@ -48,7 +48,7 @@ async function fixture(options:{memories?:number;drama?:boolean;empty?:boolean}=
   close(){if(journal!==f.journal)journal.close();f.close();},
   stage(){const result=journal.beginForkJob(request);assert.equal(result.kind,'created');if(result.kind!=='created')assert.fail();return result.job;},
   project(){for(const receipt of receipts)assert.deepEqual(journal.recordForkProjection({...lookup,receipt}),receipt);},
-  mutate(fn:(db:DatabaseSync)=>void){const db=new DatabaseSync(join(f.directory,(options.memories??1)>1||options.drama||options.empty?'fork-source-isolated.sqlite':'journal.sqlite'));try{fn(db);}finally{db.close();}},
+  mutate(fn:(db:DatabaseSync)=>void){const db=new DatabaseSync(join(f.directory,(options.memories??1)>1||options.drama||options.empty||options.embodied?'fork-source-isolated.sqlite':'journal.sqlite'));try{fn(db);}finally{db.close();}},
  };
 }
 
@@ -268,5 +268,17 @@ for(const corruption of ['hash','metadata','history'] as const)test(`retry falla
    if(corruption==='history')db.prepare('UPDATE fork_job_history SET payload_hash=? WHERE operation_id=? AND revision=?').run('f'.repeat(64),first.operationId,result.job.revision);
   });
   assert.throws(()=>f.journal.retryForkJob(request),/alterado|inconsistente|histórica/);
+ }finally{f.close();}
+});
+
+
+for(const embodied of [false,true])test(`publicación fork conserva política fuente ${embodied?'embodied':'legacy'} en Ready y borrador sin backfill`,async()=>{
+ const f=await fixture({embodied});try{
+  const sourceBefore=canonical(f.journal.readWorldConfiguration({runId:f.configuration.runId}));
+  const staged=f.stage();f.project();const published=f.journal.publishForkJob({...f.lookup,expectedRevision:staged.revision,artifacts:f.artifacts});assert.equal(published.state,'ready');
+  const configuration=ReadyRunConfigurationSchema.parse(f.journal.readWorldConfiguration({runId:published.targetRunId})),draft=f.journal.readRunConfigurationDraft({runId:published.targetRunId});assert.ok(draft);
+  assert.deepEqual(configuration.characterDefinitionPolicy,embodied?{kind:'embodied-v1'}:undefined);
+  assert.deepEqual(draft.characterDefinitionPolicy,configuration.characterDefinitionPolicy);
+  assert.equal(canonical(f.journal.readWorldConfiguration({runId:f.configuration.runId})),sourceBefore);
  }finally{f.close();}
 });

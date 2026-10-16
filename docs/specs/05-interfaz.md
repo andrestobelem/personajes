@@ -6,6 +6,8 @@ La aplicación se opera desde la GUI local en navegador, con React/Vite y un esc
 
 ## 1. Límites e invariantes de interacción
 
+Revisión de recepción humana del 15 de octubre: conversación y vista en vivo separan audiencia de personajes y humana. La bandeja del modo Interlocución sólo presenta recepciones confirmadas para la identidad autenticada en esa representación. Cambiar identidad o corrida descarta respuestas tardías de la consulta anterior. La ausencia de campos históricos se muestra como «sin registro histórico», no como ausencia ficticia ni recepción nula demostrada. Recepción, lectura y memoria ICM se etiquetan como conceptos distintos. Consultar la bandeja no ejecuta actuación ni crea recuerdos. Ver [ADR 0017](../adr/0017-recepcion-humana-situada.md).
+
 - **Escenario, Escenografía y Escena son distintos.** El Escenario conserva estado y consecuencias; el SVG muestra una proyección de la Escenografía; la Escena puede contener una o varias personas, acciones o silencio. Zoom, selección, filtros y disposición visual no modifican el Escenario.
 - **Los datos de lectura proceden del host.** La UI puede mantener borradores de formulario y estado efímero de navegación, pero no afirma una ubicación, emisión, recepción, memoria o cambio de identidad hasta recibir el estado confirmado correspondiente.
 - **La autoridad llega por el canal autenticado.** El contenido de un mensaje no activa Dirección ni eleva permisos. El host deriva actor, operador y origen; la UI sólo envía la intención, el destinatario elegido y el canal visible.

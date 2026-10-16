@@ -7,7 +7,7 @@ export * from './interaction-schema.ts';
 /** A privacy-filtered list of characters who can currently receive this participant's speech. */
 export function projectHumanInteractionContext(input: { snapshot: unknown; profile: unknown }): HumanInteractionContext | undefined {
   const snapshot = WorldSnapshotSchema.parse(input.snapshot);
-  const profile = HumanParticipantProfileSchema.parse(input.profile);
+  const profile = humanParticipantProfileAtSnapshot({snapshot,profile:input.profile});
   const scene = snapshot.scenes.find((candidate) => candidate.id === snapshot.activeSceneId && candidate.lifecycle.kind === 'open');
   if (scene === undefined) return undefined;
   const presence = profile.presence;
@@ -32,4 +32,13 @@ export function projectHumanInteractionContext(input: { snapshot: unknown; profi
     scene: { id: scene.id, label: scene.label }, place: { id: place.id, label: place.name },
     channel: { id: channel.id, label: channel.label, scope: channel.scope }, recipients,
   });
+}
+
+/** Public presence belongs to the confirmed world cut; profile prose remains user-owned. */
+export function humanParticipantProfileAtSnapshot(input:{snapshot:unknown;profile:unknown}) {
+  const snapshot=WorldSnapshotSchema.parse(input.snapshot);
+  const profile=HumanParticipantProfileSchema.parse(input.profile);
+  const human=snapshot.humanParticipants?.find(item=>item.participantId===profile.identity.participantId);
+  return human===undefined?profile:HumanParticipantProfileSchema.parse({...profile,
+    identity:{...profile.identity,displayName:human.label},presence:human.presence});
 }

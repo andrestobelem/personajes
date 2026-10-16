@@ -74,6 +74,7 @@ export function prepareForkState(raw:unknown){
       const exists=binding.kind==='entity'?snapshot.entities.some(entity=>entity.entityId===binding.entityId)
         :binding.kind==='place'?snapshot.places.some(place=>place.id===binding.placeId)
         :binding.kind==='channel'?snapshot.channels.some(channel=>channel.id===binding.channelId)
+        :binding.kind==='human'?(snapshot.humanParticipants??[]).some(human=>human.participantId===binding.participantId)
         :snapshot.offers.some(offer=>offer.id===binding.offerId);
       if(!exists)throw new Error('Conocimiento refiere un destino ausente del corte');
     }

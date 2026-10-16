@@ -137,11 +137,11 @@ test('jobs muestran trabajo técnico y presupuesto medido sin lease, sesiones, p
   } finally {fixture.close();}
 });
 
-async function authenticatedServer(t:TestContext,fixture:Awaited<ReturnType<typeof setup>>) {
+async function authenticatedServer(t:TestContext,fixture:Awaited<ReturnType<typeof setup>>, observation=createRunObservationApplication({journal:fixture.journal})) {
   const server=createLocalHttpServer({catalog:await loadCatalog({repositoryRoot:process.cwd()}),shellHtml:'<!doctype html><html><head></head><body></body></html>',
-    runObservation:createRunObservationApplication({journal:fixture.journal}),runLifecycle:createRunLifecycleApplication({journal:fixture.journal}),
+    runObservation:observation,runLifecycle:createRunLifecycleApplication({journal:fixture.journal}),
     commitHumanIntervention:request=>fixture.journal.commitHumanIntervention(request),
-    resolveSessionMode:candidate=>candidate.kind==='interlocutor'&&candidate.runId===fixture.claim.runId&&candidate.participantId==='visitante-prueba'?candidate:null});
+    resolveSessionMode:candidate=>candidate.kind==='interlocutor'&&candidate.runId===fixture.claim.runId&&['visitante-prueba','visitante-b'].includes(candidate.participantId)?candidate:null});
   const {origin}=await server.listen();t.after(()=>server.close());
   const browser={Origin:origin,'Sec-Fetch-Site':'same-origin'};
   const shell=await fetch(origin+'/',{headers:browser});
@@ -199,4 +199,54 @@ test('intervención nueva fuera running devuelve 409 sin hechos; replay confirma
     assert.equal(replay.headers.get('idempotency-replayed'),'true');
     assert.deepEqual(await replay.json(),receipt);
   }
+});
+
+test('bandeja humana queda ligada al modo y perfil de sesión, sin atribuir registros históricos',async(t)=>{
+  const fixture=await setup();t.after(()=>fixture.close());const host=await authenticatedServer(t,fixture);
+  const base=`${host.origin}/api/v1/runs/${fixture.claim.runId}/human-receptions`;
+  assert.equal((await fetch(base,{headers:host.headers})).status,403);
+  const mode=await fetch(host.origin+'/api/v1/session/mode',{method:'PUT',headers:{...host.headers,'If-Match':host.sessionEtag,'Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'interlocutor',runId:fixture.claim.runId,participantId:'visitante-prueba'})});
+  assert.equal(mode.status,200);
+  await emit(fixture,'El humano habla; esto no prueba que haya recibido una respuesta.');
+  const response=await fetch(base,{headers:host.headers});assert.equal(response.status,200);
+  const page=await response.json();assert.equal(page.participantId,'visitante-prueba');assert.deepEqual(page.items,[]);
+  assert.equal((await fetch(base+'?participantId=otra-identidad',{headers:host.headers})).status,422);
+  assert.equal((await fetch(`${host.origin}/api/v1/runs/${randomUUID()}/human-receptions`,{headers:host.headers})).status,403);
+});
+
+
+test('HTTP devuelve únicamente recepción efectiva de la identidad A o B y conserva publicación pública',async(t)=>{
+  const fixture=await setup();t.after(()=>fixture.close());await emit(fixture,'Comunicación confirmada');
+  const app=createRunObservationApplication({journal:fixture.journal});
+  const original=app.readConversations({runId:fixture.claim.runId});assert.equal(original.kind,'found');if(original.kind!=='found')assert.fail();
+  const first=original.value.items[0];assert.ok(first);
+  const a={participantId:'visitante-prueba',label:'Visitante'},b={participantId:'visitante-b',label:'B'};
+  const page=ConversationPageSchema.parse({...original.value,items:[
+    {...first,eventId:randomUUID(),requestedHumanRecipients:[a],effectiveHumanAudience:[a]},
+    {...first,eventId:randomUUID(),requestedHumanRecipients:[a,b],effectiveHumanAudience:[b]},
+    {...first,eventId:randomUUID()},
+  ]});
+  const host=await authenticatedServer(t,fixture,{...app,readConversations:()=>({kind:'found',value:page})});
+  let etag=host.sessionEtag;
+  for(const participantId of ['visitante-prueba','visitante-b']){
+    const mode=await fetch(host.origin+'/api/v1/session/mode',{method:'PUT',headers:{...host.headers,'If-Match':etag,'Idempotency-Key':randomUUID()},body:JSON.stringify({kind:'interlocutor',runId:fixture.claim.runId,participantId})});assert.equal(mode.status,200);etag=mode.headers.get('etag')??'';
+    const response=await fetch(`${host.origin}/api/v1/runs/${fixture.claim.runId}/human-receptions`,{headers:host.headers});assert.equal(response.status,200);
+    const value=await response.json();assert.equal(value.participantId,participantId);assert.equal(value.items.length,1);assert.deepEqual(value.items[0].effectiveHumanAudience.map((human:{participantId:string})=>human.participantId),[participantId]);
+  }
+  const publicPage=await fetch(`${host.origin}/api/v1/runs/${fixture.claim.runId}/conversations`,{headers:host.headers});assert.equal(publicPage.status,200);assert.equal((await publicPage.json()).items.length,3);
+});
+
+test('stage usa presencia y etiqueta durable del corte; snapshot histórico sin humanos conserva sólo preparación',async()=>{
+  const fixture=await setup();try{
+    const snapshot=fixture.configuration.worldSnapshot;
+    const profile=fixture.configuration.humanParticipants[0];assert.ok(profile);
+    const confirmed=projectRunStage({snapshot:{...snapshot,humanParticipants:[{participantId:profile.identity.participantId,label:'Identidad en el corte',presence:{...profile.presence,position:{x:1,y:1}}}]},configuration:fixture.configuration,lifecycle:'running'});
+    assert.equal(confirmed.humanParticipants[0]?.label,'Identidad en el corte');assert.equal(confirmed.humanParticipants[0]?.presenceConfirmation,'confirmed');assert.deepEqual(confirmed.humanParticipants[0]?.position,{x:1,y:1});
+    const {stageMapData}=await import('../src/web/RunStageWorkspace.tsx');
+    assert.match(stageMapData(confirmed).entities.find(entity=>entity.kind==='human')?.status??'',/confirmada en el corte/);
+    const {humanParticipants:_ignored,...historical}=snapshot;
+    const prepared=projectRunStage({snapshot:historical,configuration:fixture.configuration,lifecycle:'running'});
+    assert.equal(prepared.humanParticipants[0]?.label,profile.identity.displayName);assert.equal(prepared.humanParticipants[0]?.presenceConfirmation,'prepared');assert.equal('humanParticipants' in historical,false);
+    assert.match(stageMapData(prepared).entities.find(entity=>entity.kind==='human')?.status??'',/preparada/);
+  }finally{fixture.close();}
 });

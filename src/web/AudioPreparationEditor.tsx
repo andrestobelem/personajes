@@ -1,17 +1,44 @@
 import React from 'react';
 import type { CatalogPage } from '../domain/http.ts';
 import type { RunConfigurationDraft } from '../domain/production.ts';
-import { AUDIO_OUTPUT_FORMATS, applyAudioPreparation, audioPreparationForm, audioRoster, type AudioPreparationForm } from './audio-preparation-form.ts';
+import { AUDIO_OUTPUT_FORMATS, applyAudioPreparation, audioPreparationForm, audioRoster, spanishAudioPreset, type AudioPreparationForm } from './audio-preparation-form.ts';
 import { draftFieldState } from './draft-form.ts';
+import { createVoiceClient, VoiceHttpRejection, type VoiceClient } from './voice-client.ts';
 
-export function AudioPreparationEditor(props: { draft: RunConfigurationDraft; catalog: CatalogPage['items']; onChange: (draft: RunConfigurationDraft) => void; onPendingChange: (pending: boolean) => void }) {
+const defaultVoiceClient = createVoiceClient();
+type ProviderModel = Awaited<ReturnType<VoiceClient['models']>>[number];
+type SpeechModel = Extract<ProviderModel, { kind: 'speech' }>;
+export function AudioPreparationEditor(props: { draft: RunConfigurationDraft; catalog: CatalogPage['items']; onChange: (draft: RunConfigurationDraft) => void; onPendingChange: (pending: boolean) => void; voiceClient?: Pick<VoiceClient, 'models'> }) {
   const [form, setForm] = React.useState(() => audioPreparationForm(props.draft));
   const [error, setError] = React.useState('');
+  const [models, setModels] = React.useState<ProviderModel[] | null>(null);
+  const [modelBusy, setModelBusy] = React.useState(false);
+  const [modelError, setModelError] = React.useState('');
+  const modelRequest = React.useRef<AbortController | null>(null);
+  const voiceClient = props.voiceClient ?? defaultVoiceClient;
   const roster = audioRoster(props.draft);
   const audio = props.draft.audio.kind === 'empty' ? undefined : props.draft.audio.value;
   const narrationEnabled = props.draft.narrationMode.kind !== 'empty' && props.draft.narrationMode.value.kind === 'enabled';
   const state = draftFieldState(props.draft.audio);
+  const compatibleModels = models?.filter((item): item is SpeechModel => item.kind === 'speech' && item.canDoTextToSpeech && item.languages.includes('es')) ?? [];
+  React.useEffect(() => () => modelRequest.current?.abort(), []);
   function edit(next: AudioPreparationForm) { setForm(next); setError(''); props.onPendingChange(true); }
+  async function consultModels() {
+    modelRequest.current?.abort();
+    const controller = new AbortController(); modelRequest.current = controller;
+    setModelBusy(true); setModelError('');
+    try {
+      const result = await voiceClient.models('speech', controller.signal);
+      if (!controller.signal.aborted) { setModels(result); setModelBusy(false); }
+    } catch (failure) {
+      if (!controller.signal.aborted) {
+        setModelError(failure instanceof VoiceHttpRejection && failure.safeCode === 'ELEVENLABS_CREDENTIAL_MISSING'
+          ? 'No hay una credencial de ElevenLabs configurada. Configurala en Voces y sonido para consultar el catálogo; esta pantalla no la solicita ni la guarda.'
+          : failure instanceof Error ? failure.message : 'No se pudieron consultar los modelos TTS.');
+        setModelBusy(false);
+      }
+    }
+  }
   function label(id: string) { return props.catalog.find(item => item.characterId === id)?.displayName ?? id; }
   function slots(kind: 'speakers' | 'effects') {
     const rows = form[kind];
@@ -30,7 +57,8 @@ export function AudioPreparationEditor(props: { draft: RunConfigurationDraft; ca
   }
   return <section className="draft-section" id="draft-audio"><div className="section-heading"><h3>Audio de la representación</h3><span className={`field-state field-state-${state.kind}`} title={state.detail}>{state.label}</span></div>
     <label>Audio<select value={form.mode} onChange={event => edit({ ...form, mode: event.target.value })}><option value="">Elegir audio</option><option value="disabled">Desactivado</option><option value="enabled">Activado</option></select></label>
-    {form.mode === 'enabled' && <><p>Idioma de síntesis: español (es).</p><label>Cuándo sintetizar<select value={form.ttsMode} onChange={event => edit({ ...form, ttsMode: event.target.value })}><option value="">Elegir comportamiento</option><option value="manual-per-publication">Manualmente por publicación</option><option value="automatic-after-publication">Automáticamente después de publicar</option></select></label><label>Identificador del modelo TTS<input value={form.ttsModelId} maxLength={200} onChange={event => edit({ ...form, ttsModelId: event.target.value })} /></label><label>Formato de audio<select value={form.outputFormat} onChange={event => edit({ ...form, outputFormat: event.target.value })}><option value="">Elegir formato</option>{AUDIO_OUTPUT_FORMATS.map(format => <option key={format} value={format}>{format}</option>)}</select></label><label>Subtítulos<select value={form.subtitles} onChange={event => edit({ ...form, subtitles: event.target.value })}><option value="">Elegir subtítulos</option><option value="true">Activados</option><option value="false">Desactivados</option></select></label></>}
+    <p className="field-help">El preset es una propuesta local editable: mantiene el modelo y las vinculaciones que ya existan, no inventa IDs ni consulta al proveedor.</p><button type="button" onClick={() => edit(spanishAudioPreset(form))}>Usar preset local: español con subtítulos · manual por publicación</button>
+    {form.mode === 'enabled' && <><p>Idioma de síntesis: español (es).</p><label>Cuándo sintetizar<select value={form.ttsMode} onChange={event => edit({ ...form, ttsMode: event.target.value })}><option value="">Elegir comportamiento</option><option value="manual-per-publication">Manualmente por publicación</option><option value="automatic-after-publication">Automáticamente después de publicar</option></select></label><button type="button" disabled={modelBusy} onClick={() => void consultModels()}>{modelBusy ? 'Consultando modelos TTS…' : 'Consultar modelos TTS para español'}</button>{modelError && <p role="alert" className="error">{modelError}</p>}{models !== null && compatibleModels.length === 0 && <p role="status">La consulta terminó, pero no hay modelos compatibles con TTS y español en este catálogo.</p>}<label>Modelo TTS compatible con español<select aria-label="Modelo TTS compatible con español" value={form.ttsModelId} onChange={event => edit({ ...form, ttsModelId: event.target.value })}><option value="">Elegí un modelo consultado</option>{form.ttsModelId !== '' && !compatibleModels.some(item => item.modelId === form.ttsModelId) && <option value={form.ttsModelId}>{form.ttsModelId} · configuración conservada; {models === null ? 'todavía no consultada' : models.some(item => item.kind === 'speech' && item.modelId === form.ttsModelId) ? 'no compatible con TTS en español' : 'ausente del catálogo consultado'}</option>}{compatibleModels.map(item => <option key={item.modelId} value={item.modelId}>{item.name} · {item.modelId}</option>)}</select></label><label>Formato de audio<select value={form.outputFormat} onChange={event => edit({ ...form, outputFormat: event.target.value })}><option value="">Elegir formato</option>{AUDIO_OUTPUT_FORMATS.map(format => <option key={format} value={format}>{format}</option>)}</select></label><label>Subtítulos<select value={form.subtitles} onChange={event => edit({ ...form, subtitles: event.target.value })}><option value="">Elegir subtítulos</option><option value="true">Activados</option><option value="false">Desactivados</option></select></label></>}
     {slots('speakers')}{slots('effects')}
     <label>Voz del narrador<select value={form.narrator} onChange={event => {
       const narrator = event.target.value;

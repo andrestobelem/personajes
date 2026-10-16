@@ -1,8 +1,10 @@
 import { RunForkOriginSchema } from '../domain/fork-origin.ts';
+import { ICM_CONTEXT_COMPILER_VERSION } from './icm-context-compiler.ts';
 import { routineIsAvailable, routineCalendarDiagnostics, dayNightCalendarDiagnostics } from '../domain/routine-calendar.ts';
 import { PreflightSnapshotFenceSchema as RunSnapshotFenceSchema, PreflightCheckSchema, PreflightReportSchema, type PreflightCheck, type PreflightReport } from '../domain/preflight-report.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { IcmWorkspaceSnapshotSchema } from '../domain/icm-workspace.ts';
 import { VoiceConfigSchema } from '../domain/voice.ts';
 import { SessionModeSchema } from '../domain/http.ts';
 import {
@@ -12,7 +14,7 @@ import {
 import {
   CircadianPolicySchema, DramaticLineSchema, DramaticReferencesSchema, ProductionValidationIssueSchema,
   HumanParticipantProfilesSchema, NarrationModeSchema, ProductionAudioSchema, ProductionRosterSchema, RunBudgetSchema,
-  RunConfigurationDraftSchema, SpeechBindingIdSchema, SoundBindingIdSchema,
+  RunConfigurationDraftSchema, SpeechBindingIdSchema, SoundBindingIdSchema, CharacterDefinitionPolicySchema,
 } from '../domain/production.ts';
 import type {
   DramaticLine, NarrationMode, ProductionAudio, ProductionRoster,
@@ -60,6 +62,7 @@ export const ReadyRunConfigurationSchema = z.strictObject({
   schemaVersion: z.literal(1),
   runId: RunIdSchema,
   configRevision: RevisionSchema,
+  characterDefinitionPolicy:CharacterDefinitionPolicySchema.optional(),
   forkOrigin: RunForkOriginSchema.optional(),
   name: z.string().trim().min(1).max(120),
   fictionalAt: FictionalInstantSchema,
@@ -76,6 +79,8 @@ export const ReadyRunConfigurationSchema = z.strictObject({
   narrationMode: NarrationModeSchema,
   /** Missing only in a pre-profile historical snapshot; selection is explicit in new Ready setups. */
   inferenceProfile: PersistedInferenceProfileSchema.optional(),
+  /** No historical backfill: admitted contracts remain byte-for-byte frozen. */
+  icmWorkspace: IcmWorkspaceSnapshotSchema.optional(),
   budget: RunBudgetSchema,
   maxReformulations: z.number().int().min(0).max(2),
   audio: ProductionAudioSchema,
@@ -83,6 +88,35 @@ export const ReadyRunConfigurationSchema = z.strictObject({
   preparedActorFences: z.array(PreparedActorFenceSchema).max(1_000),
   participantAvailability: z.array(ParticipantAvailabilitySchema).max(100),
 }).superRefine((ready, context) => {
+  if(ready.characterDefinitionPolicy?.kind==='embodied-v1')for(const characterId of ready.roster.activeCharacterIds){
+    const actor=ready.roster.preparedCharacters.find(value=>value.characterId===characterId);
+    if(actor===undefined||actor.identity.value.lifeHistory===undefined||actor.identity.value.desires===undefined){
+      context.addIssue({code:'custom',path:['roster','preparedCharacters',characterId,'identity'],message:'La política de personaje encarnado exige una historia de vida curada y deseos vinculados a sus objetivos, con vacíos y procedencia explícitos.'});
+    }
+  }
+  if (ready.icmWorkspace !== undefined) {
+    const preparedActors = new Set(ready.roster.preparedCharacters.map(actor => actor.characterId));
+    const audiences = new Set<string>();
+    for (const [index, source] of ready.icmWorkspace.sources.entries()) {
+      const audience = source.audience;
+      if (audience.role === 'actor') {
+        audiences.add(`actor:${audience.actorId}`);
+        if (!preparedActors.has(audience.actorId)) context.addIssue({
+          code: 'custom', path: ['icmWorkspace', 'sources', index, 'audience', 'actorId'],
+          message: 'El contrato ICM pertenece a un actor ajeno al reparto preparado.',
+        });
+      } else audiences.add(audience.role);
+    }
+    const required = [
+      ...ready.roster.activeCharacterIds.map(actorId => `actor:${actorId}`),
+      'continuista', 'director', 'configurator',
+      ...(ready.narrationMode.kind === 'enabled' ? ['narrator', 'narration-reviewer'] : []),
+    ];
+    for (const audience of required) if (!audiences.has(audience)) context.addIssue({
+      code: 'custom', path: ['icmWorkspace', 'sources'],
+      message: `Falta el contrato ICM para la audiencia requerida ${audience}.`,
+    });
+  }
   if (ready.runId !== ready.worldSnapshot.runId
     || ready.snapshotFence.runId !== ready.runId
     || ready.snapshotFence.revision !== ready.worldSnapshot.revision
@@ -187,6 +221,15 @@ function validateCapabilities(input: {
         code: 'prepared-capability-mismatch',
         field: `roster.preparedCharacters.${input.prepared.characterId}.capabilities`,
         detail: `La capacidad de preparación ${preparedKind} y la capacidad operativa ${worldKind} no coinciden.`,
+      });
+    }
+  }
+  for (const capability of input.prepared.capabilities.value) {
+    if (capability.kind === 'world-action' && !actorCapabilities.has(capability.action)) {
+      addIssue(input.issues, {
+        code: 'prepared-capability-mismatch',
+        field: `roster.preparedCharacters.${input.prepared.characterId}.capabilities`,
+        detail: `La acción preparada ${capability.action} no está concedida al personaje en el Escenario.`,
       });
     }
   }
@@ -310,6 +353,8 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
   const inferenceProfile = configuredValue({
     field: draft.inferenceProfile ?? { kind: 'empty' }, name: 'inferenceProfile', issues,
   });
+  const icmWorkspace = draft.icmWorkspace === undefined ? undefined
+    : configuredValue({ field: draft.icmWorkspace, name: 'icmWorkspace', issues });
   const budget = configuredValue({ field: draft.budget, name: 'budget', issues });
   const maxReformulations = configuredValue({ field: draft.maxReformulations, name: 'maxReformulations', issues });
   const audio = configuredValue({ field: draft.audio, name: 'audio', issues });
@@ -355,6 +400,7 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
     schemaVersion: 1,
     runId: draft.runId,
     configRevision: draft.revision,
+    ...(draft.characterDefinitionPolicy===undefined?{}:{characterDefinitionPolicy:draft.characterDefinitionPolicy}),
     name,
     fictionalAt,
     continuity,
@@ -363,6 +409,7 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
     worldSnapshot: world,
     dramaticLine,
     ...(dramaticReferences === undefined ? {} : { dramaticReferences }),
+    ...(icmWorkspace === undefined ? {} : { icmWorkspace }),
     circadianPolicy,
     language: 'es',
     spanishVariety,
@@ -835,6 +882,8 @@ export { PreflightReportSchema } from '../domain/preflight-report.ts';
 export type { PreflightCheck, PreflightReport } from '../domain/preflight-report.ts';
 
 export type ProductionPreflightHostPort = {
+  /** Explicit host composition capability; absence preserves old hosts as unavailable for selected Markdown. */
+  readIcmContextRuntimeReadiness?(): Promise<unknown>;
   /** Current durable config_versions revision; read-only, with no migration or write. */
   readCurrentConfigurationRevision(input: { runId: z.infer<typeof RunIdSchema> }): Promise<unknown>;
   /** Returns the currently committed snapshot from the host journal; no projection or mutation. */
@@ -1162,6 +1211,24 @@ export function createProductionPreflightPort(input: { host: ProductionPreflight
           kind: 'blocked', checkId: 'configuration', code: `setup-${issue.code}`, detail: issue.detail.slice(0, 500),
         })));
         return makePreflightReport({ configuration, observedAt, checks, profileFingerprint: null });
+      }
+
+      if (configuration.icmWorkspace !== undefined) {
+        const read = input.host.readIcmContextRuntimeReadiness;
+        const status = read === undefined ? undefined : await readPort({ read: () => read.call(input.host),
+          schema: z.discriminatedUnion('kind', [
+            z.strictObject({ kind: z.literal('ready'), compilerVersion: z.literal(ICM_CONTEXT_COMPILER_VERSION) }),
+            z.strictObject({ kind: z.literal('unavailable'), code: z.string().min(1).max(100) }),
+          ]),
+        });
+        if (status?.kind !== 'loaded' || status.value.kind !== 'ready') {
+          checks.push(check({ kind: 'unavailable', checkId: 'icm-context-runtime',
+            code: 'icm-context-runtime-not-connected',
+            detail: 'El host no acredita paquetes Markdown durables conectados a todos los roles requeridos.' }));
+          return makePreflightReport({ configuration, observedAt, checks, profileFingerprint: null });
+        }
+        checks.push(check({ kind: 'passed', checkId: 'icm-context-runtime',
+          detail: 'El host compone los roles con paquetes Markdown durables y el compilador seleccionado.' }));
       }
 
       const selectedProfileResult = SelectableInferenceProfileSchema.safeParse(configuration.inferenceProfile);

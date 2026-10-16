@@ -53,7 +53,7 @@ for (const cut of DOCUMENTED_CONTINUITY_CUTS) {
   test(`${cut.id}: only editorial name/continuity are proposed; no fictional instant, world, actors or human identity invented`, async () => {
     const draft = await createDocumentedContinuityDraft({ cutId: cut.id, runId, uuid: randomUUID });
     assert.deepEqual(RunConfigurationDraftSchema.parse(draft), draft);
-    const empty = createEmptyRunConfigurationDraft({ runId, revision: 0 });
+    const empty = { ...createEmptyRunConfigurationDraft({ runId, revision: 0 }), icmWorkspace: { kind: 'empty' } };
     for (const [key, value] of Object.entries(draft)) if (key !== 'name' && key !== 'continuity') assert.deepEqual(value, Reflect.get(empty, key));
     assert.equal(draft.name.kind, 'proposed');
     assert.equal(draft.continuity.kind, 'proposed');

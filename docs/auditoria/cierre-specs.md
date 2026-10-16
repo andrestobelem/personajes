@@ -26,3 +26,7 @@ El pase R5 había vuelto a cerrar coherencia documental en su corte. La revisió
 ## Revalidación documental R6 — 15 de octubre de 2026
 
 Se comprobó de nuevo la relación entre las 77 filas de requisitos, sus ensayos y niveles mínimos. Las filas que dependen de un solo ensayo o de varios ensayos ordinarios coinciden con la unión indicada; NFR-10 conserva su papel de cobertura agregada. P21 queda dividido en seis subresultados con piso propio y estado independiente, y cada fila VOZ-01–07/NFR-08 especifica qué subresultado le corresponde. El espejo JSON ahora registra los niveles por requisito, las subclaves P21 y su piso/estado; las 77 aceptaciones permanecen `pending`, pues el cambio documental no ejecuta ensayos. Se actualizaron los hashes del corte actual en el espejo y en el registro de comprobación; los hashes históricos de liberación permanecen intactos. G0 sigue abierto para la revisión integral de S01–S07.
+
+## Reconciliación posterior al ensayo live · 15 de octubre de 2026
+
+S03 explicita que el guard estructural considera generaciones vigentes y conserva las negativas idempotentes; S04 aclara el diagnóstico de pruebas de acceso vencidas/futuras sin admitir ejecución y refleja la opción explícita de retry al reanudar. La [evidencia de implementación y cierre](cierre-ensayo-y-preflight.md) acredita esas reparaciones y el cierre del ensayo, sin cerrar G0 ni G1–G6. Los hashes de cortes documentales anteriores son históricos y no certifican este nuevo contenido; todavía se requiere la revalidación integral de las siete specs.

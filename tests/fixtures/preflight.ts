@@ -25,6 +25,7 @@ export function createCleanReadyPreflightFixture(input: {
 
 export function recordSyntheticPassedPreflight(input:{journal:ReturnType<typeof openJournal>;runId:string}) {
  const {journal,runId}=input;
+ const configuration=ReadyRunConfigurationSchema.parse(journal.readWorldConfiguration({runId}));
  const state=()=>{const current=journal.readWorldLifecycle({runId});assert.ok(current);return current;};
 
     // Explicit synthetic inference proof: this suite checks final local voice admission, without calling either provider.
@@ -48,7 +49,7 @@ export function recordSyntheticPassedPreflight(input:{journal:ReturnType<typeof 
     assert.equal(frozen.kind, 'found'); if (frozen.kind !== 'found') assert.fail();
     assert.equal(journal.completeRunPreflightJob({ runId, jobId: started.job.jobId, expectedRevision: 1, lease, evaluation: {
       fence: frozen.fence,
-      result: { kind: 'passed', checkedAt, checks: ['configuration', 'configuration-version', 'world-snapshot', 'prepared-contexts', 'catalog-eligibility', 'inference-profile', 'pi-sdk', 'pi-profile', 'provider-authentication', 'pi-runtime', 'icm-memory', 'budget', 'provider-access-check', 'participant-availability', 'voice'].map(checkId => ({ kind: 'passed', checkId })) },
+      result: { kind: 'passed', checkedAt, checks: ['configuration', 'configuration-version', 'world-snapshot', 'prepared-contexts', 'catalog-eligibility', 'inference-profile', 'pi-sdk', 'pi-profile', 'provider-authentication', 'pi-runtime', 'icm-memory', 'budget', 'provider-access-check', 'participant-availability', 'voice',...(configuration.icmWorkspace===undefined?[]:['icm-context-runtime'])].map(checkId => ({ kind: 'passed', checkId })) },
       evidence: { provider: DEFAULT_INFERENCE_PROFILE.provider, profileFingerprint, accountFingerprint, accessReceipt: { jobId: access.job.jobId, provider: DEFAULT_INFERENCE_PROFILE.provider, profileFingerprint, accountFingerprint, resultKind: 'passed', checkedAt, expiresAt } },
     } }).kind, 'updated');
     return started.job.jobId;

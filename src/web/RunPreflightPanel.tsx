@@ -8,6 +8,7 @@ import { RunBudgetPanel } from './RunBudgetPanel.tsx';
 
 const client = createRunPreflightClient();
 const checkLabels: Record<NonNullable<RunPreflightJobDocument['report']['result']>['checks'][number]['checkId'], string> = {
+  'icm-context-runtime': 'Contexto Markdown ICM',
   configuration: 'Configuración', 'configuration-version': 'Revisión de configuración', 'world-snapshot': 'Estado del Escenario', 'prepared-contexts': 'Preparación privada del elenco', 'catalog-eligibility': 'Reparto y continuidad', 'inference-profile': 'Perfil requerido', 'pi-sdk': 'SDK de Pi', 'pi-profile': 'Modelo y esfuerzo', 'provider-authentication': 'Autenticación del proveedor', 'provider-access-check': 'Comprobación de acceso registrada', 'pi-runtime': 'Runtime de Pi', 'icm-memory': 'Memoria ICM', budget: 'Presupuestos', voice: 'Voz y audio', 'participant-availability': 'Disponibilidad del elenco',
 };
 const states: Record<RunPreflightJobView['state'], string> = { queued: 'En espera', running: 'Comprobando requisitos', 'cancel-requested': 'Cancelación solicitada', completed: 'Comprobación completada', failed: 'Falló la comprobación', canceled: 'Cancelado', interrupted: 'Interrumpido por el host' };

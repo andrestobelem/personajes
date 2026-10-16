@@ -11,15 +11,21 @@ import { loadCatalog } from '../src/adapters/catalog.ts';
 import { createProductionPreflightHost } from '../src/application/production-preflight-host.ts';
 import { createPiAuthFingerprint } from '../src/application/pi-auth-fingerprint.ts';
 import { createRunPreflightJobs, projectRunPreflightReport } from '../src/application/run-preflight-jobs.ts';
-import { validateRunConfiguration, type PreflightReport } from '../src/application/production-preflight.ts';
+import { ReadyRunConfigurationSchema,validateRunConfiguration, type PreflightReport } from '../src/application/production-preflight.ts';
+import {RunPreflightResultSchema} from '../src/domain/run-preflight-jobs.ts';
+import {createIcmWorkspaceSnapshot,hashIcmMarkdown} from '../src/domain/icm-workspace.ts';
 import { draftFixture, canonical } from './fixtures/continuista.ts';
+import { DEFAULT_INFERENCE_PROFILE } from '../src/domain/inference-profile.ts';
+import { fingerprintInferenceProfile } from '../src/application/pi-access-check.ts';
 
-async function fixture(t: TestContext, unlimited = false) {
+async function fixture(t: TestContext, unlimited = false,withIcm=false) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-preflight-broker-')); const path = join(directory, 'journal.sqlite');
   const journal = openJournal({ path }); const draft = draftFixture();
   if (unlimited && draft.budget.kind !== 'empty') { draft.budget.value.maxPiCallsPerRun = null; draft.budget.value.maxPiCallsPerPulse = null; }
   const result = validateRunConfiguration({ draft });
-  assert.ok(result.kind === 'ready'); const configuration = result.configuration;
+  assert.ok(result.kind === 'ready');
+  const audiences=[...result.configuration.roster.activeCharacterIds.map(actorId=>({role:'actor' as const,actorId})),...(['continuista','director','configurator'] as const).map(role=>({role}))];
+  const configuration = ReadyRunConfigurationSchema.parse({...result.configuration,...(withIcm?{icmWorkspace:createIcmWorkspaceSnapshot({sources:audiences.map(audience=>({sourceId:`synthetic.${audience.role}`,audience,revision:0,sourceHash:hashIcmMarkdown(audience.role),sections:[{sectionId:'process',markdown:'Contrato sintético para probar el broker, sin inferencia.'}]}))})}:{})});
   journal.registerWorldRun({ initialSnapshot: configuration.worldSnapshot, configurationRevision: configuration.configRevision, configuration, lifecycle: 'ready',
     continuityFence: { kind: 'prepared-contexts', atWorldSeq: configuration.worldSnapshot.seq, contexts: configuration.roster.preparedCharacters.map((actor) => ({ actorId: actor.characterId,
       continuityId: actor.continuity.continuityId, continuityRevision: actor.continuity.revision, continuityContentHash: actor.continuity.contentHash,
@@ -131,4 +137,123 @@ test('unlimited call configuration crosses durable preflight without evaluation 
     assert.ok(result.kind === 'found'); assert.equal(result.job.state, 'completed');
     assert.ok(result.report.result?.checks.some(check => check.checkId === 'budget' && check.kind === 'passed'));
   } finally { await broker.close(); }
+});
+
+test('a probe outside the evaluated interval produces a readable durable block, without claiming current access', async t => {
+  const f = await fixture(t);
+  writeFileSync(join(f.directory, 'pi', 'auth', 'auth.json'), JSON.stringify({ 'openai-codex': {
+    type: 'oauth', access: 'SYNTHETIC_ACCESS', refresh: 'SYNTHETIC_REFRESH', expires: Date.now() + 86_400_000,
+  } }), { mode: 0o600 });
+  const accountFingerprint = await f.authentication.readCredentialFingerprint({ provider: 'openai-codex' });
+  assert.ok(accountFingerprint);
+  const profileFingerprint = fingerprintInferenceProfile(DEFAULT_INFERENCE_PROFILE);
+  for (const interval of [
+    { checkedAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() },
+    { checkedAt: new Date(Date.now() + 60_000).toISOString(), expiresAt: new Date(Date.now() + 120_000).toISOString() },
+  ]) {
+    const probe = f.journal.createPiAccessJob({ principalId: 'local-operator', idempotencyKey: randomUUID(), profile: DEFAULT_INFERENCE_PROFILE });
+    assert.ok(probe.kind === 'created');
+    const claim = f.journal.claimPiAccessJob({ jobId: probe.job.jobId, expectedRevision: probe.job.revision,
+      ownerToken: randomUUID(), claimToken: randomUUID() });
+    assert.ok(claim.kind === 'claimed');
+    f.journal.completePiAccessJob({ jobId: probe.job.jobId, expectedRevision: claim.job.revision, lease: claim.lease,
+      result: { kind: 'passed', provider: 'openai-codex', requestedProfile: DEFAULT_INFERENCE_PROFILE,
+        profileFingerprint, accountFingerprint,
+        effectiveProfile: { provider: 'openai-codex', api: 'openai-codex-responses', model: 'gpt-6.1-sol',
+          providerThinkingLevel: null, reasoningEvidence: 'sdk-payload-and-response' },
+        measuredUsage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } }, ...interval });
+    const broker = await createRunPreflightJobs({ journal: f.journal, ownerToken: randomUUID(), createHost: f.createHost,
+      readCredentialFingerprint: f.authentication.readCredentialFingerprint });
+    try {
+      const started = await broker.start({ ...f.scopes, idempotencyKey: randomUUID() });
+      assert.ok(started.kind === 'created');
+      const scope = { runId: f.scopes.runId, jobId: started.job.jobId };
+      await until(async () => { const result = await broker.readJob(scope);
+        return result.kind === 'found' && ['completed', 'failed'].includes(result.job.state); });
+      const result = await broker.readJob(scope);
+      assert.ok(result.kind === 'found');
+      assert.equal(result.job.state, 'completed');
+      assert.equal(result.job.safeCode, null);
+      assert.equal(result.report.kind, 'current');
+      assert.equal(result.report.result?.kind, 'blocked');
+      assert.deepEqual(result.report.result?.checks.find(check => check.checkId === 'provider-access-check'),
+        { kind: 'deferred', checkId: 'provider-access-check' });
+      const evidence = f.journal.readRunPreflightJobEvidence(scope);
+      assert.ok(evidence.kind === 'found');
+      assert.deepEqual(evidence.evidence, { provider: 'openai-codex', profileFingerprint, accountFingerprint, accessReceipt: null });
+      assert.equal((await broker.readLifecycleDocument(scope))?.report.result?.kind, 'blocked');
+      const originalReceipt = f.journal.readLatestAccessReceipt({ provider: 'openai-codex', profileFingerprint, accountFingerprint });
+      assert.ok(originalReceipt.kind === 'receipt');
+      assert.equal(originalReceipt.jobId, probe.job.jobId);
+      assert.equal(originalReceipt.expiresAt, interval.expiresAt, 'Historical probe proof is preserved unchanged');
+    } finally { await broker.close(); }
+  }
+});
+
+test('broker conserva bloqueo ICM unavailable como reporte durable legible, sin evaluation-failed',async t=>{
+  const f=await fixture(t,false,true);let evaluations=0;
+  const broker=await createRunPreflightJobs({journal:f.journal,ownerToken:randomUUID(),createHost(){evaluations++;return f.createHost();},readCredentialFingerprint:f.authentication.readCredentialFingerprint});
+  try{
+    const started=await broker.start({...f.scopes,idempotencyKey:randomUUID()});assert.ok(started.kind==='created');
+    const scope={runId:f.scopes.runId,jobId:started.job.jobId};
+    await until(async()=>{const read=await broker.readJob(scope);return read.kind==='found'&&['completed','failed'].includes(read.job.state);});
+    const read=await broker.readJob(scope);assert.ok(read.kind==='found');assert.equal(read.job.state,'completed');assert.equal(read.job.safeCode,null);
+    assert.equal(read.report.result?.kind,'blocked');
+    assert.deepEqual(read.report.result?.checks,[{kind:'unavailable',checkId:'icm-context-runtime',code:'icm-context-runtime-not-connected'}]);
+    assert.equal((await broker.listJobs({runId:f.scopes.runId,offset:0,limit:100})).items[0]?.report.result?.kind,'blocked');
+    assert.equal(evaluations,1);
+  }finally{await broker.close();}
+});
+
+test('broker evalúa ICM conectado, guarda passed con 16 gates y recupera el reporte exacto sin inferencia',async t=>{
+  const f=await fixture(t,false,true);
+  writeFileSync(join(f.directory,'pi','auth','auth.json'),JSON.stringify({'openai-codex':{type:'oauth',access:'SYNTHETIC_ACCESS',refresh:'SYNTHETIC_REFRESH',expires:Date.now()+86_400_000}}),{mode:0o600});
+  const accountFingerprint=await f.authentication.readCredentialFingerprint({provider:'openai-codex'});assert.ok(accountFingerprint);
+  const profileFingerprint=fingerprintInferenceProfile(DEFAULT_INFERENCE_PROFILE);
+  const probe=f.journal.createPiAccessJob({principalId:'local-operator',idempotencyKey:randomUUID(),profile:DEFAULT_INFERENCE_PROFILE});assert.ok(probe.kind==='created');
+  const claim=f.journal.claimPiAccessJob({jobId:probe.job.jobId,expectedRevision:probe.job.revision,ownerToken:randomUUID(),claimToken:randomUUID()});assert.ok(claim.kind==='claimed');
+  f.journal.completePiAccessJob({jobId:probe.job.jobId,expectedRevision:claim.job.revision,lease:claim.lease,
+    result:{kind:'passed',provider:'openai-codex',requestedProfile:DEFAULT_INFERENCE_PROFILE,profileFingerprint,accountFingerprint,
+      effectiveProfile:{provider:'openai-codex',api:'openai-codex-responses',model:'gpt-6.1-sol',providerThinkingLevel:null,reasoningEvidence:'sdk-payload-and-response'},
+      measuredUsage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2}},checkedAt:new Date(Date.now()-1000).toISOString(),expiresAt:new Date(Date.now()+120_000).toISOString()});
+  let evaluations=0;
+  const broker=await createRunPreflightJobs({journal:f.journal,ownerToken:randomUUID(),readCredentialFingerprint:f.authentication.readCredentialFingerprint,
+    createHost(){evaluations++;const host=createProductionPreflightHost({journal:f.journal,catalog:f.catalog,piRuntime:f.runtime,authentication:f.authentication,
+      icmContextPacketsReady:()=>true,roleReadiness:()=>({actor:true,continuista:true,director:true,narrator:false})});
+      return {...host,async readCatalogEligibility({characterIds}){return {kind:'loaded',entries:characterIds.map(characterId=>({characterId,state:{kind:'eligible'}}))};},
+        async readIcmMemoryReadiness({runId,actorIds}){return {kind:'ready',version:'0.11.4',backend:'sqlite',actors:actorIds.map(characterId=>({runId,characterId,state:'recoverable',isolation:{kind:'run-actor',runId,characterId}}))};}};
+    }});
+  try{
+    const started=await broker.start({...f.scopes,idempotencyKey:randomUUID()});assert.ok(started.kind==='created');
+    const scope={runId:f.scopes.runId,jobId:started.job.jobId};
+    await until(async()=>{const read=await broker.readJob(scope);return read.kind==='found'&&['completed','failed'].includes(read.job.state);});
+    const read=await broker.readJob(scope);assert.ok(read.kind==='found');assert.equal(read.job.state,'completed');assert.equal(read.job.safeCode,null);
+    assert.equal(read.report.result?.kind,'passed',JSON.stringify(read.report));assert.equal(read.report.result?.checks.length,16);
+    assert.deepEqual(read.report.result.checks.find(check=>check.checkId==='icm-context-runtime'),{kind:'passed',checkId:'icm-context-runtime'});
+    assert.deepEqual(await broker.readJob(scope),read);assert.equal(evaluations,1);
+    const evidence=f.journal.readRunPreflightJobEvidence(scope);assert.ok(evidence.kind==='found');
+    const another=f.journal.createRunPreflightJob({...f.scopes,principalId:'local-operator',idempotencyKey:randomUUID()});assert.ok(another.kind==='created');
+    const lease={ownerToken:randomUUID(),claimToken:randomUUID()};
+    const claimed=f.journal.claimRunPreflightJob({runId:f.scopes.runId,jobId:another.job.jobId,expectedRevision:0,...lease});assert.ok(claimed.kind==='claimed');
+    const frozen=f.journal.readRunPreflightJobInput({runId:f.scopes.runId,jobId:another.job.jobId,lease});assert.ok(frozen.kind==='found');
+    const completion={runId:f.scopes.runId,jobId:another.job.jobId,expectedRevision:claimed.job.revision,lease};
+    const legacyResult={...read.report.result,checks:read.report.result.checks.filter(check=>check.checkId!=='icm-context-runtime')};
+    assert.equal(RunPreflightResultSchema.safeParse(legacyResult).success,true,'la forma legacy sigue siendo válida por sí sola');
+    assert.throws(()=>f.journal.completeRunPreflightJob({...completion,evaluation:{fence:frozen.fence,result:legacyResult,evidence:evidence.evidence}}),/runtime ICM configurado/);
+    assert.equal(f.journal.readRunPreflightJob({runId:f.scopes.runId,jobId:another.job.jobId}).kind,'found');
+    assert.equal(f.journal.completeRunPreflightJob({...completion,evaluation:{fence:frozen.fence,result:read.report.result,evidence:evidence.evidence}}).kind,'updated');
+    assert.equal((await broker.readJob({runId:f.scopes.runId,jobId:another.job.jobId})).kind,'found');
+    const db=new DatabaseSync(f.path,{readOnly:true});try{for(const table of ['request_reservations','actor_pi_sessions','world_events'])assert.equal(db.prepare(`SELECT count(*) n FROM ${table}`).get()?.n,0);}finally{db.close();}
+  }finally{await broker.close();}
+});
+
+test('passed conserva 15 gates legacy o 16 con ICM exactamente una vez, sin aceptar faltantes ni duplicados',()=>{
+  const checks=['configuration','configuration-version','world-snapshot','prepared-contexts','catalog-eligibility','inference-profile','pi-sdk','pi-profile','provider-authentication','pi-runtime','icm-memory','budget','provider-access-check','participant-availability','voice'].map(checkId=>({kind:'passed',checkId}));
+  const base={kind:'passed',checkedAt:'2026-10-16T12:00:00Z',checks};
+  assert.equal(RunPreflightResultSchema.safeParse(base).success,true);
+  const icm={kind:'passed',checkId:'icm-context-runtime'};
+  assert.equal(RunPreflightResultSchema.safeParse({...base,checks:[...checks,icm]}).success,true);
+  assert.equal(RunPreflightResultSchema.safeParse({...base,checks:[...checks,icm,icm]}).success,false);
+  assert.equal(RunPreflightResultSchema.safeParse({...base,checks:[...checks.slice(1),icm]}).success,false);
+  assert.equal(RunPreflightResultSchema.safeParse({...base,checks:[...checks,checks[0]]}).success,false);
 });

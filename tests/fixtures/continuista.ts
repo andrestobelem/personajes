@@ -1,3 +1,4 @@
+import type { IcmWorkspaceSnapshot } from '../../src/domain/icm-workspace.ts';
 import { resolveReadyInferenceProfile, type PersistedInferenceProfile } from '../../src/domain/inference-profile.ts';
 import { createSyntheticActorSession } from './pi-session.ts';
 import assert from 'node:assert/strict';
@@ -55,6 +56,8 @@ function preparedFixture(input: { characterId?: string; nonverbal?: boolean } = 
       value: {
         selfReference: 'Yo', selfConcept: 'Identidad de prueba.', values: [],
         dispositions: ['observador'], contradictions: [],
+        lifeHistory:{kind:'curated-life-history',narrative:'Historia de vida sintética elegida para esta prueba; no documenta biografía canónica. Los detalles no establecidos permanecen abiertos.',antecedentIds:[],unknowns:['Historia anterior no establecida por la fixture.'],contradictions:[]},
+        desires:[{desireId:'comprender-situacion',description:'Deseo comprender la situación inmediata.',stakes:'Poder relacionarme con lo que sucede.',tension:'La situación puede ser ambigua y exige escuchar.',goalIds:['objetivo-prueba']}],
       }, provenance,
     },
     voice: {
@@ -222,7 +225,7 @@ export function canonical(value: unknown): string {
   return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(',')}}`;
 }
 
-export async function setup(inferenceProfile?: PersistedInferenceProfile | 'historical', dramaticReferences?: DramaticReferences, budgetOverride?: Partial<RunBudget>) {
+export async function setup(inferenceProfile?: PersistedInferenceProfile | 'historical', dramaticReferences?: DramaticReferences, budgetOverride?: Partial<RunBudget>, options: { icmWorkspace?: IcmWorkspaceSnapshot } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'personajes-actor-worker-'));
   const journal = openJournal({ path: join(directory, 'journal.sqlite') });
   const baseConfiguration = readyFixture({ humanParticipants: [{
@@ -238,6 +241,7 @@ export async function setup(inferenceProfile?: PersistedInferenceProfile | 'hist
   const { inferenceProfile: originalProfile, ...historicalConfiguration } = baseConfiguration;
   const selectedConfiguration = inferenceProfile === 'historical' ? historicalConfiguration : baseConfiguration;
   const configuration = ReadyRunConfigurationSchema.parse({ ...selectedConfiguration,
+    ...(options.icmWorkspace === undefined ? {} : { icmWorkspace: options.icmWorkspace }),
     budget: { ...baseConfiguration.budget, ...budgetOverride },
     ...(inferenceProfile === undefined || inferenceProfile === 'historical' ? {} : { inferenceProfile }),
     roster: { ...baseConfiguration.roster, eligibleCharacterIds: [actorId, other.characterId],
@@ -266,10 +270,22 @@ export async function setup(inferenceProfile?: PersistedInferenceProfile | 'hist
   const pulseId = PulseIdSchema.parse(randomUUID());
   journal.configureRun({ runId, maxCalls: configuration.budget.maxPiCallsPerRun ?? 0 });
   journal.configurePulse({ runId, pulseId, maxCalls: configuration.budget.maxPiCallsPerPulse ?? 0 });
-  const scheduled = journal.scheduleActorTurnJob({ runId, actorId, pulseId });
-  assert.equal(scheduled.kind, 'scheduled');
-  if (scheduled.kind !== 'scheduled') throw new Error('Fixture sin job');
-  const claim = { runId, actorId, jobId: scheduled.job.jobId, generation: scheduled.job.generation,
+  // ICM execution is fenced to a real running coordinator pulse; historical
+  // fixtures keep their direct scheduling path and original three-argument API.
+  const scheduledJob = options.icmWorkspace === undefined ? (() => {
+    const scheduled = journal.scheduleActorTurnJob({ runId, actorId, pulseId });
+    assert.equal(scheduled.kind, 'scheduled');
+    if (scheduled.kind !== 'scheduled') throw new Error('Fixture sin job');
+    return scheduled.job;
+  })() : (() => {
+    const coordinated = journal.beginCoordinatorPulse({ runId });
+    assert.equal(coordinated.kind, 'started');
+    if (coordinated.kind !== 'started') throw new Error('Fixture ICM sin pulso');
+    const job = coordinated.jobs.find((candidate) => candidate.actorId === actorId);
+    assert.ok(job);
+    return job;
+  })();
+  const claim = { runId, actorId, jobId: scheduledJob.jobId, generation: scheduledJob.generation,
     ownerToken: randomUUID(), claimToken: randomUUID() };
   const runtime = await PiRuntime.create({ privateDataRoot: directory });
   const ids = { eventId: randomUUID, perceptionId: randomUUID, experienceId: randomUUID, offerId: randomUUID,
@@ -279,7 +295,7 @@ export async function setup(inferenceProfile?: PersistedInferenceProfile | 'hist
 }
 
 export type Fixture = Awaited<ReturnType<typeof setup>>;
-export function deterministicFactory(fixture: Fixture, options: { omitProposal?: boolean; beforePrompt?: () => void } = {}) {
+export function deterministicFactory(fixture: Fixture, options: { omitProposal?: boolean; beforePrompt?: () => void; proposeAction?: () => unknown } = {}) {
   let disposed = 0;
   const prompts: PiPromptInput[] = [];
   const factory = async (input: CreatePiSessionInput) => {
@@ -317,7 +333,8 @@ export function deterministicFactory(fixture: Fixture, options: { omitProposal?:
           const tool = input.tools.find((item) => item.name === 'propose_action');
           assert.ok(tool);
           // The fake transport invokes the real tool exactly as the SDK would; unused SDK context is absent.
-          await Reflect.apply(tool.execute, tool, ['tool-fixture', { action: { kind: 'wait', durationMs: 1 } }]);
+          await Reflect.apply(tool.execute, tool, ['tool-fixture', { nextInitiative: 'yield',
+            action: options.proposeAction?.() ?? { kind: 'wait', durationMs: 1 } }]);
         }
         await port.transitionReservation({ purpose, scope: prompt.scope, requestSeq: reservation.requestSeq, target: 'completed', wallTime: { clockEpochId: input.runtime.clockEpochId, monotonicNs: process.hrtime.bigint().toString() } });
         const leaf = frames.appendTerminal();
@@ -338,6 +355,8 @@ export function responseFor(context: ContinuistaReviewContext) {
   const proposal = context.payload.proposal;
   return { contextHash: context.contextHash, review: { kind: 'continuista', proposalId: proposal.proposalId,
     version: proposal.version, runId: proposal.runId, actorId: proposal.actorId, stateRevision: proposal.baseRevision,
-    exactContentHash: proposal.exactContentHash, verdict: 'allow', criterionCodes: ContinuistaCriterionSchema.options,
+    exactContentHash: proposal.exactContentHash,
+    ...(proposal.nextInitiative===undefined?{}:{nextInitiative:proposal.nextInitiative}),
+    verdict: 'allow', criterionCodes: ContinuistaCriterionSchema.options,
     evidenceRefs: ['ctx:proposal', 'ctx:preparation', 'ctx:projection'], complete: true } };
 }

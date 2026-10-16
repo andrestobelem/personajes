@@ -14,12 +14,17 @@ import { validateRunConfiguration } from '../src/application/production-prefligh
 import { runViewFixture } from './fixtures/run-view.ts';
 import { createLocalHttpServer, type RunDramaticStructureApplicationPort, type RunDirectionsApplicationPort, type RunCircumstancesApplicationPort, type RunLifecycleApplicationPort } from '../src/server/http.ts';
 import { DramaticStructureViewSchema } from '../src/domain/world-journal.ts';
-import { SessionCreatedSchema } from '../src/domain/http.ts';
+import { ApiProblemSchema, SessionCreatedSchema } from '../src/domain/http.ts';
 import { draftFixture } from './fixtures/continuista.ts';
 import { CircumstanceWriteSchema } from '../src/domain/direction-circumstances.ts';
-import { HashSchema } from '../src/domain/values.ts';
+import { HashSchema, RevisionSchema, WorldSeqSchema } from '../src/domain/values.ts';
+import { DramaticStructurePresentationSchema } from '../src/domain/dramatic-structure.ts';
 
-async function setup(t: TestContext, options: { rejectScenePlace?: boolean; directions?:RunDirectionsApplicationPort; circumstances?:RunCircumstancesApplicationPort; runId?:ReturnType<typeof runViewFixture>['runId'] } = {}) {
+const StructurePresentationSchema = DramaticStructurePresentationSchema.extend({
+  worldRevision: RevisionSchema, worldSeq: WorldSeqSchema.optional(), commitIndex: RevisionSchema.optional(),
+});
+
+async function setup(t: TestContext, options: { rejectScenePlace?: boolean; rejectActorJobs?:boolean; directions?:RunDirectionsApplicationPort; circumstances?:RunCircumstancesApplicationPort; runId?:ReturnType<typeof runViewFixture>['runId'] } = {}) {
   const view = {...runViewFixture(),...(options.runId===undefined?{}:{runId:options.runId})};
   const structure = DramaticStructureViewSchema.parse({ runId: view.runId, structureRevision: 0, activeEpisodeId: null, activeSceneId: null, episodes: [], unassignedLegacyScenes: [] });
   const applied: unknown[] = [];
@@ -39,6 +44,7 @@ async function setup(t: TestContext, options: { rejectScenePlace?: boolean; dire
       if (options.rejectScenePlace && request.command.kind === 'openScene') {
         return { kind: 'invalidState', code: 'invalidPlaceReference' };
       }
+      if(options.rejectActorJobs&&request.command.kind==='closeScene')return {kind:'invalidState',code:'actorJobsActive'};
       return { kind: 'stored', receipt: { operationId: request.operationId, worldRevision: 1, worldSeq: 0, structureRevision: 1,
         commitIndex: 1, activeEpisodeId: randomUUID(), activeSceneId: null } };
     },
@@ -140,6 +146,19 @@ test('la referencia a un lugar inexistente devuelve 422 de validación', async (
   assert.equal((host.applied[0] as { command: { kind: string } }).command.kind, 'openScene');
   assert.equal(response.status, 422, JSON.stringify(body));
   assert.equal(body.error.code, 'INVALID_DRAMATIC_STRUCTURE');
+});
+
+test('el cierre bloqueado por trabajo actoral conserva un diagnóstico público específico',async(t)=>{
+  const host=await setup(t,{rejectActorJobs:true});
+  const base=`${host.origin}/api/v1/runs/${host.runId}`;
+  const read=await fetch(base+'/dramatic-structure',{headers:host.headers});
+  const etag=read.headers.get('etag');assert.ok(etag);
+  const response=await fetch(base+`/scenes/${randomUUID()}/close`,{method:'POST',headers:{...host.headers,'If-Match':etag,'Idempotency-Key':randomUUID()},body:JSON.stringify({reason:'Corte de prueba'})});
+  assert.equal(response.status,409);
+  const problem=ApiProblemSchema.parse(await response.json());
+  assert.equal(problem.error.kind,'conflict');assert.equal(problem.error.code,'ACTOR_JOBS_ACTIVE');
+  assert.match(problem.error.message,/trabajos actorales vigentes/);
+  assert.doesNotMatch(JSON.stringify(problem),/ownerToken|claimToken|sessionPath|lifecycle_revision/);
 });
 
 test('HTTP y journal SQLite reproducen una apertura y rechazan lugares desconocidos sin commit', async (t) => {
@@ -244,6 +263,23 @@ test('HTTP y journal SQLite reproducen una apertura y rechazan lugares desconoci
   assert.deepEqual(historicalLatestValue.episodes.map(({ title, lifecycle }) => ({ title, lifecycle })), [{ title: 'Integración HTTP y SQLite', lifecycle: 'open' }]);
   assert.equal(historicalLatestValue.structureRevision, 2);
   assert.equal(historicalLatestValue.commitIndex, 2);
+
+  // Presentation labels are read from each durable world cut, including the initial scene
+  // whose episodeOpened event contains only its ID. A later scene must not leak into the past.
+  const laterScene = await fetch(`${origin}${base}/scenes`, { method: 'POST', headers: {
+    ...headers, 'Idempotency-Key': randomUUID(), 'If-Match': structureEtag,
+  }, body: JSON.stringify({ label: 'La escena posterior', participantIds: [participant.characterId], placeIds: [participant.placeId] }) });
+  assert.equal(laterScene.status, 200, await laterScene.clone().text());
+  const latestPresentation = StructurePresentationSchema.parse(await (await fetch(`${origin}${base}/dramatic-structure`, { headers })).json());
+  assert.ok(latestPresentation.sceneLabels?.some((scene) => scene.label === 'La escena posterior'));
+  const pastPresentation = StructurePresentationSchema.parse(await (await fetch(`${origin}${base}/dramatic-structure?worldRevision=${configuration.worldSnapshot.revision}&worldSeq=${configuration.worldSnapshot.seq}`, { headers })).json());
+  assert.deepEqual(pastPresentation.sceneLabels, [{id:initialScene.id,label:initialScene.label}]);
+  assert.equal(JSON.stringify(pastPresentation).includes('La escena posterior'), false);
+  assert.ok(latestPresentation.sceneLabels?.every((scene) => Object.keys(scene).sort().join(',') === 'id,label'),
+    'la metadata de presentación no expone participantes ni lugares');
+  // Reloading the application has no React/session cache and preserves a closed scene label.
+  const reloaded = createDramaticStructureApplication({journal}).read({runId:configuration.runId});
+  assert.ok(reloaded?.sceneLabels?.some(scene => scene.id === initialScene.id && scene.label === initialScene.label));
 
   const partialCut = await fetch(`${origin}${base}/dramatic-structure?worldRevision=${configuration.worldSnapshot.revision}`, { headers });
   assert.equal(partialCut.status, 422);

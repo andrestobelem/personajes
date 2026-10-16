@@ -59,13 +59,17 @@ export function ConversationMessage({
           {labelList(item.requestedRecipients)} · {item.requestedRecipientCount}{" "}
           solicitados
         </dd>
-        <dt>Recepción efectiva en el Escenario</dt>
+        <dt>Recepción efectiva de personajes en el Escenario</dt>
         <dd>
           {labelList(item.effectiveAudience)} · {item.effectiveAudienceCount}{" "}
           alcanzados
         </dd>
+        <dt>Destinatarios humanos solicitados</dt>
+        <dd>{item.speaker.kind==='human'?'No aplica: intervención dirigida al reparto':item.requestedHumanRecipients===undefined?'Sin registro histórico':labelList(item.requestedHumanRecipients)}</dd>
+        <dt>Recepción humana confirmada</dt>
+        <dd>{item.speaker.kind==='human'?'No aplica: intervención dirigida al reparto':item.effectiveHumanAudience===undefined?'Sin registro histórico':`${labelList(item.effectiveHumanAudience)} · ${item.effectiveHumanAudience.length} alcanzados`}. No confirma lectura ni memoria ICM.</dd>
       </dl>
-      {item.effectiveAudienceCount === 0 && (
+      {item.effectiveAudienceCount === 0 && item.effectiveHumanAudience?.length === 0 && (
         <p>Nadie recibió esta emisión en el Escenario.</p>
       )}
       {item.effectiveAudienceCount < item.requestedRecipientCount && (
@@ -138,7 +142,7 @@ export function StageConversation({
   const recipients = [
     ...new Set(
       items.flatMap((item) =>
-        item.effectiveAudience.map((person) => person.label),
+        [...item.effectiveAudience,...(item.effectiveHumanAudience??[])].map((person) => person.label),
       ),
     ),
   ];
@@ -148,7 +152,7 @@ export function StageConversation({
       (!speaker || item.speaker.label === speaker) &&
       (!channel || item.channel.label === channel) &&
       (!recipient ||
-        item.effectiveAudience.some((person) => person.label === recipient)) &&
+        [...item.effectiveAudience,...(item.effectiveHumanAudience??[])].some((person) => person.label === recipient)) &&
       (!scene || item.sceneId === scene) &&
       (!date ||
         fictionalDateKey({ ...stage.clock, instant: item.fictionalAt }) ===

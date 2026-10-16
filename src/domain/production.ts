@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { IcmWorkspaceSnapshotStructureSchema as IcmWorkspaceSnapshotSchema } from './icm-workspace-schema.ts';
 import {
   CharacterIdSchema, FictionalInstantSchema, ProposalIdSchema, RevisionSchema, RunIdSchema,
 } from './values.ts';
 import {
-  ContinuityContextSchema, PreparedCharacterSchema, SpanishVarietyForActingSchema,
+  ContinuityContextSchema, PreparationDraftSchema, PreparedCharacterSchema, SpanishVarietyForActingSchema,
 } from './preparation.ts';
 import { WorldSnapshotSchema } from './world-schema.ts';
 import { HumanParticipantProfileSchema } from './interaction-schema.ts';
@@ -207,6 +208,8 @@ export const ProductionRosterSchema = z.strictObject({
   eligibleCharacterIds: z.array(CharacterIdSchema).max(1_000),
   /** Full, validated per-identity preparation snapshots available to this run. */
   preparedCharacters: z.array(PreparedCharacterSchema).max(1_000),
+  /** Curated sections still awaiting a complete, valid acting context. Never scheduled. */
+  preparationDrafts: z.array(PreparationDraftSchema).max(1_000).optional(),
   /** Active means an actor session may be scheduled in this run. */
   activeCharacterIds: z.array(CharacterIdSchema).max(1_000),
 }).superRefine((roster, context) => {
@@ -219,6 +222,12 @@ export const ProductionRosterSchema = z.strictObject({
   };
   validateUnique(roster.eligibleCharacterIds, ['eligibleCharacterIds']);
   validateUnique(roster.preparedCharacters.map((character) => character.characterId), ['preparedCharacters']);
+  validateUnique((roster.preparationDrafts ?? []).map((character) => character.characterId), ['preparationDrafts']);
+  for (const [index, character] of (roster.preparationDrafts ?? []).entries()) {
+    if (roster.preparedCharacters.some(prepared => prepared.characterId === character.characterId)) {
+      context.addIssue({ code: 'custom', path: ['preparationDrafts', index, 'characterId'], message: 'Una curación pendiente no puede coexistir con un actor habilitado de la misma identidad.' });
+    }
+  }
   validateUnique(roster.activeCharacterIds, ['activeCharacterIds']);
 });
 export type ProductionRoster = z.infer<typeof ProductionRosterSchema>;
@@ -243,11 +252,15 @@ export const WorldPreparationCandidateSchema = z.strictObject({
 /** Compatibility name for serialized world preparation candidates. */
 export const WorldSnapshotDraftSchema = WorldPreparationCandidateSchema;
 
+/** Host policy for fresh preparations. Missing historical values stay absent. */
+export const CharacterDefinitionPolicySchema=z.strictObject({kind:z.literal('embodied-v1')});
+
 export const RunConfigurationDraftSchema = z.strictObject({
   kind: z.literal('run-configuration-draft'),
   schemaVersion: z.literal(1),
   runId: RunIdSchema,
   revision: RevisionSchema,
+  characterDefinitionPolicy: CharacterDefinitionPolicySchema.optional(),
   name: ProductionDraftFieldSchema(z.string().trim().min(1).max(120)),
   fictionalAt: ProductionDraftFieldSchema(FictionalInstantSchema),
   continuity: ProductionDraftFieldSchema(ContinuityContextSchema),
@@ -264,6 +277,8 @@ export const RunConfigurationDraftSchema = z.strictObject({
   narrationMode: ProductionDraftFieldSchema(NarrationModeSchema),
   /** Optional only for old serialized drafts; new drafts explicitly record the selected profile. */
   inferenceProfile: ProductionDraftFieldSchema(PersistedInferenceProfileSchema).optional(),
+  /** Frozen Markdown contracts; absent legacy drafts stay absent until explicit admission. */
+  icmWorkspace: ProductionDraftFieldSchema(IcmWorkspaceSnapshotSchema).optional(),
   budget: ProductionDraftFieldSchema(RunBudgetSchema),
   maxReformulations: ProductionDraftFieldSchema(z.number().int().min(0).max(2)),
   audio: ProductionDraftFieldSchema(ProductionAudioSchema),

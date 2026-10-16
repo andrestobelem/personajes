@@ -9,6 +9,11 @@ import { createNarrationObservation } from '../application/narration-observation
 import { createNarrationRoutes } from './narration-routes.ts';
 import { z } from 'zod';
 import type { loadCatalog } from '../adapters/catalog.ts';
+import { createIcmWorkspaceReader } from '../adapters/icm-workspace.ts';
+import { createIcmWorkspaceRoutes } from './icm-workspace-routes.ts';
+import { createIcmContextInspectionRoutes } from './icm-context-inspection-routes.ts';
+import { createScriptExportService } from '../application/script-export.ts';
+import { createScriptExportRoutes } from './script-export-routes.ts';
 import type { openLocalHost } from '../application/local-host.ts';
 import { resolveConfiguredSessionMode } from '../application/production-preflight.ts';
 import { projectHumanInteractionContext } from '../domain/interaction.ts';
@@ -42,6 +47,8 @@ import { createIdentityPromotionApplication } from '../application/identity-prom
 import { createIdentityPromotionRoutes } from './identity-promotion-routes.ts';
 import { createRunMemoryPreparation } from '../application/run-memory-preparation.ts';
 import { createMemoryPreparationRoutes } from './memory-preparation-routes.ts';
+import { createPreparationConfiguratorRuntime } from '../application/preparation-configurator-runtime.ts';
+import { createPreparationConfiguratorRoutes } from './preparation-configurator-routes.ts';
 
 /** Reusable composition of one owned private directory. Creation does not recover,
  * begin a representation, login, probe a provider, or synthesize audio. */
@@ -56,6 +63,8 @@ export async function createProductionHost(input:{
  configureRestorePort?:(forkPort:BackupRestorePort)=>BackupRestorePort;
  /** Trusted composition seam for controlled local SDK integration; never read from HTTP or environment. */
  configuratorSessionFactory?:(input:CreatePiSessionInput)=>Promise<PiSessionHandle>;
+ /** Trusted session seam for preparation-configurator integration tests; never read from HTTP or environment. */
+ preparationConfiguratorSessionFactory?:(input:CreatePiSessionInput)=>Promise<PiSessionHandle>;
  /** Explicit controlled transport for production-host integration tests; never read from HTTP or environment. */
  testPiTransport?:ControlledPiTestTransport;
 }){
@@ -76,6 +85,7 @@ export async function createProductionHost(input:{
    const errors:unknown[]=[];
    async function settle(work:()=>unknown|Promise<unknown>){try{await work();}catch(error){errors.push(error);}}
    oauthController.abort();
+   await settle(()=>preparationConfigurator?.close());
    const stopMemoryPreparation=memoryPreparations?.close();
    void stopMemoryPreparation?.catch(()=>undefined);
    await restoreRecovery?.catch(()=>undefined);
@@ -117,6 +127,7 @@ export async function createProductionHost(input:{
     {sql:"SELECT 1 FROM memory_preparation_jobs WHERE state IN('queued','running') LIMIT 1"},
     {sql:"SELECT 1 FROM fork_jobs WHERE state='staging' LIMIT 1"},
     {sql:"SELECT 1 FROM configurator_jobs WHERE json_extract(payload_json,'$.job.state') IN('queued','running') LIMIT 1"},
+    {sql:"SELECT 1 FROM preparation_configurator_jobs WHERE json_extract(payload_json,'$.job.state') IN('queued','running') LIMIT 1"},
     // Running rows carry a live worker claim. Queued actor work is only active
     // for a running lifecycle; paused/stopped rows can be stale after epoch
     // invalidation and must not permanently prevent a runtime-path change.
@@ -152,9 +163,13 @@ let transfers:ReturnType<typeof openBackupTransferService>|undefined;
 let externalRestoreRoutes:ReturnType<typeof createExternalBackupRestoreRoutes>|undefined;
 let identityPromotions:Awaited<ReturnType<typeof createIdentityPromotionApplication>>|undefined;
 let memoryPreparations:Awaited<ReturnType<typeof createRunMemoryPreparation>>|undefined;
+let preparationConfigurator:Awaited<ReturnType<typeof createPreparationConfiguratorRuntime>>|undefined;
 try {
   voices=createVoiceRuntime({host,...(input.privateAuthRoot===undefined?{}:{privateAuthRoot:input.privateAuthRoot}),onDiagnostic:diagnostic=>diagnosticSink(diagnostic)});
-  const configuredExchange=await createExchangeRuntime({host,catalog});
+  const icmWorkspace=createIcmWorkspaceReader({workspaceRoot:catalog.repositoryRoot});
+  const configuredExchange=await createExchangeRuntime({host,catalog,
+    admitIcmWorkspace(snapshot){icmWorkspace.admitFrozenSnapshot(snapshot,{expectedSnapshotHash:snapshot.snapshotHash});},
+  });
   exchange=configuredExchange;
   host.journal.setPreparationSourceAdmission(configuredExchange.preparationSourceAdmission);
   const configuredTransfers=openBackupTransferService({privateDataRoot:host.privateDataRoot,ownerToken:host.ownerToken,
@@ -186,6 +201,7 @@ try {
     createHost: () => createProductionPreflightHost({ journal: host.journal, catalog, piRuntime, authentication,
       readVoiceReadiness: async request => voices?.readPreflightReadiness(request) ?? Promise.resolve({kind:'unavailable',code:'voice-runtime-unavailable'}),
       roleReadiness:()=>representation?.roleReadiness??{actor:false,continuista:false,director:false,narrator:false},
+      icmContextPacketsReady:()=>!closing && representation!==undefined && !representation.isClosed && identityPromotions!==undefined,
       ...(input.icmBinaryPath === undefined ? {} : { icmBinaryPath: input.icmBinaryPath }) }),
   });
   if (input.icmBinaryPath !== undefined) {
@@ -237,9 +253,19 @@ const configuredMemories=await createRunMemoryPreparation({host,
   },
 });
 memoryPreparations=configuredMemories;
+const preparationAdmission=createProductionPreflightHost({journal:host.journal,catalog,piRuntime,authentication,
+  ...(input.icmBinaryPath===undefined?{}:{icmBinaryPath:input.icmBinaryPath})});
+preparationConfigurator=await createPreparationConfiguratorRuntime({host,catalog,adaptations:configuredExchange.dossiers,runtime:piRuntime,
+  admission:{readPiSdkStatus:preparationAdmission.readPiSdkStatus,readPiModelProfile:preparationAdmission.readPiModelProfile,
+    readInferenceAuthenticationStatus:preparationAdmission.readInferenceAuthenticationStatus,
+    readInferenceAccessCheckReceipt:preparationAdmission.readInferenceAccessCheckReceipt},
+  ...(input.preparationConfiguratorSessionFactory===undefined?{}:{sessionFactory:input.preparationConfiguratorSessionFactory}),
+  onFailure:diagnostic=>diagnosticSink({kind:'preparationConfiguratorFailed',...diagnostic}),
+});
 if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!==undefined&&preflightJobs!==undefined) {
   exchange.setBackupQuiesce(createHostBackupQuiesce({host,admission:input.admissionBarrier,oauth:oauthJobs,access:accessJobs,preflight:preflightJobs,
     ...(forks===undefined?{}:{forks}),...(identityPromotions===undefined?{}:{configurator:identityPromotions}),
+    ...(preparationConfigurator===undefined?{}:{preparationConfigurator}),
     ...(representation===undefined?{}:{representation}),...(worldDeliveries===undefined?{}:{deliveries:worldDeliveries}),voice:voices.service}));
 }
   const configuredVoices=voices;
@@ -255,8 +281,9 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   const httpOptions={
     admissionBarrier:input.admissionBarrier,
     runtimeComposition:()=>({kind:representation!==undefined&&!representation.isClosed?'composed':'unavailable'}),
-    operatorExtensions:[createMemoryPreparationRoutes({application:configuredMemories}),createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),
-      createBackupTransferRoutes({service:()=>configuredTransfers}),externalRestoreRoutes,createIdentityPromotionRoutes({application:()=>identityPromotions}),...(exchange===undefined?[]:[exchange.routes])],
+    operatorExtensions:[createScriptExportRoutes(createScriptExportService({journal:host.journal,repositoryRoot:catalog.repositoryRoot,privateDataRoot:host.privateDataRoot})),createIcmContextInspectionRoutes({journal:host.journal}),createIcmWorkspaceRoutes({reader:icmWorkspace}),createMemoryPreparationRoutes({application:configuredMemories}),createNarrationRoutes(createNarrationObservation({journal:host.journal})),...(voices===undefined?[]:[voices.routes]),
+      createBackupTransferRoutes({service:()=>configuredTransfers}),externalRestoreRoutes,createIdentityPromotionRoutes({application:()=>identityPromotions}),
+      createPreparationConfiguratorRoutes({application:()=>preparationConfigurator?.application}),...(exchange===undefined?[]:[exchange.routes])],
     runConfigurationDrafts: host.journal,
     forks: createForkApplication({journal:host.journal,...(forks===undefined?{}:{runtime:forks})}),
     readRunModelTimeBudget: (request) => host.journal.readRunModelTimeBudget(request),
@@ -308,6 +335,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
   } satisfies Omit<LocalHttpOptions,'catalog'|'shellHtml'|'staticAssets'>;
  async function recover(){
   if(closing)throw new Error('PRODUCTION_HOST_CLOSED');
+  preparationConfigurator?.recover();
   restoreRecovery=configuredExchange.backups.recoverRestores();
   await restoreRecovery;
   if(closing)return;
@@ -319,7 +347,7 @@ if(exchange!==undefined&&voices!==undefined&&oauthJobs!==undefined&&accessJobs!=
  // A successfully reopened host may outlive that operation; later close receives
  // a fresh capability explicitly or acquires the ordinary ownership gate.
  closeOptions=undefined;
- return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,memoryPreparations:configuredMemories,httpOptions,recover,close,assertRuntimeConfigurationIdle,
+ return Object.freeze({host,exchange:configuredExchange,transfers:configuredTransfers,identityPromotions,memoryPreparations:configuredMemories,preparationConfigurator,httpOptions,recover,close,assertRuntimeConfigurationIdle,
   ...(testOnly===undefined?{}:{testOnly})});
 } catch (error) {
   try { await close(); } catch (closeError) { throw new AggregateError([error,closeError], 'Production setup and cleanup failed'); }

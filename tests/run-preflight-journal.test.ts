@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
+import { downgradeCoordinatorPulsesTo44 } from './fixtures/journal-v45-downgrade.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -86,16 +87,37 @@ test('un preflight passed exige todos los gates sin duplicados',()=>{
   assert.equal(RunPreflightResultSchema.safeParse({kind:'passed',checkedAt,checks}).success,true);
 });
 
+test('un resultado passed no puede certificar acceso fuera del intervalo de su recibo',async()=>{
+  const fixture=await readyJournal();
+  try{
+    const created=start(fixture.journal,fixture.runId,940);assert.ok(created.kind==='created');
+    const lease={ownerToken:uuid(941),claimToken:uuid(942)};
+    const claimed=fixture.journal.claimRunPreflightJob({runId:fixture.runId,jobId:created.job.jobId,expectedRevision:0,...lease});
+    assert.ok(claimed.kind==='claimed');
+    const frozen=fixture.journal.readRunPreflightJobInput({runId:fixture.runId,jobId:created.job.jobId,lease});
+    assert.ok(frozen.kind==='found');
+    const receipt=attachAccessReceipt(fixture.journal,943);
+    const base=evaluation({fence:frozen.fence,receipt});
+    const request={runId:fixture.runId,jobId:created.job.jobId,expectedRevision:claimed.job.revision,lease};
+    for(const checkedAt of [receipt.expiresAt,new Date(Date.parse(receipt.checkedAt)-1).toISOString()]){
+      assert.throws(()=>fixture.journal.completeRunPreflightJob({...request,evaluation:{...base,result:{...base.result,checkedAt}}}),
+        /recibo de acceso no valida/);
+    }
+    assert.throws(()=>fixture.journal.completeRunPreflightJob({...request,evaluation:{...base,evidence:{...base.evidence,accessReceipt:null}}}));
+    assert.equal(fixture.journal.completeRunPreflightJob({...request,evaluation:base}).kind,'updated');
+  }finally{fixture.close();}
+});
+
 test('v23 crea jobs preflight para Ready/pausa/detenida y conserva receipt inicial idempotente',async()=>{
   const fixture=await setup();const directory=mkdtempSync(join(tmpdir(),'personajes-preflight-migrate-v21-'));const path=join(directory,'journal.sqlite');let journal=openJournal({path});
   try{
     const created=journal.createRunConfigurationDraft({principalId,idempotencyKey:uuid(10),patch:patchFor(fixture.configuration)});if(created.kind!=='created')assert.fail('No draft');
     const ready=journal.validateRunConfigurationDraft({principalId,idempotencyKey:uuid(11),runId:created.draft.runId,expectedRevision:0});if(ready.kind!=='ready')assert.fail('No Ready');
     const beforeMigration=new DatabaseSync(path);
-    try{beforeMigration.exec(`DROP TABLE run_preflight_job_operations;DROP TABLE run_preflight_job_results;DROP TABLE run_preflight_job_history;DROP TABLE run_preflight_jobs;
+    try{downgradeCoordinatorPulsesTo44(beforeMigration);beforeMigration.exec(`DROP TABLE preparation_configurator_records; DROP TABLE preparation_configurator_operations; DROP TABLE preparation_configurator_jobs; DROP TABLE model_budget_authorities; DROP TRIGGER icm_context_packets_no_update; DROP TRIGGER icm_context_packets_no_delete; DROP TABLE icm_context_packets; DROP INDEX coordinator_pulses_parked_for; ALTER TABLE coordinator_pulses DROP COLUMN parked_for_pulse_id; DROP TABLE run_preflight_job_operations;DROP TABLE run_preflight_job_results;DROP TABLE run_preflight_job_history;DROP TABLE run_preflight_jobs;
       DROP TABLE model_time_spans; DROP TABLE model_time_run_state;
       DROP TABLE IF EXISTS actor_activation_invitation_jobs; DROP TABLE IF EXISTS actor_activation_invitations; DROP TABLE IF EXISTS actor_activation_causes; DROP TABLE IF EXISTS routine_clock_advances;
-      DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DELETE FROM schema_version WHERE version IN(21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41);`);}finally{beforeMigration.close();}
+      DROP TABLE IF EXISTS circumstance_operations;DROP TABLE IF EXISTS actor_state_cuts; DROP TABLE IF EXISTS actor_state_cut_batches; DROP TABLE IF EXISTS fork_projection_receipts; DROP TABLE IF EXISTS fork_job_history; DROP TABLE IF EXISTS fork_dramatic_seeds; DROP TABLE IF EXISTS fork_job_retries; DROP TABLE IF EXISTS fork_backup_sources; DROP TABLE IF EXISTS fork_jobs; DROP TABLE IF EXISTS identity_promotion_receipts; DROP TABLE IF EXISTS actor_job_identity_bindings; DROP TABLE IF EXISTS actor_pi_session_archives; DROP TABLE IF EXISTS actor_identity_session_bindings; DROP TABLE IF EXISTS actor_identity_epochs; DROP TABLE IF EXISTS configurator_http_operations; DROP TABLE IF EXISTS configurator_consents; DROP TABLE IF EXISTS configurator_operations; DROP TABLE IF EXISTS configurator_candidates; DROP TABLE IF EXISTS configurator_checkpoints; DROP TABLE IF EXISTS configurator_sessions; DROP TABLE IF EXISTS configurator_generations; DROP TABLE IF EXISTS configurator_jobs; DROP TABLE IF EXISTS run_configuration_revisions; DROP TRIGGER IF EXISTS actor_initiatives_source_immutable; DROP INDEX IF EXISTS actor_initiatives_ready; DROP INDEX IF EXISTS actor_initiatives_one_open_per_actor; DROP INDEX IF EXISTS actor_turn_jobs_initiative; DROP TABLE IF EXISTS actor_initiatives; ALTER TABLE actor_turn_jobs DROP COLUMN initiative_id; DELETE FROM schema_version WHERE version=45; DELETE FROM schema_version WHERE version IN(21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44);`);}finally{beforeMigration.close();}
     journal.close();journal=openJournal({path});
     const result=journal.createRunPreflightJob({principalId,idempotencyKey:uuid(12),runId:created.draft.runId,expectedConfigurationRevision:0,expectedWorldRevision:4});
     assert.equal(result.kind,'created');if(result.kind!=='created')assert.fail('No job');
@@ -105,7 +127,7 @@ test('v23 crea jobs preflight para Ready/pausa/detenida y conserva receipt inici
     const found=journal.readRunPreflightJob({runId:created.draft.runId,jobId:result.job.jobId});assert.equal(found.kind,'found');
     if(found.kind==='found'){assert.equal(found.document.report.kind,'current');assert.equal(found.document.report.result,null);}
     assert.equal(journal.readRunConfigurationDraftState({runId:created.draft.runId})?.lifecycle,'ready');
-    const inspect=new DatabaseSync(path);try{assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version, 41);
+    const inspect=new DatabaseSync(path);try{assert.equal(inspect.prepare('SELECT MAX(version) version FROM schema_version').get()?.version, 45);
       assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_events').get()?.n,0);assert.equal(inspect.prepare('SELECT COUNT(*) n FROM world_commits').get()?.n,0);
       assert.deepEqual(inspect.prepare('PRAGMA foreign_key_check').all(),[]);}finally{inspect.close();}
   }finally{journal.close();fixture.close();rmSync(directory,{recursive:true,force:true});}
@@ -509,7 +531,7 @@ test('step conserva CAS, rechaza preflight ajeno y presupuesto agotado dentro de
     assert.equal(fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2100),expectedWorldRevision:command.expectedWorldRevision-1}).kind,'stale');
     assert.equal(fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2101),preflightJobId:uuid(2102)}).kind,'preflightBlocked');
     const database = new DatabaseSync(fixture.path);
-    try {database.prepare('INSERT INTO run_budgets(run_id,max_calls,consumed) VALUES(?,?,?)').run(fixture.runId,20,20);}
+    try {assert.equal(database.prepare('UPDATE run_budgets SET max_calls=?,consumed=? WHERE run_id=?').run(20,20,fixture.runId).changes,1, 'la autoridad de presupuesto Ready ya fue inicializada');}
     finally {database.close();}
     assert.equal(fixture.journal.applyRunLifecycleCommand({...command,idempotencyKey:uuid(2103)}).kind,'budgetExhausted');
     assert.equal(fixture.journal.readWorldLifecycle({runId:fixture.runId})?.lifecycle,'paused');

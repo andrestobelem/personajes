@@ -46,7 +46,8 @@ test('journal admits host source, preserves exact source after catalogue changes
   assert.deepEqual(f.journal.updateRunConfigurationDraft(update),{...saved,kind:'existing'});
   const {dossierSource,...legacy}=f.prepared(source);void dossierSource;
   assert.throws(()=>f.journal.updateRunConfigurationDraft({...update,idempotencyKey:randomUUID(),expectedRevision:1,patch:f.patch([legacy])}),/REMOVAL_FORBIDDEN/);
-  assert.equal(RunDraftMutationResultSchema.parse(f.journal.updateRunConfigurationDraft({...update,idempotencyKey:randomUUID(),expectedRevision:1,patch:f.patch([])})).kind,'stored');
+  const retired=f.patch([]);retired.roster.value.activeCharacterIds=[];
+  assert.equal(RunDraftMutationResultSchema.parse(f.journal.updateRunConfigurationDraft({...update,idempotencyKey:randomUUID(),expectedRevision:1,patch:retired})).kind,'stored');
  }finally{f.close();}
 });
 

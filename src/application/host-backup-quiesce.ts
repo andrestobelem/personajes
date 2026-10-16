@@ -10,6 +10,8 @@ import { ActorJobCheckpointSchema,ContinuistaJobExecutionSchema,RunLifecycleComm
 import { ConfiguratorJobSessionSchema } from '../domain/configurator-jobs.ts';
 import { AdministrativeCheckpointSchema } from '../domain/admin-role-jobs.ts';
 import { AdministrativeRoleSchema } from '../domain/admin-roles.ts';
+import { PreparationConfiguratorRecordSchema } from '../domain/preparation-configurator-jobs.ts';
+import { canonicalJson, sha256CanonicalJson } from '../domain/canonical-json.ts';
 import type { openLocalHost } from './local-host.ts';
 import type { BackupQuiescePort } from './backup-service.ts';
 import type { createHostRequestBarrier } from './host-request-barrier.ts';
@@ -30,7 +32,7 @@ function physicalRole(raw:unknown){
 export function createHostBackupQuiesce(input:{
  host:ReturnType<typeof openLocalHost>;admission:ReturnType<typeof createHostRequestBarrier>;
  oauth:BusyPort;access:BusyPort;preflight:BusyPort;
- representation?:RepresentationSuspension;deliveries?:Suspension;forks?:Suspension;configurator?:Suspension;voice:MediaSuspension;
+ representation?:RepresentationSuspension;deliveries?:Suspension;forks?:Suspension;configurator?:Suspension;preparationConfigurator?:Suspension;voice:MediaSuspension;
 }):BackupQuiescePort{
  if(input.representation===undefined&&input.deliveries===undefined)throw new Error('BACKUP_DELIVERY_BARRIER_UNAVAILABLE');
  return {async acquire(){
@@ -45,6 +47,8 @@ export function createHostBackupQuiesce(input:{
    else if(db.prepare("SELECT 1 FROM fork_jobs WHERE state IN ('staging','failed') LIMIT 1").get())throw new Error('BACKUP_FORK_BARRIER_UNAVAILABLE');
    if(input.configurator)releases.push(await input.configurator.suspendAdmissions());
    else if(db.prepare("SELECT 1 FROM configurator_jobs WHERE json_extract(payload_json,'$.job.state') IN ('queued','running') LIMIT 1").get())throw new Error('BACKUP_CONFIGURATOR_BARRIER_UNAVAILABLE');
+   if(input.preparationConfigurator)releases.push(await input.preparationConfigurator.suspendAdmissions());
+   else if(db.prepare("SELECT 1 FROM preparation_configurator_jobs WHERE json_extract(payload_json,'$.job.state') IN ('queued','running') LIMIT 1").get())throw new Error('BACKUP_PREPARATION_CONFIGURATOR_BARRIER_UNAVAILABLE');
    const runRows=db.prepare('SELECT run_id FROM world_runs ORDER BY run_id LIMIT 100001').all();
    if(runRows.length>100000)throw new Error('BACKUP_RUN_LIMIT');
    const runIds=runRows.map(row=>z.strictObject({run_id:RunIdSchema}).parse(row).run_id);
@@ -120,6 +124,18 @@ export function createHostBackupQuiesce(input:{
     const session=ConfiguratorJobSessionSchema.parse(JSON.parse(record.payload_json));
     if(session.execution.scope.jobId!==record.job_id||session.execution.scope.generation!==record.generation||session.sessionPath!==record.session_path)throw new Error('BACKUP_SESSION_SCOPE_INVALID');
     sessionPath(session.sessionPath,session.execution.scope.runId,'roles/configurador');
+   }
+   const preparationSessions=db.prepare("SELECT job_id,generation,payload_json,payload_hash FROM preparation_configurator_records WHERE kind='session' LIMIT 100001").all();
+   if(preparationSessions.length>100000)throw new Error('BACKUP_ARTIFACT_LIMIT');
+   for(const row of preparationSessions){
+    const record=z.strictObject({job_id:z.uuid(),generation:z.number().int().nonnegative(),payload_json:z.string(),payload_hash:HashSchema}).parse(row);
+    const session=PreparationConfiguratorRecordSchema.parse(JSON.parse(record.payload_json));
+    if(canonicalJson(session)!==record.payload_json||sha256CanonicalJson({jobId:record.job_id,generation:record.generation,kind:'session',requestSeq:-1,record:session})!==record.payload_hash)throw new Error('BACKUP_SESSION_METADATA_TAMPERED');
+    if(session.kind!=='session'||session.execution.scope.jobId!==record.job_id||session.execution.scope.generation!==record.generation)throw new Error('BACKUP_SESSION_SCOPE_INVALID');
+    // Pi creates its JSONL lazily on the first request. A registered pre-input
+    // session without any checkpoint has no physical artifact to preserve yet.
+    if(existsSync(session.value.sessionPath))sessionPath(session.value.sessionPath,session.execution.scope.runId,'roles/configurador');
+    else if(db.prepare("SELECT 1 FROM preparation_configurator_records WHERE job_id=? AND generation=? AND kind IN ('request-input','terminal-candidate','accepted-proof') LIMIT 1").get(record.job_id,record.generation))throw new Error('BACKUP_REGISTERED_SESSION_MISSING');
    }
    // Retain all registered role generations and forensic actor candidates/checkpoints,
    // including files no longer selected as the actor's current session.

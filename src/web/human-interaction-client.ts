@@ -1,3 +1,4 @@
+import { HumanReceptionPageSchema } from "../domain/run-observation.ts";
 import { z } from "zod";
 import {
   ApiProblemSchema,
@@ -14,7 +15,7 @@ import {
   type HumanInterventionRequest,
 } from "../domain/interaction-schema.ts";
 import { bootstrapSession } from "./client.ts";
-import { HumanParticipantIdSchema } from "../domain/values.ts";
+import { WorldSeqSchema, HumanParticipantIdSchema } from "../domain/values.ts";
 
 export type SessionDocument = { view: SessionView; etag: string };
 export type ContextDocument = { view: HumanInteractionContext; etag: string };
@@ -114,6 +115,24 @@ export function createHumanInteractionClient(
       if (view.runId !== runId || response.headers.get("etag") !== etag)
         throw new Error("Contexto de otra representación o revisión");
       return { view, etag };
+    },
+    async receptions(runId: string, participantId: string, fromWorldSeq=0) {
+      const checkedRun=z.string().uuid().parse(runId);
+      const checkedParticipant=HumanParticipantIdSchema.parse(participantId);
+      const from=WorldSeqSchema.parse(fromWorldSeq);
+      const items=[];
+      let throughWorldSeq=from;
+      let cursor:string|null=null;
+      do {
+        const query=new URLSearchParams({limit:'100'});
+        if(from>0)query.set('fromWorldSeq',String(from));
+        if(cursor!==null)query.set('pageCursor',cursor);
+        const response=await request(`/api/v1/runs/${checkedRun}/human-receptions?${query}`,{credentials:'same-origin'});
+        const page=HumanReceptionPageSchema.parse(await body(response));
+        if(page.runId!==checkedRun||page.participantId!==checkedParticipant)throw new Error('La recepción pertenece a otra identidad o representación');
+        items.push(...page.items);throughWorldSeq=page.toWorldSeq;cursor=page.nextCursor;
+      } while(cursor!==null);
+      return {items,throughWorldSeq};
     },
     async mutate(intent: HumanIntent) {
       const session = await bootstrap();

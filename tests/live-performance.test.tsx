@@ -39,3 +39,49 @@ test('live dialogue follows confirmed additions, permits reading earlier message
     for(const {name,descriptor} of restore){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else Reflect.deleteProperty(globalThis,name);}
   }
 });
+
+test('intervención humana dirigida al reparto no se presenta como recepción humana histórica faltante',async()=>{
+  const {renderToStaticMarkup}=await import('react-dom/server');
+  const {ConversationMessage}=await import('../src/web/StageConversation.tsx');
+  const stage=stageFixture();
+  const human=ConversationViewSchema.parse({...conversationFixture(),speaker:{kind:'human',participantId:'visitante-a',label:'Visitante A'}});
+  const live=renderToStaticMarkup(<LivePerformance stage={stage} items={[human]} jobs={[]} map={stageMapData(stage)} connected error={null} onExit={()=>{}}/>);
+  assert.match(live,/no aplica: intervención dirigida al reparto/);assert.doesNotMatch(live,/sin registro histórico/i);
+  const detailed=renderToStaticMarkup(<ConversationMessage item={human} clock={stage.clock} onSelectEvent={()=>{}}/>);
+  assert.match(detailed,/No aplica: intervención dirigida al reparto/);assert.doesNotMatch(detailed,/Sin registro histórico/);
+  const legacyActor=renderToStaticMarkup(<LivePerformance stage={stage} items={[conversationFixture()]} jobs={[]} map={stageMapData(stage)} connected error={null} onExit={()=>{}}/>);
+  assert.match(legacyActor,/recepción humana: sin registro histórico/);
+});
+
+test('al cerrar la escena muestra su estado y conserva la conversación en lugar de un plano vacío',async()=>{
+  const {renderToStaticMarkup}=await import('react-dom/server');
+  const stage={...stageFixture(),activeSceneId:null,lifecycle:'stopped' as const,places:[]};
+  const item=conversationFixture();
+  const html=renderToStaticMarkup(<LivePerformance stage={stage} items={[item]} jobs={[]} map={stageMapData(stageFixture())} connected error={null} onExit={()=>{}}/>);
+  assert.match(html,/Entre escenas\. No hay una escena activa/);
+  assert.match(html,/consultar las escenas anteriores/);
+  assert.ok(item.content.kind==='speech');
+  const rendered=new JSDOM(html);
+  try {assert.equal(rendered.window.document.querySelector('blockquote')?.textContent,item.content.text);}
+  finally {rendered.window.close();}
+  assert.doesNotMatch(html,/<svg/);
+});
+
+test('actividad en vivo respeta ciclo actual aunque un registro durable siga running y conserva fallos visibles',async()=>{
+  const {renderToStaticMarkup}=await import('react-dom/server');
+  const {TechnicalJobViewSchema}=await import('../src/domain/run-observation.ts');
+  const stage=stageFixture();
+  const job=TechnicalJobViewSchema.parse({jobId:crypto.randomUUID(),runId:stage.runId,kind:'pulse',generation:0,pulseId:null,state:'running',actor:null,createdAt:0,updatedAt:1,elapsedMs:0,modelCalls:0,modelWallTimeMs:0,reservedWallTimeMs:0,safeCode:null});
+  const failed=TechnicalJobViewSchema.parse({...job,jobId:crypto.randomUUID(),kind:'actor',state:'failed',updatedAt:2,safeCode:'execution-failed'});
+  for(const lifecycle of ['running','paused','stopped','closed'] as const){
+    const current={...stage,lifecycle};
+    const html=renderToStaticMarkup(<LivePerformance stage={current} items={[]} jobs={[job,failed]} map={stageMapData(current)} connected error={null} onExit={()=>{}}/>);
+    if(lifecycle==='running')assert.match(html,/Pulso: trabajando/);
+    else{
+      assert.doesNotMatch(html,/Pulso: trabajando/);
+      assert.match(html,/registros técnicos pendientes de finalizar/);
+      assert.match(html,new RegExp({paused:'En pausa',stopped:'Detenida',closed:'Cerrada'}[lifecycle]));
+    }
+    assert.match(html,/El último trabajo registrado falló/);
+  }
+});

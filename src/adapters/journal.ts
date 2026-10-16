@@ -1,4 +1,6 @@
 import type { PreparationSourceAdmission } from '../application/preparation-source-admission.ts';
+import { inspectIcmContextPackets } from '../application/icm-context-inspection.ts';
+import { verifyIcmWorkspaceSnapshot } from '../domain/icm-workspace.ts';
 import { CONFIGURATOR_JOB_SCHEMA_SQL } from './configurator-job-ledger.ts';
 import { IdentityPromotionRequestSchema, IdentityPromotionAuthorityRequestSchema, AcceptedConfiguratorProposalSchema, IdentityPromotionReceiptSchema, IdentityPromotionResultSchema, ActorIdentityEpochSchema, type IdentityPromotionPorts } from '../domain/identity-promotion.ts';
 import { prepareIdentityPromotion, PreparedIdentityPromotionSchema } from '../application/prepare-identity-promotion.ts';
@@ -186,16 +188,18 @@ import {
   RunPreflightPrivateEvidenceSchema,
   WorldDeliveryTargetsQuerySchema,
 } from '../domain/world-journal.ts';
-import { RunConfigurationDraftSchema, ProductionEvidenceSchema, createEmptyRunConfigurationDraft, HumanParticipantProfilesSchema, effectiveRequestTimeoutMs } from '../domain/production.ts';
+import { RunConfigurationDraftSchema, ProductionEvidenceSchema, createEmptyRunConfigurationDraft, HumanParticipantProfilesSchema, effectiveRequestTimeoutMs, RunBudgetSchema } from '../domain/production.ts';
 import {
   ModelTimeClockEpochIdSchema, MonotonicNanosecondsSchema, ModelWallTimeExpirationSchema,
   ModelTimeOwnerRecoverySchema, RunModelTimeBudgetReadSchema, RunModelTimeBudgetSchema,
 } from '../domain/model-time-budget.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import { assertCharacterBiographyPreserved } from '../domain/character-biography.ts';
+import type { CuratedIdentity } from '../domain/preparation.ts';
 import { ContinuityReferenceSchema } from '../domain/preparation.ts';
 import { currentRoutineAvailabilityBoundary, nextRoutineAdvance, nextWorldTimeBoundary, planActorActivationInvitations } from '../domain/actor-activation.ts';
 import {
-  ActorActivationIdSchema, ActorActivationInvitationIdSchema, CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
+  ActorActivationIdSchema, ActorActivationInvitationIdSchema, ActorInitiativeIdSchema, CharacterIdSchema, ExperienceIdSchema, HashSchema, HumanInterventionIdSchema, HumanParticipantIdSchema,
   EventIdSchema, FictionalInstantSchema, JobIdSchema, PerceptionIdSchema, ProposalIdSchema, PulseIdSchema, RevisionSchema, RunIdSchema, WorldSeqSchema,
 } from '../domain/values.ts';
 
@@ -207,6 +211,17 @@ import { NarrationReviewContextSchema } from '../domain/narration-review.ts';
 import { validateNarrationReviewContext, narrationReviewContextHash, validateNarrationReviewDecision } from '../application/narration-review-context.ts';
 import { DirectorContextSchema, DirectorAnnotationSchema } from '../domain/admin-roles.ts';
 import { directorContextHash, validateDirectorContext, validateDirectorObservation } from '../application/director-context.ts';
+import { compileIcmContextPacket } from '../application/icm-context-compiler.ts';
+import { IcmContextJobBindingSchema, IcmContextBindingReadResultSchema, IcmContextPacketReadResultSchema,
+  IcmContextPacketReceiptSchema, type IcmContextJobBinding } from '../domain/icm-context-jobs.ts';
+import { IcmContextPacketSchema, IcmContextPacketScopeSchema, IcmWorkspaceSnapshotSchema,
+  verifyIcmContextPacketAgainstSnapshot } from '../domain/icm-workspace.ts';
+import { ConfiguratorJobStoredSchema, ConfiguratorJobExecutionSchema } from '../domain/configurator-jobs.ts';
+import { validateConfiguratorContext, configuratorValueHash } from '../application/configurator-context.ts';
+import { compilePreparationConfiguratorContext, compilePreparationConfiguratorPacket, validatePreparationConfiguratorContext, validatePreparationConfiguratorProposal } from '../application/preparation-configurator-context.ts';
+import { PreparationConfiguratorDocumentSchema } from '../domain/preparation-configurator.ts';
+import { DossierSourceSchema } from '../domain/dossier-source.ts';
+import { PreparationBudgetAuthoritySchema, PreparationConfiguratorStoredSchema, PreparationConfiguratorCreateSchema, PreparationConfiguratorExecutionSchema, PreparationConfiguratorRecordSchema, PreparationConfiguratorMutationSchema, PreparationConfiguratorListSchema, PreparationConfiguratorPageSchema, PreparationConfiguratorOperationSchema, PreparationConfiguratorStartResultSchema, PreparationConfiguratorApplySchema, PreparationConfiguratorAppliedSchema, PreparationConfiguratorCandidateSchema, type PreparationConfiguratorExecution } from '../domain/preparation-configurator-jobs.ts';
 
 const counter = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const BudgetRequestFieldsSchema = z.strictObject({
@@ -375,12 +390,31 @@ const ContinuistaReceiptSchema = z.strictObject({jobId:JobIdSchema,generation:Re
 const ActorTurnJobDbRowSchema = z.strictObject({
   run_id: RunIdSchema, actor_id: CharacterIdSchema, job_id: JobIdSchema, generation: counter,
   pulse_id: PulseIdSchema, lifecycle_revision: counter.nullable(), state: z.enum(['queued', 'running', 'accepted', 'blocked']),
+  initiative_id: ActorInitiativeIdSchema.nullable(),
   failure_code: ActorTurnJobFailureCodeSchema.nullable(),
   owner_token: z.string().uuid().nullable(), claim_token: z.string().uuid().nullable(),
   frozen_perception_ids_json: z.string().nullable(),
   frozen_world_cut_json: z.string().nullable(),
   frozen_direction_revision: counter.nullable(),
   created_at: counter, updated_at: counter,
+});
+const ActorInitiativeDbRowSchema = z.strictObject({
+  initiative_id: ActorInitiativeIdSchema, run_id: RunIdSchema, actor_id: CharacterIdSchema,
+  source_proposal_id: ProposalIdSchema, source_version: counter.min(1).max(3),
+  source_job_id: JobIdSchema, source_generation: counter, source_attempt_id: WorldAttemptIdSchema,
+  source_proposal_hash: HashSchema, source_attempt_hash: HashSchema, source_exact_content_hash: HashSchema,
+  source_commit_index: counter.min(1), source_world_revision: counter, source_world_seq: counter,
+  source_lifecycle_revision: counter, source_configuration_hash: HashSchema, source_identity_version: counter,
+  eligible_at: FictionalInstantSchema, source_hash: HashSchema,
+  state: z.enum(['pending','assigned','consumed','blocked']), failure_reason: z.string().min(1).max(120).nullable(),
+  assigned_pulse_id: PulseIdSchema.nullable(), assigned_job_id: JobIdSchema.nullable(), assigned_generation: counter.nullable(),
+  created_at: counter, updated_at: counter,
+}).superRefine((row,context)=>{
+  const target=[row.assigned_pulse_id,row.assigned_job_id,row.assigned_generation];
+  if(target.some(value=>value===null)&&target.some(value=>value!==null))context.addIssue({code:'custom',path:['assigned_job_id'],message:'Asignación de iniciativa incompleta'});
+  if((row.state==='pending'&&target.some(value=>value!==null))||(row.state==='assigned'&&target.some(value=>value===null)))
+    context.addIssue({code:'custom',path:['state'],message:'Estado de iniciativa no coincide con su asignación'});
+  if((row.state==='blocked')!==(row.failure_reason!==null))context.addIssue({code:'custom',path:['failure_reason'],message:'Causa de bloqueo inconsistente'});
 });
 const ActorTurnJobInputDbRowSchema = z.strictObject({
   perception_id: PerceptionIdSchema, state: z.enum(['assigned', 'consumed', 'released']),
@@ -514,10 +548,27 @@ function hashJson(value: unknown): { json: string; hash: z.infer<typeof HashSche
 /** Internal adapter. Its path is chosen by the host, never by actor input. */
 export function openJournal(input: { path: string }) {
   let preparationSourceAdmission: PreparationSourceAdmission | undefined;
+  let preparationConfiguratorApplication:((input:{principalId:string;context:z.infer<typeof PreparationConfiguratorStoredSchema>['context'];candidate:z.infer<typeof PreparationConfiguratorCandidateSchema>;selection:z.infer<typeof PreparationConfiguratorApplySchema>['selection'];currentDraft:z.infer<typeof RunConfigurationDraftSchema>;recordedAt:string})=>unknown)|undefined;
+  let preparationConfiguratorSources: ((input:{principalId:string;request:z.infer<typeof PreparationConfiguratorCreateSchema>['request'];draft:z.infer<typeof RunConfigurationDraftSchema>})=>unknown)|undefined;
   function admitPreparationSources(principalId: string, previous: z.infer<typeof RunConfigurationDraftSchema>, candidate: z.infer<typeof RunConfigurationDraftSchema>) {
+    const identities=(draft:z.infer<typeof RunConfigurationDraftSchema>)=>{
+      const values=new Map<string,CuratedIdentity>();
+      if(draft.roster.kind==='empty')return values;
+      for(const actor of draft.roster.value.preparedCharacters)values.set(actor.characterId,actor.identity.value);
+      for(const actor of draft.roster.value.preparationDrafts??[])if(actor.identity.kind==='declared')values.set(actor.characterId,actor.identity.value.value);
+      return values;
+    };
+    const priorIdentities=identities(previous),nextIdentities=identities(candidate);
+    for(const [characterId,identity] of priorIdentities){
+      const next=nextIdentities.get(characterId);
+      const remainsActive=candidate.roster.kind!=='empty'&&candidate.roster.value.activeCharacterIds.includes(CharacterIdSchema.parse(characterId));
+      if(next!==undefined||remainsActive)assertCharacterBiographyPreserved({previous:identity,next:next??{}});
+    }
+
     const hasSource = [previous, candidate].some(draft => draft.roster.kind !== 'empty' && draft.roster.value.preparedCharacters.some(actor => actor.dossierSource !== undefined));
-    if (!hasSource) return;
-    if (preparationSourceAdmission === undefined) throw new Error('DOSSIER_SOURCE_ADMISSION_UNAVAILABLE');
+    const hasWorkspace = previous.icmWorkspace?.kind === 'configured' || candidate.icmWorkspace?.kind === 'configured';
+    if (!hasSource && !hasWorkspace) return;
+    if (preparationSourceAdmission === undefined) throw new Error(hasWorkspace ? 'ICM_WORKSPACE_ADMISSION_UNAVAILABLE' : 'DOSSIER_SOURCE_ADMISSION_UNAVAILABLE');
     preparationSourceAdmission({ principalId, previous, candidate });
   }
   const journalPrivateDataRoot=dirname(input.path);
@@ -531,7 +582,7 @@ export function openJournal(input: { path: string }) {
       const version = z.strictObject({ version: counter.nullable() }).parse(
         database.prepare('SELECT MAX(version) AS version FROM schema_version').get(),
       );
-      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41].includes(version.version)) {
+      if (version.version === null || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45].includes(version.version)) {
         throw new Error('Versión de journal no soportada');
       }
       initialVersion = version.version;
@@ -2012,6 +2063,345 @@ export function openJournal(input: { path: string }) {
       database.close(); throw error;
     }
   }
+  // A retry is a new generation of the same activation invitation. Keep every
+  // generation linked so the blocked attempt remains inspectable after retry.
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=42').get()) {
+    try {
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE actor_activation_invitation_jobs_v42(
+          run_id TEXT NOT NULL,invitation_id TEXT NOT NULL,actor_id TEXT NOT NULL,job_id TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK(generation>=0),assigned_at INTEGER NOT NULL CHECK(assigned_at>=0),
+          PRIMARY KEY(run_id,invitation_id,generation),UNIQUE(run_id,actor_id,job_id,generation),
+          FOREIGN KEY(run_id,invitation_id) REFERENCES actor_activation_invitations(run_id,invitation_id) ON DELETE RESTRICT,
+          FOREIGN KEY(run_id,actor_id,job_id,generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation) ON DELETE RESTRICT
+        );
+        INSERT INTO actor_activation_invitation_jobs_v42
+          SELECT run_id,invitation_id,actor_id,job_id,generation,assigned_at FROM actor_activation_invitation_jobs;
+        DROP TABLE actor_activation_invitation_jobs;
+        ALTER TABLE actor_activation_invitation_jobs_v42 RENAME TO actor_activation_invitation_jobs;
+        CREATE INDEX actor_activation_invitation_jobs_by_job
+          ON actor_activation_invitation_jobs(run_id,actor_id,job_id,generation);
+        ALTER TABLE coordinator_pulses ADD COLUMN parked_for_pulse_id TEXT
+          REFERENCES coordinator_pulses(pulse_id) ON DELETE RESTRICT;
+        CREATE INDEX coordinator_pulses_parked_for ON coordinator_pulses(parked_for_pulse_id)
+          WHERE parked_for_pulse_id IS NOT NULL;
+      `);
+      if (database.prepare('PRAGMA foreign_key_check').all().length !== 0) throw new Error('Migración v42 produjo referencias inválidas');
+      database.exec('INSERT INTO schema_version VALUES(42); COMMIT; PRAGMA foreign_keys=ON;');
+    } catch (error) {
+      try { database.exec('ROLLBACK; PRAGMA foreign_keys=ON;'); } catch { /* Atomic migration. */ }
+      database.close(); throw error;
+    }
+  }
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=43').get()) {
+    try {
+      database.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE icm_context_packets(
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          role TEXT NOT NULL CHECK(role IN('actor','continuista','director','configurator','narrator','narration-reviewer')),
+          actor_id TEXT NOT NULL,
+          job_id TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK(generation>=0),
+          scope_json TEXT NOT NULL,
+          scope_hash TEXT NOT NULL CHECK(length(scope_hash)=64),
+          packet_json TEXT NOT NULL,
+          packet_hash TEXT NOT NULL CHECK(length(packet_hash)=64),
+          receipt_json TEXT NOT NULL,
+          receipt_hash TEXT NOT NULL CHECK(length(receipt_hash)=64),
+          created_at INTEGER NOT NULL CHECK(created_at>=0),
+          PRIMARY KEY(run_id,role,actor_id,job_id,generation),
+          CHECK((role='actor' AND actor_id<>'') OR (role<>'actor' AND actor_id=''))
+        );
+        CREATE TRIGGER icm_context_packets_no_update BEFORE UPDATE ON icm_context_packets
+          BEGIN SELECT RAISE(ABORT,'ICM_CONTEXT_PACKET_IMMUTABLE'); END;
+        CREATE TRIGGER icm_context_packets_no_delete BEFORE DELETE ON icm_context_packets
+          BEGIN SELECT RAISE(ABORT,'ICM_CONTEXT_PACKET_IMMUTABLE'); END;
+        INSERT INTO schema_version VALUES(43);
+        COMMIT;`);
+    } catch (error) {
+      try { database.exec('ROLLBACK;'); } catch { /* Atomic migration. */ }
+      database.close(); throw error;
+    }
+  }
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=44').get()) {
+    try {
+      if(database.prepare(`SELECT 1 FROM model_time_run_state s LEFT JOIN run_budgets b ON b.run_id=s.run_id WHERE b.run_id IS NULL AND (s.unknown_legacy_requests>0 OR EXISTS(SELECT 1 FROM request_reservations r WHERE r.run_id=s.run_id)) LIMIT 1`).get()!==undefined)throw new Error('MIGRATION_MODEL_BUDGET_ORPHANED_REQUESTS');
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE model_budget_authorities(
+          run_id TEXT PRIMARY KEY REFERENCES run_budgets(run_id) ON DELETE RESTRICT,
+          kind TEXT NOT NULL CHECK(kind IN('preparation','ready')),
+          payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL CHECK(length(payload_hash)=64)
+        );
+        INSERT OR IGNORE INTO run_budgets(run_id,max_calls)
+          SELECT s.run_id,COALESCE(json_extract(w.configuration_json,'$.budget.maxPiCallsPerRun'),0)
+          FROM model_time_run_state s JOIN world_runs w ON w.run_id=s.run_id;
+        CREATE TABLE model_time_run_state_v44(
+          run_id TEXT PRIMARY KEY REFERENCES run_budgets(run_id) ON DELETE RESTRICT,
+          unknown_legacy_requests INTEGER NOT NULL DEFAULT 0 CHECK(unknown_legacy_requests>=0)
+        );
+        INSERT INTO model_time_run_state_v44 SELECT * FROM model_time_run_state;
+        DROP TABLE model_time_run_state;
+        ALTER TABLE model_time_run_state_v44 RENAME TO model_time_run_state;
+        CREATE TABLE preparation_configurator_jobs(
+          job_id TEXT PRIMARY KEY,principal_id TEXT NOT NULL,run_id TEXT NOT NULL REFERENCES run_configuration_drafts(run_id) ON DELETE RESTRICT,
+          payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL CHECK(length(payload_hash)=64)
+        );
+        CREATE TABLE preparation_configurator_operations(
+          principal_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,operation_kind TEXT NOT NULL CHECK(operation_kind IN('create','start','cancel','apply')),
+          request_json TEXT NOT NULL,request_hash TEXT NOT NULL CHECK(length(request_hash)=64),
+          job_id TEXT NOT NULL REFERENCES preparation_configurator_jobs(job_id) ON DELETE RESTRICT,
+          result_json TEXT NOT NULL,result_hash TEXT NOT NULL CHECK(length(result_hash)=64),PRIMARY KEY(principal_id,idempotency_key)
+        );
+        CREATE TABLE preparation_configurator_records(
+          job_id TEXT NOT NULL REFERENCES preparation_configurator_jobs(job_id) ON DELETE RESTRICT,
+          generation INTEGER NOT NULL CHECK(generation>=0),kind TEXT NOT NULL CHECK(kind IN('session','job-base','request-input','terminal-candidate','candidate','accepted-proof')),
+          request_seq INTEGER NOT NULL,payload_json TEXT NOT NULL,payload_hash TEXT NOT NULL CHECK(length(payload_hash)=64),
+          PRIMARY KEY(job_id,generation,kind,request_seq)
+        );
+        CREATE TRIGGER preparation_configurator_records_no_update BEFORE UPDATE ON preparation_configurator_records BEGIN SELECT RAISE(ABORT,'PREPARATION_CONFIGURATOR_RECORD_IMMUTABLE'); END;
+        CREATE TRIGGER preparation_configurator_records_no_delete BEFORE DELETE ON preparation_configurator_records BEGIN SELECT RAISE(ABORT,'PREPARATION_CONFIGURATOR_RECORD_IMMUTABLE'); END;
+        CREATE TRIGGER preparation_configurator_operations_no_update BEFORE UPDATE ON preparation_configurator_operations BEGIN SELECT RAISE(ABORT,'PREPARATION_CONFIGURATOR_OPERATION_IMMUTABLE'); END;
+        CREATE TRIGGER preparation_configurator_operations_no_delete BEFORE DELETE ON preparation_configurator_operations BEGIN SELECT RAISE(ABORT,'PREPARATION_CONFIGURATOR_OPERATION_IMMUTABLE'); END;
+      `);
+      if (database.prepare('PRAGMA foreign_key_check').all().length !== 0) throw new Error('Migración v44 produjo referencias inválidas');
+      database.exec('INSERT INTO schema_version VALUES(44); COMMIT; PRAGMA foreign_keys=ON;');
+    } catch(error) { try {database.exec('ROLLBACK; PRAGMA foreign_keys=ON;');} catch {/* Atomic migration. */} database.close();throw error; }
+  }
+  if (!database.prepare('SELECT 1 FROM schema_version WHERE version=45').get()) {
+    try {
+      database.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE coordinator_pulses_v45(
+          pulse_id TEXT PRIMARY KEY REFERENCES pulses(pulse_id) ON DELETE RESTRICT,
+          run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          origin_kind TEXT NOT NULL CHECK(origin_kind IN('humanIntervention','actorAttempt','directionCircumstance','actorActivation','actorInitiative')),
+          origin_id TEXT NOT NULL,commit_index INTEGER CHECK(commit_index IS NULL OR commit_index>=1),
+          configuration_hash TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('running','completed','blocked')),
+          created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,lifecycle_revision INTEGER CHECK(lifecycle_revision IS NULL OR lifecycle_revision>=0),
+          parked_for_pulse_id TEXT REFERENCES coordinator_pulses_v45(pulse_id) ON DELETE RESTRICT,
+          UNIQUE(run_id,origin_kind,origin_id),
+          FOREIGN KEY(run_id,commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT,
+          CHECK((origin_kind='actorActivation' AND commit_index IS NULL) OR (origin_kind<>'actorActivation' AND commit_index IS NOT NULL))
+        );
+        INSERT INTO coordinator_pulses_v45 SELECT pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,
+          created_at,updated_at,lifecycle_revision,parked_for_pulse_id FROM coordinator_pulses;
+        DROP TABLE coordinator_pulses;
+        ALTER TABLE coordinator_pulses_v45 RENAME TO coordinator_pulses;
+        CREATE UNIQUE INDEX coordinator_pulses_one_running ON coordinator_pulses(run_id) WHERE state='running';
+        CREATE INDEX coordinator_pulses_parked_for ON coordinator_pulses(parked_for_pulse_id) WHERE parked_for_pulse_id IS NOT NULL;
+        ALTER TABLE actor_turn_jobs ADD COLUMN initiative_id TEXT;
+        CREATE TABLE actor_initiatives(
+          initiative_id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES world_runs(run_id) ON DELETE RESTRICT,
+          actor_id TEXT NOT NULL,source_proposal_id TEXT NOT NULL,source_version INTEGER NOT NULL CHECK(source_version BETWEEN 1 AND 3),
+          source_job_id TEXT NOT NULL,source_generation INTEGER NOT NULL CHECK(source_generation>=0),source_attempt_id TEXT NOT NULL,
+          source_proposal_hash TEXT NOT NULL CHECK(length(source_proposal_hash)=64),source_attempt_hash TEXT NOT NULL CHECK(length(source_attempt_hash)=64),
+          source_exact_content_hash TEXT NOT NULL CHECK(length(source_exact_content_hash)=64),source_commit_index INTEGER NOT NULL CHECK(source_commit_index>0),
+          source_world_revision INTEGER NOT NULL CHECK(source_world_revision>=0),source_world_seq INTEGER NOT NULL CHECK(source_world_seq>=0),
+          source_lifecycle_revision INTEGER NOT NULL CHECK(source_lifecycle_revision>=0),source_configuration_hash TEXT NOT NULL CHECK(length(source_configuration_hash)=64),
+          source_identity_version INTEGER NOT NULL CHECK(source_identity_version>=0),eligible_at INTEGER NOT NULL,
+          source_hash TEXT NOT NULL CHECK(length(source_hash)=64),state TEXT NOT NULL CHECK(state IN('pending','assigned','consumed','blocked')),
+          failure_reason TEXT,assigned_pulse_id TEXT REFERENCES pulses(pulse_id) ON DELETE RESTRICT,assigned_job_id TEXT,
+          assigned_generation INTEGER CHECK(assigned_generation IS NULL OR assigned_generation>=0),
+          created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),
+          UNIQUE(run_id,source_job_id,source_generation,source_proposal_id,source_version),
+          FOREIGN KEY(run_id,source_proposal_id,source_version) REFERENCES world_proposals(run_id,proposal_id,version) ON DELETE RESTRICT,
+          FOREIGN KEY(run_id,source_commit_index) REFERENCES world_commits(run_id,commit_index) ON DELETE RESTRICT,
+          FOREIGN KEY(run_id,actor_id,assigned_job_id,assigned_generation) REFERENCES actor_turn_jobs(run_id,actor_id,job_id,generation) ON DELETE RESTRICT,
+          CHECK((assigned_pulse_id IS NULL AND assigned_job_id IS NULL AND assigned_generation IS NULL)
+            OR (assigned_pulse_id IS NOT NULL AND assigned_job_id IS NOT NULL AND assigned_generation IS NOT NULL)),
+          CHECK(state<>'assigned' OR assigned_pulse_id IS NOT NULL),
+          CHECK((state='blocked')=(failure_reason IS NOT NULL))
+        );
+        CREATE INDEX actor_initiatives_ready ON actor_initiatives(run_id,state,eligible_at,created_at,initiative_id);
+        CREATE UNIQUE INDEX actor_initiatives_one_open_per_actor ON actor_initiatives(run_id,actor_id) WHERE state IN('pending','assigned');
+        CREATE INDEX actor_turn_jobs_initiative ON actor_turn_jobs(run_id,initiative_id) WHERE initiative_id IS NOT NULL;
+        CREATE TRIGGER actor_initiatives_source_immutable BEFORE UPDATE ON actor_initiatives
+          WHEN NEW.initiative_id IS NOT OLD.initiative_id OR NEW.run_id IS NOT OLD.run_id OR NEW.actor_id IS NOT OLD.actor_id
+            OR NEW.source_proposal_id IS NOT OLD.source_proposal_id OR NEW.source_version IS NOT OLD.source_version
+            OR NEW.source_job_id IS NOT OLD.source_job_id OR NEW.source_generation IS NOT OLD.source_generation
+            OR NEW.source_attempt_id IS NOT OLD.source_attempt_id OR NEW.source_proposal_hash IS NOT OLD.source_proposal_hash
+            OR NEW.source_attempt_hash IS NOT OLD.source_attempt_hash OR NEW.source_exact_content_hash IS NOT OLD.source_exact_content_hash
+            OR NEW.source_commit_index IS NOT OLD.source_commit_index OR NEW.source_world_revision IS NOT OLD.source_world_revision
+            OR NEW.source_world_seq IS NOT OLD.source_world_seq OR NEW.source_lifecycle_revision IS NOT OLD.source_lifecycle_revision
+            OR NEW.source_configuration_hash IS NOT OLD.source_configuration_hash OR NEW.source_identity_version IS NOT OLD.source_identity_version
+            OR NEW.eligible_at IS NOT OLD.eligible_at OR NEW.source_hash IS NOT OLD.source_hash OR NEW.created_at IS NOT OLD.created_at
+          BEGIN SELECT RAISE(ABORT,'ACTOR_INITIATIVE_SOURCE_IMMUTABLE'); END;
+        `);
+      if (database.prepare('PRAGMA foreign_key_check').all().length !== 0) throw new Error('Migración v45 produjo referencias inválidas');
+      database.exec('INSERT INTO schema_version VALUES(45);COMMIT;PRAGMA foreign_keys=ON;');
+    } catch(error) { try {database.exec('ROLLBACK;PRAGMA foreign_keys=ON;');} catch {/* Atomic migration. */} database.close();throw error; }
+  }
+  function actorTurnRetryHasUnsettledRequest(runId:string,jobId:string,generation:number):boolean {
+    return database.prepare(`SELECT 1 FROM request_reservations
+        WHERE run_id=? AND job_id=? AND generation=? AND state IN('reserved','dispatched','ambiguous')
+      UNION ALL
+      SELECT 1 FROM continuista_jobs child JOIN request_reservations r
+        ON r.job_id=child.job_id AND r.generation=child.generation
+        WHERE child.run_id=? AND child.actor_job_id=? AND child.actor_generation=?
+          AND r.state IN('reserved','dispatched','ambiguous') LIMIT 1`)
+      .get(runId,jobId,generation,runId,jobId,generation)!==undefined;
+  }
+
+  function actorTurnRetryHasActiveContinuistaChild(runId:string,jobId:string,generation:number):boolean {
+    return database.prepare(`SELECT 1 FROM continuista_jobs
+      WHERE run_id=? AND actor_job_id=? AND actor_generation=? AND state IN('queued','running') LIMIT 1`)
+      .get(runId,jobId,generation)!==undefined;
+  }
+
+  function actorTurnRetryHasPendingProposal(runId:string,actorId:string,jobId:string,generation:number):boolean {
+    return database.prepare(`SELECT 1 FROM actor_turn_jobs actor
+      JOIN world_proposals proposal ON proposal.run_id=actor.run_id AND proposal.job_id=actor.job_id AND proposal.generation=actor.generation
+      WHERE actor.run_id=? AND actor.actor_id=? AND actor.job_id=? AND actor.generation=?
+        AND actor.state='accepted' AND proposal.status='pending' LIMIT 1`)
+      .get(runId,actorId,jobId,generation)!==undefined;
+  }
+
+  function canParkDrainedCoordinatorPulse(runId:string,pulseId:string,dependencyPulseId:string):boolean {
+    const dependency=database.prepare(`SELECT 1 FROM coordinator_pulses
+      WHERE run_id=? AND pulse_id=? AND origin_kind='actorActivation' AND state='blocked'`).get(runId,dependencyPulseId);
+    if(dependency===undefined)return false;
+    const pulse=database.prepare(`SELECT origin_kind,origin_id FROM coordinator_pulses WHERE run_id=? AND pulse_id=? AND state='running'`)
+      .get(runId,pulseId);
+    if(pulse===undefined)return false;
+    const origin=z.strictObject({origin_kind:z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation']),origin_id:z.string()}).parse(pulse);
+    if(origin.origin_kind==='actorActivation')return false;
+    const hasPendingCauseInput=database.prepare(`SELECT 1 FROM actor_turn_intents intent
+      JOIN world_perceptions perception ON perception.perception_id=intent.perception_id
+      JOIN world_deliveries delivery ON delivery.perception_id=intent.perception_id
+      WHERE intent.run_id=? AND intent.state='queued' AND delivery.state='delivered'
+        AND perception.origin_kind=? AND perception.origin_id=?
+        AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs input WHERE input.perception_id=intent.perception_id AND input.state IN('assigned','consumed'))
+        AND NOT EXISTS(SELECT 1 FROM actor_turn_intents otherIntent
+          JOIN world_perceptions otherPerception ON otherPerception.perception_id=otherIntent.perception_id
+          JOIN world_deliveries otherDelivery ON otherDelivery.perception_id=otherIntent.perception_id
+          WHERE otherIntent.run_id=intent.run_id AND otherIntent.actor_id=intent.actor_id
+            AND otherIntent.state='queued' AND otherDelivery.state='delivered'
+            AND otherPerception.origin_kind=perception.origin_kind AND otherPerception.origin_id=perception.origin_id
+            AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs otherInput WHERE otherInput.perception_id=otherIntent.perception_id
+              AND otherInput.state IN('assigned','consumed'))
+            AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs blocked WHERE blocked.run_id=otherIntent.run_id
+              AND blocked.actor_id=otherIntent.actor_id AND blocked.state='blocked'
+              AND blocked.pulse_id=?
+              AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.run_id=blocked.run_id
+                AND newer.actor_id=blocked.actor_id AND newer.job_id=blocked.job_id AND newer.generation>blocked.generation)))
+      LIMIT 1`).get(runId,origin.origin_kind,origin.origin_id,dependencyPulseId);
+    if(hasPendingCauseInput===undefined)return false;
+    const activeWork=database.prepare(`SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND pulse_id=? AND state IN('queued','running')
+      UNION ALL SELECT 1 FROM continuista_jobs WHERE run_id=? AND pulse_id=? AND state IN('queued','running')
+      UNION ALL SELECT 1 FROM administrative_jobs WHERE run_id=? AND pulse_id=? AND state='running'
+      UNION ALL SELECT 1 FROM request_reservations WHERE run_id=? AND pulse_id=? AND state IN('reserved','dispatched','ambiguous')
+      UNION ALL SELECT 1 FROM actor_turn_jobs actor JOIN world_proposals proposal
+        ON proposal.run_id=actor.run_id AND proposal.job_id=actor.job_id AND proposal.generation=actor.generation
+        WHERE actor.run_id=? AND actor.pulse_id=? AND actor.state='accepted' AND proposal.status='pending'
+          AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.run_id=actor.run_id AND newer.actor_id=actor.actor_id
+            AND newer.job_id=actor.job_id AND newer.generation>actor.generation)
+      LIMIT 1`).get(runId,pulseId,runId,pulseId,runId,pulseId,runId,pulseId,runId,pulseId);
+    return activeWork===undefined;
+  }
+
+  function canResumeParkedCoordinatorPulse(runId:string,pulseId:string):boolean {
+    const pulse=database.prepare(`SELECT origin_kind,origin_id,parked_for_pulse_id FROM coordinator_pulses WHERE run_id=? AND pulse_id=? AND state='blocked'`)
+      .get(runId,pulseId);
+    if(pulse===undefined)return false;
+    const origin=z.strictObject({origin_kind:z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation']),origin_id:z.string(),parked_for_pulse_id:PulseIdSchema.nullable()}).parse(pulse);
+    if(origin.origin_kind==='actorActivation')return false;
+    if(origin.parked_for_pulse_id===null)return false;
+    const dependency=database.prepare(`SELECT 1 FROM coordinator_pulses WHERE run_id=? AND pulse_id=?
+      AND origin_kind='actorActivation' AND state='completed'`).get(runId,origin.parked_for_pulse_id);
+    if(dependency===undefined)return false;
+    const hasPendingCauseInput=database.prepare(`SELECT 1 FROM actor_turn_intents intent
+      JOIN world_perceptions perception ON perception.perception_id=intent.perception_id
+      JOIN world_deliveries delivery ON delivery.perception_id=intent.perception_id
+      WHERE intent.run_id=? AND intent.state='queued' AND delivery.state='delivered'
+        AND perception.origin_kind=? AND perception.origin_id=?
+        AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs input WHERE input.perception_id=intent.perception_id AND input.state IN('assigned','consumed'))
+      LIMIT 1`).get(runId,origin.origin_kind,origin.origin_id);
+    if(hasPendingCauseInput===undefined)return false;
+    const unresolved=database.prepare(`SELECT 1 FROM actor_turn_jobs job WHERE job.run_id=? AND job.pulse_id=?
+        AND job.state='blocked' AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.run_id=job.run_id
+          AND newer.actor_id=job.actor_id AND newer.job_id=job.job_id AND newer.generation>job.generation)
+      UNION ALL SELECT 1 FROM continuista_jobs child WHERE child.run_id=? AND child.pulse_id=? AND child.state IN('queued','running','blocked')
+        AND NOT EXISTS(SELECT 1 FROM continuista_jobs newer WHERE newer.job_id=child.job_id AND newer.generation>child.generation)
+        AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newerActor WHERE newerActor.run_id=child.run_id AND newerActor.actor_id=child.actor_id
+          AND newerActor.job_id=child.actor_job_id AND newerActor.generation>child.actor_generation)
+      UNION ALL SELECT 1 FROM administrative_jobs admin WHERE admin.run_id=? AND admin.pulse_id=? AND admin.state IN('running','blocked')
+        AND NOT EXISTS(SELECT 1 FROM administrative_jobs newer WHERE newer.job_id=admin.job_id AND newer.generation>admin.generation)
+      UNION ALL SELECT 1 FROM request_reservations WHERE run_id=? AND pulse_id=? AND state IN('reserved','dispatched','ambiguous')
+      UNION ALL SELECT 1 FROM actor_turn_jobs actor JOIN world_proposals proposal
+        ON proposal.run_id=actor.run_id AND proposal.job_id=actor.job_id AND proposal.generation=actor.generation
+        WHERE actor.run_id=? AND actor.pulse_id=? AND actor.state='accepted' AND proposal.status='pending'
+          AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer WHERE newer.run_id=actor.run_id AND newer.actor_id=actor.actor_id
+            AND newer.job_id=actor.job_id AND newer.generation>actor.generation)
+      LIMIT 1`).get(runId,pulseId,runId,pulseId,runId,pulseId,runId,pulseId,runId,pulseId);
+    return unresolved===undefined;
+  }
+
+  function actorActivationRetryIsEligible(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;
+    actorId:string;jobId:string;generation:number;pulseId:string}):boolean {
+    const invitationId=actorActivationInvitationForJob({runId:input.run.row.run_id,actorId:input.actorId,jobId:input.jobId,generation:input.generation});
+    if(invitationId===undefined)return false;
+    const binding=database.prepare(`SELECT i.activation_id FROM actor_activation_invitations i
+      JOIN coordinator_pulses p ON p.run_id=i.run_id AND p.origin_kind='actorActivation' AND p.origin_id=i.activation_id
+      WHERE i.run_id=? AND i.invitation_id=? AND i.actor_id=? AND p.pulse_id=?`)
+      .get(input.run.row.run_id,invitationId,input.actorId,input.pulseId);
+    if(binding===undefined)return false;
+    const inputRow=database.prepare(`SELECT 1 FROM actor_turn_job_inputs
+      WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? LIMIT 1`)
+      .get(input.run.row.run_id,input.actorId,input.jobId,input.generation);
+    if(inputRow!==undefined)return false;
+    return activationInvitationIneligibility({run:input.run,configuration:input.configuration,invitationId,allowBlocked:true})===undefined;
+  }
+
+  function actorInitiativeEligibilityFailure(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;
+    initiative:z.infer<typeof ActorInitiativeDbRowSchema>}):string|undefined {
+    const {run,configuration,initiative}=input;
+    if(run.row.lifecycle!=='running')return 'run-not-running';
+    if(run.row.configuration_hash!==initiative.source_configuration_hash)return 'configuration-changed';
+    const scene=run.snapshot.scenes.find((item)=>item.id===run.snapshot.activeSceneId);
+    const actor=run.snapshot.entities.find((item)=>item.kind==='character'&&item.characterId===initiative.actor_id);
+    if(actor?.kind!=='character'||actor.preparation.kind!=='prepared'
+      ||actor.preparation.identityVersion!==initiative.source_identity_version)return 'actor-identity-changed';
+    if(!configuration.roster.activeCharacterIds.includes(initiative.actor_id)
+      ||!configuration.roster.preparedCharacters.some((item)=>item.characterId===initiative.actor_id
+        &&item.identityVersion===initiative.source_identity_version))return 'actor-not-prepared';
+    if(scene?.lifecycle.kind!=='open'||!scene.participantIds.includes(initiative.actor_id)
+      ||actor.presence.kind!=='present'||actor.presence.sceneId!==scene.id)return 'actor-not-in-open-scene';
+    if(!scene.placeIds.includes(actor.placeId))return 'actor-place-not-in-scene';
+    if(!characterCanReceiveAt({snapshot:run.snapshot,characterId:initiative.actor_id}))return 'actor-unavailable-at-fictional-time';
+    if(initiative.eligible_at>run.snapshot.clock.instant)return 'initiative-not-yet-due';
+    return undefined;
+  }
+
+  function actorInitiativeRetryIsEligible(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;
+    actorId:string;jobId:string;generation:number;pulseId:string}):boolean {
+    const value=database.prepare(`SELECT initiative_id FROM actor_turn_jobs
+      WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND pulse_id=?`).get(
+        input.run.row.run_id,input.actorId,input.jobId,input.generation,input.pulseId);
+    if(value===undefined)return false;
+    const link=z.strictObject({initiative_id:ActorInitiativeIdSchema.nullable()}).parse(value);
+    if(link.initiative_id===null)return false;
+    const initiative=readActorInitiative(input.run.row.run_id,link.initiative_id);
+    if(initiative===undefined||initiative.state!=='blocked'||initiative.actor_id!==input.actorId
+      ||initiative.assigned_job_id!==input.jobId||initiative.assigned_generation!==input.generation
+      ||initiative.assigned_pulse_id!==input.pulseId)return false;
+    return actorInitiativeEligibilityFailure({run:input.run,configuration:input.configuration,initiative})===undefined;
+  }
+
+  function retryableBlockedActorTurnJob(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;
+    actorId:string;jobId:string;generation:number;pulseId:string}):boolean {
+    if(actorTurnRetryHasUnsettledRequest(input.run.row.run_id,input.jobId,input.generation)
+      ||actorTurnRetryHasActiveContinuistaChild(input.run.row.run_id,input.jobId,input.generation)
+      ||actorTurnRetryHasPendingProposal(input.run.row.run_id,input.actorId,input.jobId,input.generation))return false;
+    if(actorActivationInvitationForJob({runId:input.run.row.run_id,actorId:input.actorId,jobId:input.jobId,generation:input.generation})!==undefined)
+      return actorActivationRetryIsEligible(input);
+    const initiativeJob=database.prepare(`SELECT initiative_id FROM actor_turn_jobs
+      WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`).get(input.run.row.run_id,input.actorId,input.jobId,input.generation);
+    if(initiativeJob!==undefined&&z.strictObject({initiative_id:ActorInitiativeIdSchema.nullable()}).parse(initiativeJob).initiative_id!==null)
+      return actorInitiativeRetryIsEligible(input);
+    return database.prepare(`SELECT 1 FROM actor_turn_job_inputs
+      WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='released' LIMIT 1`)
+      .get(input.run.row.run_id,input.actorId,input.jobId,input.generation)!==undefined;
+  }
+
   function retryActorTurnJobWithinTransaction(request:z.infer<typeof ActorTurnJobRetrySchema>) {
         const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
         if (runValue === undefined) throw new Error('World run del retry actoral inexistente');
@@ -2026,20 +2416,64 @@ export function openJournal(input: { path: string }) {
         const next = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
           .get(request.runId, request.actorId, request.jobId, generation);
         if (next !== undefined) return ActorTurnJobRetryResultSchema.parse({ kind: 'existing', job: actorTurnJobView(next) });
-        const pending = database.prepare(`SELECT i.perception_id FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id JOIN world_perceptions p ON p.perception_id=i.perception_id
-          LEFT JOIN coordinator_pulses c ON c.pulse_id=?
-          WHERE i.run_id=? AND i.actor_id=? AND i.state='queued' AND d.state='delivered' AND (c.pulse_id IS NULL OR (p.origin_kind=c.origin_kind AND p.origin_id=c.origin_id))
-            AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
-          ORDER BY i.world_seq,i.perception_id LIMIT 100001`).all(request.pulseId, request.runId, request.actorId)
-          .map((item) => z.strictObject({ perception_id: PerceptionIdSchema }).parse(item).perception_id);
-        if (pending.length === 0 || pending.length > 100_000) throw new Error('Retry requiere intenciones pendientes dentro del límite');
+        if(actorTurnRetryHasUnsettledRequest(request.runId,request.jobId,request.expectedGeneration))
+          throw new Error('Retry actoral bloqueado: reconciliá las solicitudes inciertas antes de crear otra generación');
+        if(actorTurnRetryHasActiveContinuistaChild(request.runId,request.jobId,request.expectedGeneration))
+          throw new Error('Retry actoral bloqueado: el trabajo activo del Continuista debe resolverse antes de crear otra generación');
+        if(actorTurnRetryHasPendingProposal(request.runId,request.actorId,request.jobId,request.expectedGeneration))
+          throw new Error('Retry actoral bloqueado: la propuesta aceptada debe confirmarse o rechazarse antes de crear otra generación');
+        const activationInvitationId=actorActivationInvitationForJob({runId:request.runId,actorId:request.actorId,jobId:request.jobId,generation:request.expectedGeneration});
+        const initiativeId=row.initiative_id;
+        let pending:string[]=[];
+        if(activationInvitationId!==undefined){
+          const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+          if(!actorActivationRetryIsEligible({run,configuration,actorId:request.actorId,jobId:request.jobId,
+            generation:request.expectedGeneration,pulseId:request.pulseId}))
+            throw new Error('Retry actoral requiere una invitación de activación todavía elegible y sin inbox');
+        }else{
+          if(initiativeId!==null){
+            const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+            if(!actorInitiativeRetryIsEligible({run,configuration,actorId:request.actorId,jobId:request.jobId,
+              generation:request.expectedGeneration,pulseId:request.pulseId}))
+              throw new Error('Retry actoral requiere una iniciativa posterior todavía elegible');
+          }
+          pending = database.prepare(`SELECT i.perception_id FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id JOIN world_perceptions p ON p.perception_id=i.perception_id
+            LEFT JOIN coordinator_pulses c ON c.pulse_id=?
+            WHERE i.run_id=? AND i.actor_id=? AND i.state='queued' AND d.state='delivered' AND (c.pulse_id IS NULL OR (p.origin_kind=c.origin_kind AND p.origin_id=c.origin_id))
+              AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
+            ORDER BY i.world_seq,i.perception_id LIMIT 100001`).all(request.pulseId, request.runId, request.actorId)
+            .map((item) => z.strictObject({ perception_id: PerceptionIdSchema }).parse(item).perception_id);
+          if ((pending.length === 0 && initiativeId===null) || pending.length > 100_000)
+            throw new Error('Retry requiere una causa durable elegible e intenciones dentro del límite');
+        }
+        const otherRunningPulse=database.prepare(`SELECT pulse_id FROM coordinator_pulses
+          WHERE run_id=? AND state='running' AND pulse_id<>? LIMIT 1`).get(request.runId,request.pulseId);
+        if(otherRunningPulse!==undefined)
+          throw new Error('Retry actoral requiere apartar primero el pulso activo con causas pendientes');
         const timestamp = Date.now();
-        database.prepare(`UPDATE coordinator_pulses SET state='running',lifecycle_revision=?,updated_at=? WHERE run_id=? AND pulse_id=? AND state='blocked'`)
+        database.prepare(`UPDATE coordinator_pulses SET state='running',lifecycle_revision=?,updated_at=?
+          WHERE run_id=? AND pulse_id=? AND state IN('blocked','running')`)
           .run(run.row.lifecycle_revision,timestamp, request.runId, request.pulseId);
-        database.prepare(`INSERT INTO actor_turn_jobs(run_id,actor_id,job_id,generation,pulse_id,state,owner_token,claim_token,created_at,updated_at,lifecycle_revision)
-          VALUES(?,?,?,?,?,'queued',NULL,NULL,?,?,?)`).run(request.runId, request.actorId, request.jobId, generation, request.pulseId, timestamp, timestamp,run.row.lifecycle_revision);
+        database.prepare(`INSERT INTO actor_turn_jobs(run_id,actor_id,job_id,generation,pulse_id,state,owner_token,claim_token,created_at,updated_at,lifecycle_revision,initiative_id)
+          VALUES(?,?,?,?,?,'queued',NULL,NULL,?,?,?,?)`).run(request.runId, request.actorId, request.jobId, generation, request.pulseId, timestamp, timestamp,run.row.lifecycle_revision,initiativeId);
         for (const perceptionId of pending) database.prepare(`INSERT INTO actor_turn_job_inputs(run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at)
           VALUES(?,?,?,?,?,'assigned',?,NULL)`).run(request.runId, request.actorId, request.jobId, generation, perceptionId, timestamp);
+        if(activationInvitationId!==undefined){
+          const activation=database.prepare(`SELECT activation_id FROM actor_activation_invitations WHERE run_id=? AND invitation_id=? AND actor_id=?`)
+            .get(request.runId,activationInvitationId,request.actorId);
+          if(activation===undefined)throw new Error('La invitación de activación desapareció durante el retry');
+          const activationId=z.strictObject({activation_id:ActorActivationIdSchema}).parse(activation).activation_id;
+          database.prepare(`INSERT INTO actor_activation_invitation_jobs(run_id,invitation_id,actor_id,job_id,generation,assigned_at)
+            VALUES(?,?,?,?,?,?)`).run(request.runId,activationInvitationId,request.actorId,request.jobId,generation,timestamp);
+          const invitationChanged=database.prepare(`UPDATE actor_activation_invitations SET state='assigned',failure_reason=NULL,updated_at=?
+            WHERE run_id=? AND invitation_id=? AND actor_id=? AND state IN('assigned','blocked')`).run(timestamp,request.runId,activationInvitationId,request.actorId);
+          if(invitationChanged.changes!==1)throw new Error('La invitación ya no está disponible para retry');
+          const activationChanged=database.prepare(`UPDATE actor_activation_causes SET state='running',failure_reason=NULL,updated_at=?
+            WHERE run_id=? AND activation_id=? AND state IN('running','blocked')`).run(timestamp,request.runId,activationId);
+          if(activationChanged.changes!==1)throw new Error('La causa de activación ya no está disponible para retry');
+        }
+        if(initiativeId!==null)reassignActorInitiativeForRetry({runId:request.runId,actorId:request.actorId,initiativeId,
+          pulseId:request.pulseId,jobId:request.jobId,previousGeneration:request.expectedGeneration,generation,at:timestamp});
         return ActorTurnJobRetryResultSchema.parse({ kind: 'retried', job: actorTurnJobView(database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
           .get(request.runId, request.actorId, request.jobId, generation)) });
 
@@ -2482,9 +2916,9 @@ export function openJournal(input: { path: string }) {
       for(const act of episode.acts){database.prepare('INSERT INTO acts VALUES(?,?,?,?,?)').run(job.targetRunId,episode.episodeId,act.actId,act.ordinal,act.title);act.sceneIds.forEach((sceneId,index)=>database.prepare('INSERT INTO act_scenes VALUES(?,?,?,?,?)').run(job.targetRunId,episode.episodeId,act.actId,sceneId,index+1));}
     }
     const recordedAt=new Date().toISOString();const evidence={kind:'operator-choice',operatorId:job.principalId,recordedAt};
-    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','icmWorkspace','budget','maxReformulations','audio'] as const;
     const configured=Object.fromEntries(fields.flatMap(field=>packet.configuration[field]===undefined?[]:[[field,{kind:'configured',value:packet.configuration[field],evidence:field==='name'?evidence:{kind:'host-derived',derivationRef:`fork:${job.operationId}`,recordedAt}}]]));
-    const draft=RunConfigurationDraftSchema.parse({...createEmptyRunConfigurationDraft({runId:job.targetRunId,revision:0}),...configured});
+    const draft=RunConfigurationDraftSchema.parse({...createEmptyRunConfigurationDraft({runId:job.targetRunId,revision:0}),...configured,...(packet.configuration.characterDefinitionPolicy===undefined?{}:{characterDefinitionPolicy:packet.configuration.characterDefinitionPolicy})});
     database.prepare('INSERT INTO run_configuration_drafts VALUES(?,?,?,?)').run(job.targetRunId,0,recordedAt,recordedAt);appendRunDraftHistory({draft,principalId:job.principalId,recordedAt});
     const artifacts=hashJson(manifest);database.prepare('UPDATE fork_jobs SET artifacts_json=?,artifacts_hash=? WHERE operation_id=?').run(artifacts.json,artifacts.hash,job.operationId);
     return appendForkJob(ForkJobSchema.parse({...job,state:'ready',revision:job.revision+1,updatedAt:Date.now(),publishedAt:Date.now()}));
@@ -2594,6 +3028,7 @@ export function openJournal(input: { path: string }) {
     const payload=z.strictObject({draft:RunConfigurationDraftSchema,principalId:z.string().trim().min(1).max(200),recordedAt:z.string().datetime({offset:true})}).parse(parseStoredJson(row.payload_json));
     if(sha256(row.payload_json)!==row.payload_hash||canonicalJson(payload)!==row.payload_json||payload.draft.runId!==row.run_id||payload.draft.revision!==row.revision
       ||payload.principalId!==row.principal_id||payload.recordedAt!==row.recorded_at)throw new Error('Hash/metadatos de borrador durable no coinciden');
+    if(payload.draft.icmWorkspace?.kind==='configured')verifyIcmWorkspaceSnapshot(payload.draft.icmWorkspace.value);
     return RunDraftHistoryEntrySchema.parse({...payload,payloadHash:row.payload_hash});
   }
   function identityPromotedConfiguration(runId:z.infer<typeof RunIdSchema>){return database.prepare('SELECT 1 FROM run_configuration_revisions WHERE run_id=? AND effective_commit_index>0 LIMIT 1').get(runId)!==undefined;}
@@ -2604,7 +3039,7 @@ export function openJournal(input: { path: string }) {
     const latest=database.prepare('SELECT * FROM identity_promotion_receipts WHERE run_id=? ORDER BY rowid DESC LIMIT 1').get(entry.draft.runId);
     const receipt=latest===undefined?undefined:identityPromotionRecord(latest).receipt;
     const evidence={kind:'host-derived',derivationRef:receipt===undefined?`configuration-cut:${entry.draft.runId}:${configuration.configRevision}`:`identity-promotion:${receipt.operationId}`,recordedAt:receipt?.recordedAt??entry.recordedAt};
-    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','budget','maxReformulations','audio'] as const;
+    const fields=['name','fictionalAt','continuity','roster','humanParticipants','worldSnapshot','dramaticLine','dramaticReferences','circadianPolicy','spanishVariety','narrationMode','inferenceProfile','icmWorkspace','budget','maxReformulations','audio'] as const;
     const changes=Object.fromEntries(fields.flatMap(field=>{
       const value=configuration[field];const old=entry.draft[field];if(value===undefined||(old?.kind==='configured'&&hashJson(old.value).hash===hashJson(value).hash))return [];
       return [[field,{kind:'configured',value,evidence}]];
@@ -2619,7 +3054,7 @@ export function openJournal(input: { path: string }) {
   }
   function applyRunDraftPatch(draft:z.infer<typeof RunConfigurationDraftSchema>,patch:z.infer<typeof RunDraftPatchSchema>,principalId:string,recordedAt:string,revision:z.infer<typeof RevisionSchema>){
     const evidence=ProductionEvidenceSchema.parse({kind:'operator-choice',operatorId:principalId,recordedAt});
-    const normalized=RunDraftPatchSchema.parse(patch);
+    const normalized=RunDraftPatchSchema.parse(Object.fromEntries(Object.entries(RunDraftPatchSchema.parse(patch)).filter(([,value])=>value!==undefined)));
     const world=normalized.worldSnapshot;
     if(world?.kind==='configured'||world?.kind==='proposed'){
       const catalog=world.value.circumstanceCatalog;
@@ -2788,12 +3223,18 @@ export function openJournal(input: { path: string }) {
     if(row.job_id!==input.jobId||sha256(row.result_json)!==row.result_hash||canonicalJson(result)!==row.result_json
       ||sha256(row.evidence_json)!==row.evidence_hash||canonicalJson(evidence)!==row.evidence_json)throw new Error('Resultado privado del preflight alterado');
     const current=runPreflightJobRow(input);if(current===undefined)throw new Error('Job de preflight sin fila al leer su resultado');
+    requireConfiguredIcmPreflightGate(current.configuration,result);
     const evaluation=RunPreflightEvaluationSchema.parse({fence:{configurationRevision:current.job.configurationRevision,configurationHash:current.row.configuration_hash,
       worldRevision:current.job.worldRevision,worldSeq:current.job.worldSeq,fictitiousAt:current.job.fictitiousAt},result,evidence});
     if(row.completion_revision+1!==current.job.revision||current.job.state!=='completed'||current.job.resultKind!==result.kind
       ||hashJson({runId:input.runId,jobId:input.jobId,expectedRevision:row.completion_revision,leaseHash:row.completion_lease_hash,evaluation}).hash!==row.completion_request_hash)
       throw new Error('Proof de completion del preflight alterado');
     return {row,result,evidence};
+  }
+  function requireConfiguredIcmPreflightGate(configuration:z.infer<typeof ReadyRunConfigurationSchema>,result:z.infer<typeof RunPreflightResultSchema>){
+    if(configuration.icmWorkspace!==undefined&&result.kind==='passed'
+      &&!result.checks.some(check=>check.checkId==='icm-context-runtime'&&check.kind==='passed'))
+      throw new Error('El preflight aprobado requiere comprobar el runtime ICM configurado');
   }
   function runPreflightCompletionProof(input:{runId:string;jobId:string;expectedRevision:number;lease:{ownerToken:string;claimToken:string};evaluation:z.infer<typeof RunPreflightEvaluationSchema>}){
     const leaseHash=hashJson(input.lease).hash;
@@ -2891,9 +3332,73 @@ export function openJournal(input: { path: string }) {
       .run(input.principalId,input.idempotencyKey,input.kind,input.requestHash,payload.json,payload.hash,input.recordedAt);
     return input.result;
   }
+  function updateRunDraftWithinTransaction(request:z.infer<typeof RunDraftUpdateSchema>){
+    const operation={principalId:request.principalId,idempotencyKey:request.idempotencyKey,kind:'update',requestHash:hashJson(request).hash} satisfies Parameters<typeof replayRunDraftOperation>[0];
+        const replay=replayRunDraftOperation(operation);if(replay!==undefined)return RunDraftMutationResultSchema.parse(replay);
+        const recordedAt=new Date().toISOString();const entry=readRunDraft({runId:request.runId});
+        if(entry===undefined)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'missing'})});
+        const worldValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
+        const world=worldValue===undefined?undefined:parseWorldRun(worldValue);
+        if(world!==undefined&&identityPromotedConfiguration(request.runId))return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'identity-promoted'})});
+        if(world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined))
+          return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'fork-published'})});
+        if(world!==undefined){const lifecycle=world.row.lifecycle;
+          if(lifecycle!=='draft'&&lifecycle!=='ready')return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'invalidLifecycle',lifecycle})});}
+        if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
+        const revision=RevisionSchema.parse(request.expectedRevision+1);const draft=applyRunDraftPatch(entry.draft,request.patch,request.principalId,recordedAt,revision);
+        admitPreparationSources(request.principalId,entry.draft,draft);
+        const changed=database.prepare('UPDATE run_configuration_drafts SET revision=?,updated_at=? WHERE run_id=? AND revision=?').run(revision,recordedAt,request.runId,request.expectedRevision);
+        if(changed.changes!==1)throw new Error('CAS de borrador cambió durante la transacción');
+        if(world!==undefined){
+          if(world.row.config_revision!==entry.draft.revision)throw new Error('Revisión World/configuración no coincide con el borrador editable');
+          const payload=hashJson(draft);
+          const invalidated=database.prepare(`UPDATE world_runs SET lifecycle='draft',config_revision=?,configuration_json=?,configuration_hash=?,updated_at=?
+            WHERE run_id=? AND config_revision=? AND lifecycle IN('draft','ready')`).run(revision,payload.json,payload.hash,Date.now(),request.runId,world.row.config_revision);
+          if(invalidated.changes!==1)throw new Error('CAS de configuración World cambió al invalidar Ready');
+        }
+        appendRunDraftHistory({draft,principalId:request.principalId,recordedAt});
+        return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'stored',draft})});
+  }
   function appendRunDraftHistory(input:{draft:z.infer<typeof RunConfigurationDraftSchema>;principalId:string;recordedAt:string}){
     const payload=hashJson(input);database.prepare('INSERT INTO run_configuration_draft_history VALUES(?,?,?,?,?,?)')
       .run(input.draft.runId,input.draft.revision,input.principalId,input.recordedAt,payload.json,payload.hash);
+  }
+
+  function actionFeedbackChainForActorJob(input:{runId:string;actorId:string;jobId:string;generation:number}) {
+    const values=database.prepare(`SELECT p.world_seq,p.payload_json,p.payload_hash
+      FROM actor_turn_job_inputs i JOIN world_perceptions p ON p.perception_id=i.perception_id
+      WHERE i.run_id=? AND i.actor_id=? AND i.job_id=? AND i.generation=?
+      ORDER BY p.world_seq,p.perception_id LIMIT 100001`)
+      .all(input.runId,input.actorId,input.jobId,input.generation);
+    if(values.length>100_000)throw new Error('Inbox actoral excede el límite para rastrear feedback privado');
+    let chainId:z.infer<typeof PerceptionIdSchema>|undefined;
+    for(const value of values){
+      const row=z.strictObject({world_seq:counter,payload_json:z.string(),payload_hash:HashSchema}).parse(value);
+      if(sha256(row.payload_json)!==row.payload_hash)throw new Error('Hash de percepción de entrada actoral alterado');
+      const perception=WorldPerceptionSchema.parse(parseStoredJson(row.payload_json));
+      if(perception.runId!==input.runId||perception.recipientCharacterId!==input.actorId
+        ||canonicalJson(perception)!==row.payload_json)throw new Error('La entrada actoral no coincide con su percepción canónica');
+      if(perception.kind==='actionFeedback')chainId=perception.chainId;
+    }
+    return chainId;
+  }
+
+  function actionFeedbackAlreadyRepeated(input:{runId:string;actorId:string;chainId:string;actionSignature:string;worldRevision:number;reason:string}) {
+    const values=database.prepare(`SELECT payload_json,payload_hash FROM world_perceptions
+      WHERE run_id=? AND recipient_actor_id=? AND json_extract(payload_json,'$.chainId')=?
+      ORDER BY world_seq,perception_id LIMIT 100001`)
+      .all(input.runId,input.actorId,input.chainId);
+    if(values.length>100_000)throw new Error('Cadena de feedback privado excede el límite de inspección');
+    return values.some((value)=>{
+      const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(value);
+      if(sha256(row.payload_json)!==row.payload_hash)throw new Error('Hash de feedback privado alterado');
+      const perception=WorldPerceptionSchema.parse(parseStoredJson(row.payload_json));
+      if(perception.runId!==input.runId||perception.recipientCharacterId!==input.actorId
+        ||canonicalJson(perception)!==row.payload_json)throw new Error('Feedback privado fuera de su ámbito/codificación');
+      return perception.kind==='actionFeedback' && perception.chainId===input.chainId
+        && perception.actionSignature===input.actionSignature && perception.reason===input.reason
+        && perception.worldRevision===input.worldRevision;
+    });
   }
 
   function actorTurnJobView(rowValue: unknown): z.infer<typeof ActorTurnJobViewSchema> {
@@ -2948,20 +3453,44 @@ export function openJournal(input: { path: string }) {
       cause_state:z.enum(['pending','running','completed','blocked']),
     }).parse(activationValue);
     if (activation !== null) {
+      const superseded=database.prepare(`SELECT 1 FROM actor_turn_jobs newer
+        WHERE newer.run_id=? AND newer.actor_id=? AND newer.job_id=? AND newer.generation>? LIMIT 1`)
+        .get(row.run_id,row.actor_id,row.job_id,row.generation)!==undefined;
       if (inputs.length !== 0 || activation.trigger_kind !== activation.cause_trigger_kind
         || activation.boundary_at !== activation.cause_boundary_at
-        || (row.state === 'queued' && activation.state !== 'assigned')
-        || (row.state === 'running' && activation.state !== 'assigned')
-        || (row.state === 'accepted' && !['assigned','consumed'].includes(activation.state))
-        || (row.state === 'blocked' && !['assigned','blocked'].includes(activation.state))) {
+        || (!superseded && row.state === 'queued' && activation.state !== 'assigned')
+        || (!superseded && row.state === 'running' && activation.state !== 'assigned')
+        || (!superseded && row.state === 'accepted' && !['assigned','consumed'].includes(activation.state))
+        || (!superseded && row.state === 'blocked' && !['assigned','blocked'].includes(activation.state))) {
         throw new Error('La relación técnica de activación no coincide con el job actoral');
       }
-    } else if (inputs.length === 0) throw new Error('Job de actor sin percepciones asignadas');
+    }
+    const initiativeValue = row.initiative_id === null ? null : readActorInitiative(row.run_id,row.initiative_id);
+    if (row.initiative_id !== null && (initiativeValue === null || initiativeValue === undefined
+      || initiativeValue.actor_id !== row.actor_id)) throw new Error('La causa durable de iniciativa no coincide con el job actoral');
+    if (initiativeValue !== null && initiativeValue !== undefined) {
+      const superseded = database.prepare(`SELECT 1 FROM actor_turn_jobs newer
+        WHERE newer.run_id=? AND newer.actor_id=? AND newer.job_id=? AND newer.generation>? LIMIT 1`)
+        .get(row.run_id,row.actor_id,row.job_id,row.generation) !== undefined;
+      const exactAssigned = initiativeValue.assigned_pulse_id === row.pulse_id
+        && initiativeValue.assigned_job_id === row.job_id && initiativeValue.assigned_generation === row.generation;
+      if ((!superseded && row.state === 'queued' && (initiativeValue.state !== 'assigned' || !exactAssigned))
+        || (!superseded && row.state === 'running' && (initiativeValue.state !== 'assigned' || !exactAssigned))
+        || (!superseded && row.state === 'accepted' && !(initiativeValue.state === 'consumed' || (initiativeValue.state === 'assigned' && exactAssigned)))
+        || (!superseded && row.state === 'blocked' && !(initiativeValue.state === 'blocked' || (initiativeValue.state === 'assigned' && exactAssigned)))) {
+        throw new Error('La relación técnica de iniciativa no coincide con el job actoral');
+      }
+    }
+    if (inputs.length === 0 && activation === null && initiativeValue === null) throw new Error('Job de actor sin percepciones asignadas');
     return ActorTurnJobViewSchema.parse({
       runId: row.run_id, actorId: row.actor_id, jobId: row.job_id, generation: row.generation,
       pulseId: row.pulse_id, lifecycleRevision: row.lifecycle_revision, state: row.state,
       failureCode: row.failure_code, perceptionIds: inputs, frozenPerceptionIds, frozenWorldCut,
       frozenDirectionRevision: row.frozen_direction_revision,
+      initiative:initiativeValue===null||initiativeValue===undefined?null:{initiativeId:initiativeValue.initiative_id,
+        sourceProposalId:initiativeValue.source_proposal_id,sourceVersion:initiativeValue.source_version,
+        sourceCommitIndex:initiativeValue.source_commit_index,sourceWorldRevision:initiativeValue.source_world_revision,
+        sourceWorldSeq:initiativeValue.source_world_seq,eligibleAt:initiativeValue.eligible_at},
       activation:activation === null?null:{activationId:activation.activation_id,invitationId:activation.invitation_id,
         identityVersion:activation.identity_version,trigger:activation.trigger_kind==='initial-goal'
           ?{kind:'initial-goal'}:{kind:'routine-boundary',boundaryAt:FictionalInstantSchema.parse(activation.boundary_at)}},
@@ -3000,9 +3529,10 @@ export function openJournal(input: { path: string }) {
     const value = database.prepare(`SELECT c.*,p.max_calls,p.consumed FROM coordinator_pulses c JOIN pulses p ON p.pulse_id=c.pulse_id
       WHERE c.run_id=? AND c.pulse_id=?`).get(input.runId, input.pulseId);
     if (value === undefined) return undefined;
-    const row = z.strictObject({ pulse_id: PulseIdSchema, run_id: RunIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation']),
+    const row = z.strictObject({ pulse_id: PulseIdSchema, run_id: RunIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation','actorInitiative']),
       origin_id: z.string(), commit_index: counter.nullable(), configuration_hash: HashSchema, state: z.enum(['running','completed','blocked']),
-      lifecycle_revision: counter.nullable(), created_at: counter, updated_at: counter, max_calls: counter, consumed: counter }).parse(value);
+      lifecycle_revision: counter.nullable(), created_at: counter, updated_at: counter, parked_for_pulse_id: PulseIdSchema.nullable(),
+      max_calls: counter, consumed: counter }).parse(value);
     const run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(input.runId));
     if (row.configuration_hash !== run.row.configuration_hash) throw new Error('Configuración del pulso coordinador difiere de la corrida');
     const jobs = database.prepare(`SELECT * FROM actor_turn_jobs j WHERE run_id=? AND pulse_id=?
@@ -3021,6 +3551,15 @@ export function openJournal(input: { path: string }) {
           :{kind:'routine-boundary' as const,boundaryAt:FictionalInstantSchema.parse(activation.boundary_at)};
         return {kind:'actorActivation' as const,id:activationId,trigger};
       })()
+      : row.origin_kind === 'actorInitiative'
+        ? (() => {
+          if(row.commit_index===null)throw new Error('Pulso de iniciativa sin commit fuente');
+          const initiativeId=ActorInitiativeIdSchema.parse(row.origin_id);
+          const initiative=readActorInitiative(row.run_id,initiativeId);
+          if(initiative===undefined||initiative.source_commit_index!==row.commit_index
+            ||initiative.assigned_pulse_id!==row.pulse_id)throw new Error('Pulso de iniciativa no coincide con su causa durable');
+          return {kind:'actorInitiative' as const,id:initiativeId,commitIndex:row.commit_index};
+        })()
       : (() => {
         if (row.commit_index === null) throw new Error('Pulso causado por evento sin commit index');
         return {kind:row.origin_kind,id:row.origin_id,commitIndex:row.commit_index};
@@ -3057,7 +3596,76 @@ export function openJournal(input: { path: string }) {
         VALUES(?,?,?,?,?,'queued',NULL,NULL,?,?,?)`).run(pulse.runId,actorId,jobId,generation,pulse.pulseId,timestamp,timestamp,pulse.lifecycleRevision);
       for (const item of inputs.filter((item) => item.actor_id===actorId)) database.prepare(`INSERT INTO actor_turn_job_inputs(run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at)
         VALUES(?,?,?,?,?,'assigned',?,NULL)`).run(pulse.runId,actorId,jobId,generation,item.perception_id,timestamp);
+      const initiativeValue=database.prepare(`SELECT initiative_id FROM actor_initiatives
+        WHERE run_id=? AND actor_id=? AND state='pending' AND eligible_at<=?
+        ORDER BY source_commit_index,created_at,initiative_id LIMIT 1`)
+        .get(pulse.runId,actorId,run.snapshot.clock.instant);
+      if(initiativeValue!==undefined){
+        const initiativeId=z.strictObject({initiative_id:ActorInitiativeIdSchema}).parse(initiativeValue).initiative_id;
+        const initiative=readActorInitiative(pulse.runId,initiativeId);
+        if(initiative===undefined)throw new Error('Iniciativa pendiente desapareció al coalescer');
+        const failure=actorInitiativeEligibilityFailure({run,configuration,initiative});
+        if(failure!==undefined){
+          if(failure!=='initiative-not-yet-due')database.prepare(`UPDATE actor_initiatives SET state='blocked',failure_reason=?,updated_at=?
+            WHERE run_id=? AND initiative_id=? AND state='pending'`).run(failure,Date.now(),pulse.runId,initiativeId);
+          continue;
+        }
+        const assigned=database.prepare(`UPDATE actor_turn_jobs SET initiative_id=?,updated_at=?
+          WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND pulse_id=? AND state='queued'
+            AND frozen_perception_ids_json IS NULL AND frozen_world_cut_json IS NULL AND initiative_id IS NULL`)
+          .run(initiativeId,Date.now(),pulse.runId,actorId,jobId,generation,pulse.pulseId);
+        if(assigned.changes!==1)throw new Error('No se pudo vincular la iniciativa al job coalescido');
+        assignActorInitiative({runId:pulse.runId,actorId,initiativeId,pulseId:pulse.pulseId,jobId,generation,at:Date.now()});
+      }
     }
+  }
+
+  function nextDueActorInitiative(run:ReturnType<typeof parseWorldRun>,configuration:z.infer<typeof ReadyRunConfigurationSchema>) {
+    const rows=database.prepare(`SELECT initiative_id FROM actor_initiatives
+      WHERE run_id=? AND state='pending' AND eligible_at<=?
+      ORDER BY source_commit_index,created_at,initiative_id LIMIT 100001`)
+      .all(run.row.run_id,run.snapshot.clock.instant);
+    if(rows.length>100_000)throw new Error('Demasiadas iniciativas actoriales pendientes');
+    for(const value of rows){
+      const initiativeId=z.strictObject({initiative_id:ActorInitiativeIdSchema}).parse(value).initiative_id;
+      const initiative=readActorInitiative(run.row.run_id,initiativeId);
+      if(initiative===undefined)throw new Error('Iniciativa pendiente inexistente');
+      const failure=actorInitiativeEligibilityFailure({run,configuration,initiative});
+      if(failure===undefined)return initiative;
+      database.prepare(`UPDATE actor_initiatives SET state='blocked',failure_reason=?,updated_at=?
+        WHERE run_id=? AND initiative_id=? AND state='pending'`)
+        .run(failure,Date.now(),run.row.run_id,initiativeId);
+    }
+    return undefined;
+  }
+
+  function startActorInitiativePulse(run:ReturnType<typeof parseWorldRun>,configuration:z.infer<typeof ReadyRunConfigurationSchema>,
+    initiative:z.infer<typeof ActorInitiativeDbRowSchema>) {
+    const failure=actorInitiativeEligibilityFailure({run,configuration,initiative});
+    if(failure!==undefined)throw new Error(`ACTOR_INITIATIVE_NOT_ELIGIBLE:${failure}`);
+    const existingBudget=database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(run.row.run_id);
+    if(existingBudget===undefined)database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?)')
+      .run(run.row.run_id,configuration.budget.maxPiCallsPerRun??0);
+    else if(budgetRow.parse(existingBudget).max_calls!==(configuration.budget.maxPiCallsPerRun??0))
+      throw new Error('Presupuesto run difiere de configuración ready');
+    ensureModelTimeRunState(run.row.run_id);
+    const pulseId=PulseIdSchema.parse(randomUUID());
+    const jobId=JobIdSchema.parse(randomUUID());
+    const timestamp=Date.now();
+    database.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)')
+      .run(pulseId,run.row.run_id,configuration.budget.maxPiCallsPerPulse??0);
+    database.prepare(`INSERT INTO coordinator_pulses(pulse_id,run_id,origin_kind,origin_id,commit_index,configuration_hash,state,
+      created_at,updated_at,lifecycle_revision) VALUES(?,?,'actorInitiative',?,?,?,'running',?,?,?)`)
+      .run(pulseId,run.row.run_id,initiative.initiative_id,initiative.source_commit_index,run.row.configuration_hash,
+        timestamp,timestamp,run.row.lifecycle_revision);
+    database.prepare(`INSERT INTO actor_turn_jobs(run_id,actor_id,job_id,generation,pulse_id,state,owner_token,claim_token,
+      created_at,updated_at,lifecycle_revision,initiative_id) VALUES(?,?,?,0,?,'queued',NULL,NULL,?,?,?,?)`)
+      .run(run.row.run_id,initiative.actor_id,jobId,pulseId,timestamp,timestamp,run.row.lifecycle_revision,initiative.initiative_id);
+    assignActorInitiative({runId:run.row.run_id,actorId:initiative.actor_id,initiativeId:initiative.initiative_id,
+      pulseId,jobId,generation:0,at:timestamp});
+    const pulse=coordinatorPulseView({runId:run.row.run_id,pulseId});
+    if(pulse===undefined)throw new Error('Pulso por iniciativa no persistido');
+    return pulse;
   }
 
   function assignedActorTurnPerceptionIds(scope: {
@@ -3072,6 +3680,34 @@ export function openJournal(input: { path: string }) {
       ORDER BY perception_id
     `).all(scope.runId, scope.actorId, scope.jobId, scope.generation).map((value) =>
       z.strictObject({ perception_id: PerceptionIdSchema }).parse(value).perception_id);
+  }
+
+  function attachDeliveredInboxToInitiativeJob(input: {
+    row: z.infer<typeof ActorTurnJobDbRowSchema>;
+    throughWorldSeq: number;
+    at: number;
+  }) {
+    const { row } = input;
+    if (row.initiative_id === null) return;
+    const initiative = readActorInitiative(row.run_id, row.initiative_id);
+    if (initiative === undefined || initiative.state !== 'assigned' || initiative.actor_id !== row.actor_id
+      || initiative.assigned_pulse_id !== row.pulse_id || initiative.assigned_job_id !== row.job_id
+      || initiative.assigned_generation !== row.generation) {
+      throw new Error('ACTOR_INITIATIVE_ASSIGNMENT_INVALID');
+    }
+    const pending = database.prepare(`SELECT i.perception_id FROM actor_turn_intents i
+      JOIN world_deliveries d ON d.perception_id=i.perception_id
+      JOIN world_perceptions p ON p.perception_id=i.perception_id
+      WHERE i.run_id=? AND i.actor_id=? AND i.state='queued' AND d.state='delivered' AND p.world_seq<=?
+        AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))
+      ORDER BY p.world_seq,i.perception_id`)
+      .all(row.run_id,row.actor_id,input.throughWorldSeq)
+      .map((value) => z.strictObject({perception_id:PerceptionIdSchema}).parse(value).perception_id);
+    for (const perceptionId of pending) {
+      database.prepare(`INSERT INTO actor_turn_job_inputs(run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at)
+        VALUES(?,?,?,?,?,'assigned',?,NULL)`)
+        .run(row.run_id,row.actor_id,row.job_id,row.generation,perceptionId,input.at);
+    }
   }
 
   function frozenActorTurnPerceptionIds(row: z.infer<typeof ActorTurnJobDbRowSchema>): string[] | null {
@@ -3224,6 +3860,161 @@ export function openJournal(input: { path: string }) {
       || hashJson(record.attempt).hash !== row.attempt_hash || row.attempt_hash !== record.attemptHash
       || row.exact_content_hash !== record.exactContentHash) throw new Error('Hash o metadatos de propuesta no coinciden');
     return { row, record };
+  }
+
+  function actorInitiativeSourcePayload(row: z.infer<typeof ActorInitiativeDbRowSchema>) {
+    return {
+      initiativeId: row.initiative_id, runId: row.run_id, actorId: row.actor_id,
+      sourceProposalId: row.source_proposal_id, sourceVersion: row.source_version,
+      sourceJobId: row.source_job_id, sourceGeneration: row.source_generation,
+      sourceAttemptId: row.source_attempt_id, sourceProposalHash: row.source_proposal_hash,
+      sourceAttemptHash: row.source_attempt_hash, sourceExactContentHash: row.source_exact_content_hash,
+      sourceCommitIndex: row.source_commit_index, sourceWorldRevision: row.source_world_revision,
+      sourceWorldSeq: row.source_world_seq, sourceLifecycleRevision: row.source_lifecycle_revision,
+      sourceConfigurationHash: row.source_configuration_hash, sourceIdentityVersion: row.source_identity_version,
+      eligibleAt: row.eligible_at,
+    };
+  }
+
+  /** Re-derive every source fence from the proposal, accepted job, resolution and exact commit. */
+  function readActorInitiative(runId: string, initiativeId: string) {
+    const value = database.prepare('SELECT * FROM actor_initiatives WHERE run_id=? AND initiative_id=?').get(runId,initiativeId);
+    if (value === undefined) return undefined;
+    const row = ActorInitiativeDbRowSchema.parse(value);
+    if (hashJson(actorInitiativeSourcePayload(row)).hash !== row.source_hash) throw new Error('ACTOR_INITIATIVE_SOURCE_HASH_INVALID');
+    const { record } = proposalRecord(row.run_id,row.source_proposal_id,row.source_version);
+    if (hashJson(record).hash !== row.source_proposal_hash || record.nextInitiative !== 'after-resolution'
+      || record.actorId !== row.actor_id || record.jobId !== row.source_job_id || record.generation !== row.source_generation
+      || record.attemptId !== row.source_attempt_id || record.attemptHash !== row.source_attempt_hash
+      || record.exactContentHash !== row.source_exact_content_hash) throw new Error('ACTOR_INITIATIVE_PROPOSAL_SOURCE_INVALID');
+    const sourceJobValue = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+      .get(row.run_id,row.actor_id,row.source_job_id,row.source_generation);
+    if (sourceJobValue === undefined) throw new Error('ACTOR_INITIATIVE_SOURCE_JOB_MISSING');
+    const sourceJob = ActorTurnJobDbRowSchema.parse(sourceJobValue);
+    // Lifecycle resume may advance an already accepted source row's epoch. The
+    // immutable initiative retains the epoch where consent was recorded; later
+    // claims bind the new turn to the then-current epoch.
+    if (sourceJob.lifecycle_revision === null || sourceJob.lifecycle_revision < row.source_lifecycle_revision
+      || sourceJob.state !== 'accepted')
+      throw new Error('ACTOR_INITIATIVE_SOURCE_JOB_INVALID');
+    const resolutionValue = database.prepare(`SELECT proposal_id,version,attempt_hash,payload_json,payload_hash,commit_index
+      FROM world_resolutions WHERE run_id=? AND origin_kind='actorAttempt' AND origin_id=?`)
+      .get(row.run_id,row.source_attempt_id);
+    if (resolutionValue === undefined) throw new Error('ACTOR_INITIATIVE_SOURCE_RESOLUTION_MISSING');
+    const resolutionRow = WorldResolutionDbRowSchema.parse(resolutionValue);
+    if (sha256(resolutionRow.payload_json) !== resolutionRow.payload_hash
+      || resolutionRow.proposal_id !== row.source_proposal_id || resolutionRow.version !== row.source_version
+      || resolutionRow.attempt_hash !== row.source_attempt_hash || resolutionRow.commit_index !== row.source_commit_index) {
+      throw new Error('ACTOR_INITIATIVE_SOURCE_RESOLUTION_INVALID');
+    }
+    const resolution = WorldResolutionSchema.parse(parseStoredJson(resolutionRow.payload_json));
+    if (canonicalJson(resolution) !== resolutionRow.payload_json || resolution.kind !== 'applied'
+      || resolution.attemptId !== row.source_attempt_id || resolution.newSnapshot.runId !== row.run_id
+      || resolution.newSnapshot.revision !== row.source_world_revision || resolution.newSnapshot.seq !== row.source_world_seq
+      || resolution.newSnapshot.clock.instant !== row.eligible_at) throw new Error('ACTOR_INITIATIVE_SOURCE_CUT_INVALID');
+    const commitValue = database.prepare('SELECT * FROM world_commits WHERE run_id=? AND commit_index=?').get(row.run_id,row.source_commit_index);
+    if (commitValue === undefined) throw new Error('ACTOR_INITIATIVE_SOURCE_COMMIT_MISSING');
+    const commit = WorldCommitDbRowSchema.parse(commitValue);
+    if (commit.origin_kind !== 'actorAttempt' || commit.origin_id !== row.source_attempt_id
+      || commit.world_revision !== row.source_world_revision || commit.last_seq !== row.source_world_seq
+      || sha256(commit.snapshot_json) !== commit.snapshot_hash || canonicalJson(resolution.newSnapshot) !== commit.snapshot_json
+      || hashJson(resolution.newSnapshot).hash !== commit.snapshot_hash) throw new Error('ACTOR_INITIATIVE_SOURCE_COMMIT_INVALID');
+    const sourceRun = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(row.run_id));
+    const configuration = configurationAtCommit(sourceRun,row.source_commit_index);
+    const actor = resolution.newSnapshot.entities.find((entity) => entity.kind === 'character' && entity.characterId === row.actor_id);
+    if (configuration.configurationHash !== row.source_configuration_hash || actor?.kind !== 'character'
+      || actor.preparation.kind !== 'prepared' || actor.preparation.identityVersion !== row.source_identity_version) {
+      throw new Error('ACTOR_INITIATIVE_SOURCE_CONFIGURATION_INVALID');
+    }
+    if (row.state === 'assigned') {
+      const assigned = database.prepare(`SELECT initiative_id,pulse_id,state FROM actor_turn_jobs
+        WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+        .get(row.run_id,row.actor_id,row.assigned_job_id,row.assigned_generation);
+      const assignedRow = z.strictObject({initiative_id:ActorInitiativeIdSchema.nullable(),pulse_id:PulseIdSchema,state:z.enum(['queued','running','accepted','blocked'])}).parse(assigned);
+      if (assignedRow.initiative_id !== row.initiative_id || assignedRow.pulse_id !== row.assigned_pulse_id)
+        throw new Error('ACTOR_INITIATIVE_ASSIGNMENT_INVALID');
+    }
+    return row;
+  }
+
+  function assignActorInitiative(input:{runId:string;actorId:string;initiativeId:string;pulseId:string;jobId:string;generation:number;at:number}) {
+    const current = readActorInitiative(input.runId,input.initiativeId);
+    if (current === undefined || current.actor_id !== input.actorId) throw new Error('ACTOR_INITIATIVE_NOT_FOUND');
+    if (current.state === 'assigned' && current.assigned_pulse_id === input.pulseId
+      && current.assigned_job_id === input.jobId && current.assigned_generation === input.generation) return;
+    if (current.state !== 'pending') throw new Error('ACTOR_INITIATIVE_NOT_PENDING');
+    const changed = database.prepare(`UPDATE actor_initiatives SET state='assigned',failure_reason=NULL,
+      assigned_pulse_id=?,assigned_job_id=?,assigned_generation=?,updated_at=?
+      WHERE run_id=? AND initiative_id=? AND state='pending'`)
+      .run(input.pulseId,input.jobId,input.generation,input.at,input.runId,input.initiativeId);
+    if (changed.changes !== 1) throw new Error('ACTOR_INITIATIVE_ASSIGNMENT_CONFLICT');
+  }
+
+  function reassignActorInitiativeForRetry(input:{runId:string;actorId:string;initiativeId:string;pulseId:string;jobId:string;
+    previousGeneration:number;generation:number;at:number}) {
+    const current=readActorInitiative(input.runId,input.initiativeId);
+    if(current===undefined||current.actor_id!==input.actorId||current.state!=='blocked'
+      ||current.assigned_pulse_id!==input.pulseId||current.assigned_job_id!==input.jobId
+      ||current.assigned_generation!==input.previousGeneration)throw new Error('ACTOR_INITIATIVE_RETRY_BINDING_INVALID');
+    const changed=database.prepare(`UPDATE actor_initiatives SET state='assigned',failure_reason=NULL,assigned_generation=?,updated_at=?
+      WHERE run_id=? AND initiative_id=? AND state='blocked' AND assigned_pulse_id=? AND assigned_job_id=? AND assigned_generation=?`)
+      .run(input.generation,input.at,input.runId,input.initiativeId,input.pulseId,input.jobId,input.previousGeneration);
+    if(changed.changes!==1)throw new Error('ACTOR_INITIATIVE_RETRY_CONFLICT');
+  }
+
+  function blockActorInitiativeForJob(input:{runId:string;actorId:string;jobId:string;generation:number;reason:string;at?:number}) {
+    const value = database.prepare(`SELECT initiative_id FROM actor_turn_jobs
+      WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`).get(input.runId,input.actorId,input.jobId,input.generation);
+    if (value === undefined) return;
+    const row = z.strictObject({initiative_id:ActorInitiativeIdSchema.nullable()}).parse(value);
+    if (row.initiative_id === null) return;
+    database.prepare(`UPDATE actor_initiatives SET state='blocked',failure_reason=?,updated_at=?
+      WHERE run_id=? AND initiative_id=? AND state='assigned' AND assigned_job_id=? AND assigned_generation=?`)
+      .run(input.reason,input.at??Date.now(),input.runId,row.initiative_id,input.jobId,input.generation);
+  }
+
+  function settleActorInitiativeAfterResolution(input:{run:ReturnType<typeof parseWorldRun>;committedRun:ReturnType<typeof parseWorldRun>;
+    job:z.infer<typeof ActorTurnJobDbRowSchema>|undefined;record:z.infer<typeof WorldProposalRecordSchema>;
+    resolution:z.infer<typeof WorldResolutionSchema>;commitIndex:number;at:number}) {
+    if (input.job?.initiative_id !== null && input.job?.initiative_id !== undefined) {
+      const current = readActorInitiative(input.run.row.run_id,input.job.initiative_id);
+      if (current === undefined || current.state !== 'assigned' || current.assigned_pulse_id !== input.job.pulse_id
+        || current.assigned_job_id !== input.job.job_id || current.assigned_generation !== input.job.generation) {
+        throw new Error('ACTOR_INITIATIVE_SETTLEMENT_BINDING_INVALID');
+      }
+      const consumed = database.prepare(`UPDATE actor_initiatives SET state='consumed',updated_at=?
+        WHERE run_id=? AND initiative_id=? AND state='assigned' AND assigned_job_id=? AND assigned_generation=?`)
+        .run(input.at,input.run.row.run_id,input.job.initiative_id,input.job.job_id,input.job.generation);
+      if (consumed.changes !== 1) throw new Error('ACTOR_INITIATIVE_SETTLEMENT_CONFLICT');
+    }
+    if (input.record.nextInitiative !== 'after-resolution' || input.resolution.kind !== 'applied') return;
+    const job = input.job;
+    if (job === undefined || job.lifecycle_revision === null) throw new Error('ACTOR_INITIATIVE_REQUIRES_DURABLE_ACTOR_JOB');
+    const actor = input.resolution.newSnapshot.entities.find((entity) => entity.kind === 'character' && entity.characterId === input.record.actorId);
+    if (actor?.kind !== 'character' || actor.preparation.kind !== 'prepared') throw new Error('ACTOR_INITIATIVE_RESULT_ACTOR_MISSING');
+    const effectiveConfiguration = configurationAtCommit(input.committedRun,input.commitIndex);
+    const initiativeId = ActorInitiativeIdSchema.parse(randomUUID());
+    const source = {
+      initiativeId,runId:input.run.row.run_id,actorId:input.record.actorId,
+      sourceProposalId:input.record.proposalId,sourceVersion:input.record.version,
+      sourceJobId:job.job_id,sourceGeneration:job.generation,sourceAttemptId:input.record.attemptId,
+      sourceProposalHash:hashJson(input.record).hash,sourceAttemptHash:input.record.attemptHash,
+      sourceExactContentHash:input.record.exactContentHash,sourceCommitIndex:input.commitIndex,
+      sourceWorldRevision:input.resolution.newSnapshot.revision,sourceWorldSeq:input.resolution.newSnapshot.seq,
+      sourceLifecycleRevision:job.lifecycle_revision,sourceConfigurationHash:effectiveConfiguration.configurationHash,
+      sourceIdentityVersion:actor.preparation.identityVersion,eligibleAt:input.resolution.newSnapshot.clock.instant,
+    };
+    const sourceHash = hashJson(source).hash;
+    database.prepare(`INSERT INTO actor_initiatives(
+      initiative_id,run_id,actor_id,source_proposal_id,source_version,source_job_id,source_generation,source_attempt_id,
+      source_proposal_hash,source_attempt_hash,source_exact_content_hash,source_commit_index,source_world_revision,source_world_seq,
+      source_lifecycle_revision,source_configuration_hash,source_identity_version,eligible_at,source_hash,state,failure_reason,
+      assigned_pulse_id,assigned_job_id,assigned_generation,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',NULL,NULL,NULL,NULL,?,?)`)
+      .run(initiativeId,source.runId,source.actorId,source.sourceProposalId,source.sourceVersion,source.sourceJobId,
+        source.sourceGeneration,source.sourceAttemptId,source.sourceProposalHash,source.sourceAttemptHash,source.sourceExactContentHash,
+        source.sourceCommitIndex,source.sourceWorldRevision,source.sourceWorldSeq,source.sourceLifecycleRevision,
+        source.sourceConfigurationHash,source.sourceIdentityVersion,source.eligibleAt,sourceHash,input.at,input.at);
   }
 
   function reviewRecord(rowValue: unknown) {
@@ -3470,6 +4261,7 @@ export function openJournal(input: { path: string }) {
       || review.runId !== record.runId || review.proposalId !== record.proposalId || review.version !== record.version
       || review.actorId !== record.actorId || review.stateRevision !== record.baseRevision
       || review.stateRevision !== run.row.world_revision || review.exactContentHash !== record.exactContentHash
+      || review.nextInitiative !== record.nextInitiative
       || record.attempt.expectedRevision !== run.row.world_revision) return undefined;
     return WorldContentApprovalReceiptSchema.parse({
       kind: 'approved', proposalId: record.proposalId, version: record.version,
@@ -3592,6 +4384,7 @@ export function openJournal(input: { path: string }) {
       database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
         WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='running'`)
         .run(timestamp, job.run_id, job.actor_id, job.job_id, job.generation);
+      blockActorInitiativeForJob({runId:job.run_id,actorId:job.actor_id,jobId:job.job_id,generation:job.generation,reason:'lifecycle-epoch-changed',at:timestamp});
       database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='assigned'`)
         .run(job.run_id, job.actor_id, job.job_id, job.generation);
       database.prepare(`UPDATE continuista_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
@@ -3672,6 +4465,11 @@ export function openJournal(input: { path: string }) {
   }
 
   function ensureModelTimeRunState(runId: z.infer<typeof RunIdSchema>): void {
+    const configured = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(runId);
+    if (configured !== undefined) {
+      const ready = ReadyRunConfigurationSchema.safeParse(parseWorldRun(configured).configuration);
+      if (ready.success) database.prepare('INSERT OR IGNORE INTO run_budgets(run_id,max_calls) VALUES(?,?)').run(runId,ready.data.budget.maxPiCallsPerRun ?? 0);
+    }
     const legacy = z.strictObject({ count: counter }).parse(database.prepare(`SELECT COUNT(*) AS count FROM request_reservations r
       WHERE r.run_id=? AND r.state IN('dispatched','completed','ambiguous')
         AND NOT EXISTS(SELECT 1 FROM model_time_spans s WHERE s.job_id=r.job_id AND s.generation=r.generation AND s.request_seq=r.request_seq)`)
@@ -3737,6 +4535,12 @@ export function openJournal(input: { path: string }) {
     }).parse(database.prepare(
       'SELECT run_id,pulse_id,state FROM request_reservations WHERE job_id=? AND generation=? AND request_seq=?',
     ).get(request.jobId, request.generation, request.requestSeq));
+    if(request.target==='dispatched'){
+      checkPreparationBudgetRequest({runId:row.run_id,pulseId:row.pulse_id,jobId:request.jobId,generation:request.generation,ownerToken:request.ownerToken});
+      const configuratorBinding=configuratorBindingForBudgetRequest({runId:row.run_id,pulseId:row.pulse_id,jobId:request.jobId,
+        generation:request.generation,...(request.ownerToken===undefined?{}:{ownerToken:request.ownerToken})});
+      if(configuratorBinding!==undefined)requireIcmPacketPresent(configuratorBinding);
+    }
     const spanValue = database.prepare(`SELECT clock_epoch_id,owner_token,reserved_ms,state,start_monotonic_ns,
       stop_monotonic_ns,measured_ms,expiry_reason,settlement_hash FROM model_time_spans
       WHERE job_id=? AND generation=? AND request_seq=?`)
@@ -3808,12 +4612,178 @@ export function openJournal(input: { path: string }) {
     }
   }
 
+  function readPreparationConfiguratorStored(jobId:string) {
+    const raw=database.prepare('SELECT * FROM preparation_configurator_jobs WHERE job_id=?').get(jobId);
+    if(raw===undefined)throw new Error('PREPARATION_CONFIGURATOR_JOB_MISSING');
+    const row=z.strictObject({job_id:JobIdSchema,principal_id:z.string(),run_id:RunIdSchema,payload_json:z.string(),payload_hash:HashSchema}).parse(raw);
+    const stored=PreparationConfiguratorStoredSchema.parse(parseStoredJson(row.payload_json));
+    if(stored.job.scope.jobId!==row.job_id||stored.job.principalId!==row.principal_id||stored.job.scope.runId!==row.run_id
+      ||hashJson({jobId:row.job_id,principalId:row.principal_id,runId:row.run_id,stored}).hash!==row.payload_hash||canonicalJson(stored)!==row.payload_json)throw new Error('PREPARATION_CONFIGURATOR_JOB_CORRUPT');
+    validatePreparationConfiguratorContext(stored.context);
+    const historical=readRunDraft({runId:row.run_id,revision:stored.job.scope.draftRevision});
+    if(historical===undefined||canonicalJson(historical.draft)!==canonicalJson(stored.context.draft)||hashJson(historical.draft).hash!==stored.job.scope.draftHash)throw new Error('PREPARATION_CONFIGURATOR_HISTORICAL_DRAFT_MISMATCH');
+    if(canonicalJson(compilePreparationConfiguratorPacket(stored.context))!==canonicalJson(stored.packet)
+      ||canonicalJson(stored.job.scope)!==canonicalJson({runId:stored.context.request.runId,jobId:stored.context.request.jobId,generation:stored.context.request.generation,draftRevision:stored.context.request.draftRevision,draftHash:stored.context.request.draftHash,contextHash:stored.context.contextHash}))throw new Error('PREPARATION_CONFIGURATOR_PACKET_CORRUPT');
+    return stored;
+  }
+  function savePreparationConfiguratorStored(raw:unknown) {
+    const stored=PreparationConfiguratorStoredSchema.parse(raw),scope=stored.job.scope;
+    database.prepare(`INSERT INTO preparation_configurator_jobs VALUES(?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET payload_json=excluded.payload_json,payload_hash=excluded.payload_hash`)
+      .run(scope.jobId,stored.job.principalId,scope.runId,canonicalJson(stored),hashJson({jobId:scope.jobId,principalId:stored.job.principalId,runId:scope.runId,stored}).hash);
+    return stored;
+  }
+  function readPreparationOperation(principalId:string,idempotencyKey:string) {
+    const raw=database.prepare('SELECT * FROM preparation_configurator_operations WHERE principal_id=? AND idempotency_key=?').get(principalId,idempotencyKey);
+    if(raw===undefined)return undefined;
+    const row=z.strictObject({principal_id:z.string(),idempotency_key:z.uuid(),operation_kind:z.enum(['create','start','cancel','apply']),request_json:z.string(),request_hash:HashSchema,job_id:JobIdSchema,result_json:z.string(),result_hash:HashSchema}).parse(raw);
+    const operation=PreparationConfiguratorOperationSchema.parse({operationKind:row.operation_kind,request:parseStoredJson(row.request_json),result:parseStoredJson(row.result_json)});
+    const jobId=operation.operationKind==='create'?operation.request.request.jobId:operation.request.jobId;
+    const resultScopeValid=operation.operationKind==='apply'
+      ?operation.result.jobId===jobId&&operation.result.candidateId===operation.request.candidateId&&operation.result.proposalHash===operation.request.proposalHash&&operation.result.baseDraftRevision===operation.request.expectedDraftRevision&&operation.result.baseDraftHash===operation.request.expectedDraftHash&&operation.result.selectionHash===hashJson(operation.request.selection).hash
+      :operation.operationKind==='start'?operation.result.job.scope.jobId===jobId&&operation.result.job.principalId===principalId:operation.result.scope.jobId===jobId&&operation.result.principalId===principalId;
+    if(operation.request.principalId!==row.principal_id||operation.request.idempotencyKey!==row.idempotency_key||jobId!==row.job_id
+      ||!resultScopeValid||canonicalJson(operation.request)!==row.request_json||hashJson(operation.request).hash!==row.request_hash
+      ||canonicalJson(operation.result)!==row.result_json||hashJson({principalId,idempotencyKey,operationKind:row.operation_kind,requestHash:row.request_hash,jobId,result:operation.result}).hash!==row.result_hash)throw new Error('PREPARATION_CONFIGURATOR_OPERATION_CORRUPT');
+    return operation;
+  }
+  function putPreparationOperation(raw:z.infer<typeof PreparationConfiguratorOperationSchema>) {
+    const operation=PreparationConfiguratorOperationSchema.parse(raw),{principalId,idempotencyKey}=operation.request;
+    const jobId=operation.operationKind==='create'?operation.request.request.jobId:operation.request.jobId;
+    const requestHash=hashJson(operation.request).hash;
+    database.prepare('INSERT INTO preparation_configurator_operations VALUES(?,?,?,?,?,?,?,?)').run(principalId,idempotencyKey,operation.operationKind,canonicalJson(operation.request),requestHash,jobId,canonicalJson(operation.result),hashJson({principalId,idempotencyKey,operationKind:operation.operationKind,requestHash,jobId,result:operation.result}).hash);
+    return operation;
+  }
+  function preparationRecordKey(record:z.infer<typeof PreparationConfiguratorRecordSchema>) {
+    const kind=record.kind==='checkpoint'?record.value.purpose.kind:record.kind;
+    const seq=record.kind==='checkpoint'&&record.value.purpose.kind==='request-input'?record.value.purpose.requestSeq:-1;
+    return {kind,seq};
+  }
+  function readPreparationRecord(jobId:string,generation:number,kind:string,seq=-1) {
+    const raw=database.prepare('SELECT payload_json,payload_hash FROM preparation_configurator_records WHERE job_id=? AND generation=? AND kind=? AND request_seq=?').get(jobId,generation,kind,seq);
+    if(raw===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(raw);
+    const record=PreparationConfiguratorRecordSchema.parse(parseStoredJson(row.payload_json));
+    const key=preparationRecordKey(record);
+    if(record.execution.scope.jobId!==jobId||record.execution.scope.generation!==generation||key.kind!==kind||key.seq!==seq||canonicalJson(record)!==row.payload_json
+      ||hashJson({jobId,generation,kind,requestSeq:seq,record}).hash!==row.payload_hash)throw new Error('PREPARATION_CONFIGURATOR_RECORD_CORRUPT');
+    return record;
+  }
+  function putPreparationRecord(raw:unknown) {
+    const record=PreparationConfiguratorRecordSchema.parse(raw),execution=record.execution;
+    const stored=activePreparationConfigurator(execution);const {kind,seq}=preparationRecordKey(record);
+    if(record.kind==='session'){
+      if(canonicalJson(record.value.profile)!==canonicalJson(stored.context.profile))throw new Error('PREPARATION_CONFIGURATOR_SESSION_PROFILE');
+      const collision=database.prepare(`SELECT 1 FROM preparation_configurator_records WHERE kind='session' AND job_id<>?
+        AND (json_extract(payload_json,'$.value.sessionId')=? OR json_extract(payload_json,'$.value.sessionPath')=?)
+        UNION ALL SELECT 1 FROM actor_pi_sessions WHERE session_id=? OR session_path=?
+        UNION ALL SELECT 1 FROM configurator_sessions WHERE session_path=?
+        UNION ALL SELECT 1 FROM administrative_sessions WHERE json_extract(payload_json,'$.sessionPath')=?
+        UNION ALL SELECT 1 FROM continuista_sessions WHERE json_extract(payload_json,'$.sessionPath')=? LIMIT 1`)
+        .get(execution.scope.jobId,record.value.sessionId,record.value.sessionPath,record.value.sessionId,record.value.sessionPath,record.value.sessionPath,record.value.sessionPath,record.value.sessionPath);
+      if(collision!==undefined)throw new Error('PREPARATION_CONFIGURATOR_SESSION_NOT_INDEPENDENT');
+    }
+    if(record.kind==='candidate'){
+      const proposal=validatePreparationConfiguratorProposal({context:stored.context,proposal:record.value.proposal});
+      if(record.value.candidateHash!==hashJson({execution,candidateId:record.value.candidateId,proposal}).hash)throw new Error('PREPARATION_CONFIGURATOR_CANDIDATE_HASH');
+    }
+    const prior=readPreparationRecord(execution.scope.jobId,execution.scope.generation,kind,seq);
+    if(prior!==undefined){if(canonicalJson(prior)!==canonicalJson(record))throw new Error('PREPARATION_CONFIGURATOR_RECORD_CONFLICT');return 'existing' as const;}
+    database.prepare('INSERT INTO preparation_configurator_records VALUES(?,?,?,?,?,?)').run(execution.scope.jobId,execution.scope.generation,kind,seq,canonicalJson(record),
+      hashJson({jobId:execution.scope.jobId,generation:execution.scope.generation,kind,requestSeq:seq,record}).hash);
+    return 'stored' as const;
+  }
+  function activePreparationConfigurator(execution:PreparationConfiguratorExecution) {
+    const stored=readPreparationConfiguratorStored(execution.scope.jobId);
+    if(stored.job.state!=='running'||canonicalJson(stored.job.scope)!==canonicalJson(execution.scope)||canonicalJson(stored.lease)!==canonicalJson(execution.lease))throw new Error('PREPARATION_CONFIGURATOR_CLAIM_INACTIVE');
+    const draft=readRunDraft({runId:execution.scope.runId})?.draft;
+    if(draft===undefined||draft.revision!==execution.scope.draftRevision||hashJson(draft).hash!==execution.scope.draftHash
+      ||database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(execution.scope.runId)!==undefined)throw new Error('PREPARATION_CONFIGURATOR_DRAFT_CHANGED');
+    const authority=preparationBudgetAuthority(execution.scope.runId);
+    if(authority?.kind!=='preparation'||canonicalJson(authority.value.budget)!==canonicalJson(stored.context.budget)||canonicalJson(authority.value.profile)!==canonicalJson(stored.context.profile)
+      ||authority.value.draftRevision!==execution.scope.draftRevision||authority.value.draftHash!==execution.scope.draftHash)throw new Error('PREPARATION_CONFIGURATOR_AUTHORITY_MISMATCH');
+    return stored;
+  }
+  function checkPreparationBudgetRequest(request:{runId:z.infer<typeof RunIdSchema>;pulseId:z.infer<typeof PulseIdSchema>;jobId:z.infer<typeof JobIdSchema>;generation:number;ownerToken?:string|undefined}) {
+    const authority=preparationBudgetAuthority(request.runId);
+    const jobExists=database.prepare('SELECT 1 FROM preparation_configurator_jobs WHERE job_id=? OR run_id=? LIMIT 1').get(request.jobId,request.runId)!==undefined;
+    if(authority?.kind!=='preparation'){
+      if(jobExists&&database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(request.runId)===undefined)throw new Error('PREPARATION_CONFIGURATOR_AUTHORITY_MISSING');
+      return;
+    }
+    const stored=readPreparationConfiguratorStored(request.jobId);
+    if(stored.lease===null||request.ownerToken!==stored.lease.ownerToken||request.pulseId!==PulseIdSchema.parse(request.jobId)||request.generation!==stored.job.scope.generation)throw new Error('PREPARATION_CONFIGURATOR_REQUEST_SCOPE');
+    activePreparationConfigurator(PreparationConfiguratorExecutionSchema.parse({role:'preparation-configurator',scope:stored.job.scope,lease:stored.lease}));
+  }
+  function preparationBudgetAuthority(runId: z.infer<typeof RunIdSchema>) {
+    const raw = database.prepare('SELECT kind,payload_json,payload_hash FROM model_budget_authorities WHERE run_id=?').get(runId);
+    if (raw===undefined) return undefined;
+    const row=z.strictObject({kind:z.enum(['preparation','ready']),payload_json:z.string(),payload_hash:HashSchema}).parse(raw);
+    const authority=PreparationBudgetAuthoritySchema.parse(parseStoredJson(row.payload_json));
+    if(authority.runId!==runId||hashJson(authority).json!==row.payload_json||sha256(row.payload_json)!==row.payload_hash)throw new Error('MODEL_BUDGET_AUTHORITY_CORRUPT');
+    return {kind:row.kind,value:authority};
+  }
+  function assertSettledPreparationAmbiguities(runId:z.infer<typeof RunIdSchema>) {
+    const rows=database.prepare(`SELECT r.job_id,r.generation,r.request_seq,r.run_id,r.pulse_id,
+      s.job_id AS span_job_id,s.generation AS span_generation,s.request_seq AS span_request_seq,s.run_id AS span_run_id,
+      s.pulse_id AS span_pulse_id,s.clock_epoch_id,s.owner_token,s.state AS span_state,s.start_monotonic_ns,
+      s.stop_monotonic_ns,s.measured_ms,s.expiry_reason,s.settlement_hash
+      FROM request_reservations r LEFT JOIN model_time_spans s USING(job_id,generation,request_seq)
+      WHERE r.run_id=? AND r.state='ambiguous'`).all(runId);
+    for(const value of rows){
+      const row=z.strictObject({job_id:JobIdSchema,generation:counter,request_seq:counter,run_id:RunIdSchema,pulse_id:PulseIdSchema,
+        span_job_id:JobIdSchema.nullable(),span_generation:counter.nullable(),span_request_seq:counter.nullable(),span_run_id:RunIdSchema.nullable(),
+        span_pulse_id:PulseIdSchema.nullable(),clock_epoch_id:ModelTimeClockEpochIdSchema.nullable(),owner_token:z.string().uuid().nullable(),
+        span_state:z.enum(['reserved','running','expired','uncertain','settled','undispatched']).nullable(),
+        start_monotonic_ns:MonotonicNanosecondsSchema.nullable(),stop_monotonic_ns:MonotonicNanosecondsSchema.nullable(),
+        measured_ms:counter.nullable(),expiry_reason:z.enum(['timeout','cancelled','host-interrupted']).nullable(),settlement_hash:HashSchema.nullable()}).parse(value);
+      if(row.span_job_id===null||row.span_generation===null||row.span_request_seq===null||row.span_run_id===null||row.span_pulse_id===null
+        ||row.clock_epoch_id===null||row.owner_token===null||row.span_state!=='settled'||row.start_monotonic_ns===null
+        ||row.stop_monotonic_ns===null||row.measured_ms===null||row.expiry_reason!==null||row.settlement_hash===null
+        ||row.span_job_id!==row.job_id||row.span_generation!==row.generation||row.span_request_seq!==row.request_seq
+        ||row.span_run_id!==row.run_id||row.span_pulse_id!==row.pulse_id||row.run_id!==runId||row.pulse_id!==PulseIdSchema.parse(row.job_id)){
+        throw new Error('PREPARATION_BUDGET_UNSETTLED');
+      }
+      const stored=readPreparationConfiguratorStored(row.job_id),job=stored.job;
+      if(job.scope.runId!==runId||job.scope.jobId!==row.job_id||job.scope.generation!==row.generation
+        ||!['blocked','interrupted','cancelled'].includes(job.state)||stored.lease?.ownerToken!==row.owner_token){
+        throw new Error('PREPARATION_BUDGET_UNSETTLED');
+      }
+      const start=BigInt(row.start_monotonic_ns),stop=BigInt(row.stop_monotonic_ns);
+      if(stop<start)throw new Error('PREPARATION_BUDGET_UNSETTLED');
+      const measuredMs=(stop-start+999_999n)/1_000_000n;
+      if(measuredMs>BigInt(Number.MAX_SAFE_INTEGER)||Number(measuredMs)!==row.measured_ms
+        ||hashJson({clockEpochId:row.clock_epoch_id,startMonotonicNs:row.start_monotonic_ns,stopMonotonicNs:row.stop_monotonic_ns}).hash!==row.settlement_hash){
+        throw new Error('PREPARATION_BUDGET_UNSETTLED');
+      }
+    }
+  }
+  function assertPreparationBudgetIdle(runId:z.infer<typeof RunIdSchema>) {
+    const active=database.prepare("SELECT 1 FROM request_reservations WHERE run_id=? AND state IN('reserved','dispatched') LIMIT 1").get(runId);
+    const counts=modelTimeCounts(runId);
+    const state=database.prepare('SELECT unknown_legacy_requests FROM model_time_run_state WHERE run_id=?').get(runId);
+    if(active!==undefined||counts.active_count>0||(state!==undefined&&z.strictObject({unknown_legacy_requests:counter}).parse(state).unknown_legacy_requests>0))throw new Error('PREPARATION_BUDGET_UNSETTLED');
+    assertSettledPreparationAmbiguities(runId);
+  }
+  function promotePreparationBudget(configuration:z.infer<typeof ReadyRunConfigurationSchema>) {
+    const authority=preparationBudgetAuthority(configuration.runId);
+    if(authority===undefined)return;
+    assertPreparationBudgetIdle(configuration.runId);
+    const next=PreparationBudgetAuthoritySchema.parse({...authority.value,budget:configuration.budget,profile:resolveReadyInferenceProfile(configuration)});
+    const sealed=hashJson(next);
+    database.prepare("UPDATE model_budget_authorities SET kind='ready',payload_json=?,payload_hash=? WHERE run_id=?").run(sealed.json,sealed.hash,configuration.runId);
+    database.prepare('UPDATE run_budgets SET max_calls=? WHERE run_id=?').run(configuration.budget.maxPiCallsPerRun ?? 0,configuration.runId);
+  }
   function reserveWithinTransaction(request: z.infer<typeof BudgetRequestSchema>): ReserveResult {
-    const existing = database.prepare('SELECT run_id,pulse_id FROM request_reservations WHERE job_id=? AND generation=? AND request_seq=?')
+    checkPreparationBudgetRequest(request);
+    const configuratorBinding=configuratorBindingForBudgetRequest({runId:request.runId,pulseId:request.pulseId,jobId:request.jobId,
+      generation:request.generation,...(request.ownerToken===undefined?{}:{ownerToken:request.ownerToken})});
+    if(configuratorBinding!==undefined)requireIcmPacketPresent(configuratorBinding);
+    const existing = database.prepare('SELECT run_id,pulse_id,state FROM request_reservations WHERE job_id=? AND generation=? AND request_seq=?')
       .get(request.jobId, request.generation, request.requestSeq);
     if (existing !== undefined) {
-      const stored = reservationRow.parse(existing);
+      const stored = reservationRow.extend({state:z.enum(['reserved','dispatched','completed','undispatched','ambiguous'])}).parse(existing);
       if (stored.run_id !== request.runId || stored.pulse_id !== request.pulseId) throw new Error('Reserva existente pertenece a otro ámbito');
+      if(preparationBudgetAuthority(request.runId)?.kind==='preparation'&&stored.state==='ambiguous')return ReserveResultSchema.parse({kind:'exhausted',scope:'uncertain'});
       return ReserveResultSchema.parse({ kind: 'existing' });
     }
     const run = budgetRow.parse(database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(request.runId));
@@ -3821,7 +4791,17 @@ export function openJournal(input: { path: string }) {
     if (pulse.run_id !== request.runId) throw new Error('Pulso ajeno a corrida');
     const readyBudgetRow = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
     const readyConfiguration = ReadyRunConfigurationSchema.safeParse(readyBudgetRow === undefined ? undefined : parseWorldRun(readyBudgetRow).configuration);
-    const readyBudget = readyConfiguration.success ? readyConfiguration.data.budget : undefined;
+    const authority=preparationBudgetAuthority(request.runId);
+    const readyBudget = readyConfiguration.success ? readyConfiguration.data.budget : authority?.kind==='preparation' ? authority.value.budget : undefined;
+    if(authority?.kind==='preparation'&&readyConfiguration.success)throw new Error('PREPARATION_BUDGET_NOT_PROMOTED');
+    if(authority?.kind==='preparation'&&(run.max_calls!==(authority.value.budget.maxPiCallsPerRun??0)||pulse.max_calls!==(authority.value.budget.maxPiCallsPerPulse??0)))throw new Error('PREPARATION_CONFIGURATOR_QUOTA_POLICY_MISMATCH');
+    if(authority?.kind==='preparation'){
+      const sameJobAmbiguous=database.prepare("SELECT 1 FROM request_reservations WHERE run_id=? AND job_id=? AND generation=? AND state='ambiguous' LIMIT 1")
+        .get(request.runId,request.jobId,request.generation);
+      if(sameJobAmbiguous!==undefined)return ReserveResultSchema.parse({kind:'exhausted',scope:'uncertain'});
+      try{assertSettledPreparationAmbiguities(request.runId);}
+      catch(error){if(error instanceof Error&&error.message==='PREPARATION_BUDGET_UNSETTLED')return ReserveResultSchema.parse({kind:'exhausted',scope:'uncertain'});throw error;}
+    }
     if (readyBudget?.maxPiCallsPerRun !== null && run.consumed >= run.max_calls) {
       pauseRunForModelTimeBudget(request.runId);
       return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'run' });
@@ -3843,9 +4823,10 @@ export function openJournal(input: { path: string }) {
     if (stateValue !== undefined) {
       const timeState = z.strictObject({ unknown_legacy_requests: counter }).parse(stateValue);
       const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
-      if (runValue === undefined) throw new Error('Budget wall-time sin WorldRun ready asociado');
-      const productionRun = parseWorldRun(runValue);
-      const configuration = ReadyRunConfigurationSchema.parse(productionRun.configuration);
+      const configuration = runValue===undefined
+        ? {budget:authority?.kind==='preparation'?authority.value.budget:undefined}
+        : ReadyRunConfigurationSchema.parse(parseWorldRun(runValue).configuration);
+      const policy=RunBudgetSchema.parse(configuration.budget);
       if (timeState.unknown_legacy_requests > 0) {
         pauseRunForModelTimeBudget(request.runId);
         return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'legacy-unknown' });
@@ -3858,15 +4839,15 @@ export function openJournal(input: { path: string }) {
         pauseRunForModelTimeBudget(request.runId);
         return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'uncertain' });
       }
-      if (counts.active_count >= configuration.budget.maxConcurrentPiRequests) {
+      if (counts.active_count >= policy.maxConcurrentPiRequests) {
         return ReserveResultSchema.parse({ kind: 'busy', scope: 'concurrency' });
       }
-      const remainingMs = configuration.budget.maxWallTimeMs === null ? effectiveRequestTimeoutMs(configuration.budget) : Math.max(0, configuration.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
+      const remainingMs = policy.maxWallTimeMs === null ? effectiveRequestTimeoutMs(policy) : Math.max(0, policy.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
       if (remainingMs < 1) {
         pauseRunForModelTimeBudget(request.runId);
         return ReserveResultSchema.parse({ kind: 'exhausted', scope: 'wall-time' });
       }
-      wallTime = { reservedMs: Math.min(effectiveRequestTimeoutMs(configuration.budget), remainingMs), clockEpochId: request.clockEpochId };
+      wallTime = { reservedMs: Math.min(effectiveRequestTimeoutMs(policy), remainingMs), clockEpochId: request.clockEpochId };
     } else if (request.clockEpochId !== undefined || request.ownerToken !== undefined) {
       throw new Error('No existe accounting wall-time para esta corrida production');
     }
@@ -3956,7 +4937,8 @@ export function openJournal(input: { path: string }) {
 
         const { record, row } = proposalRecord(review.runId, review.proposalId, review.version);
         if (row.status !== 'pending' || review.actorId !== record.actorId || review.stateRevision !== record.baseRevision
-          || review.exactContentHash !== record.exactContentHash) throw new Error('Review no coincide con versión exacta de propuesta');
+          || review.exactContentHash !== record.exactContentHash || review.nextInitiative !== record.nextInitiative)
+          throw new Error('Review no coincide con versión exacta de propuesta');
         const latest = database.prepare(`
           SELECT review_seq,reviewer_kind,verdict,complete,state_revision,exact_content_hash,payload_json,payload_hash
           FROM world_reviews
@@ -4623,6 +5605,8 @@ export function openJournal(input: { path: string }) {
       if (new Set(fence.contexts.map((context) => context.actorId)).size !== fence.contexts.length) {
         throw new Error('Actor duplicado en continuity fence');
       }
+      const preparationReady=ReadyRunConfigurationSchema.safeParse(registration.configuration);
+      if(preparationReady.success)promotePreparationBudget(preparationReady.data);
       const { json: configurationJson, hash: configurationHash } = hashJson(registration.configuration);
       const fenceJson = hashJson(fence).json;
       const { json: snapshotJson, hash: snapshotHash } = hashJson(snapshot);
@@ -4690,11 +5674,12 @@ export function openJournal(input: { path: string }) {
 
   function readRunModelTimeBudget(input: z.infer<typeof RunModelTimeBudgetReadSchema>) {
     const runValue = database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(input.runId);
-    if (runValue === undefined) return undefined;
-    const run = parseWorldRun(runValue);
-    const configuration = ReadyRunConfigurationSchema.safeParse(run.configuration);
-    if (!configuration.success || configuration.data.runId !== input.runId
-      || configuration.data.configRevision !== run.row.config_revision) return undefined;
+    const authority=preparationBudgetAuthority(input.runId);
+    const run=runValue===undefined?undefined:parseWorldRun(runValue);
+    const configuration=ReadyRunConfigurationSchema.safeParse(run?.configuration);
+    const policy=configuration.success&&run!==undefined&&configuration.data.runId===input.runId&&configuration.data.configRevision===run.row.config_revision
+      ?configuration.data.budget:authority?.kind==='preparation'?authority.value.budget:undefined;
+    if(policy===undefined)return undefined;
     const budgetRowValue = database.prepare('SELECT max_calls,consumed FROM run_budgets WHERE run_id=?').get(input.runId);
     const runCallsUsed = budgetRowValue === undefined ? 0 : budgetRow.parse(budgetRowValue).consumed;
     const reservedPiCalls = z.strictObject({ count: counter }).parse(database.prepare(`
@@ -4712,21 +5697,21 @@ export function openJournal(input: { path: string }) {
       : z.strictObject({ unknown_legacy_requests: counter }).parse(stateValue).unknown_legacy_requests;
     const base = {
       runId: input.runId,
-      maxPiCallsPerRun: configuration.data.budget.maxPiCallsPerRun,
+      maxPiCallsPerRun: policy.maxPiCallsPerRun,
       runCallsUsed,
       reservedPiCalls,
-      maxPiCallsPerPulse: configuration.data.budget.maxPiCallsPerPulse,
+      maxPiCallsPerPulse: policy.maxPiCallsPerPulse,
       pulseCallsUsed: maxPulseUsage,
-      maxConcurrentPiRequests: configuration.data.budget.maxConcurrentPiRequests,
+      maxConcurrentPiRequests: policy.maxConcurrentPiRequests,
       activePiRequests: counts.active_count,
-      maxWallTimeMs: configuration.data.budget.maxWallTimeMs,
+      maxWallTimeMs: policy.maxWallTimeMs,
       wallTimeReservedMs: counts.reserved_ms,
-      requestTimeoutMs: effectiveRequestTimeoutMs(configuration.data.budget),
+      requestTimeoutMs: effectiveRequestTimeoutMs(policy),
       uncertainRequests: counts.uncertain_count,
       unknownLegacyRequests,
     };
     if (unknownLegacyRequests > 0) return RunModelTimeBudgetSchema.parse({ ...base, status: 'legacy-unknown', wallTimeMeasuredMs: null, wallTimeRemainingMs: null });
-    const wallTimeRemainingMs = configuration.data.budget.maxWallTimeMs === null ? null : Math.max(0, configuration.data.budget.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
+    const wallTimeRemainingMs = policy.maxWallTimeMs === null ? null : Math.max(0, policy.maxWallTimeMs - counts.measured_ms - counts.reserved_ms);
     if (counts.uncertain_count > 0) return RunModelTimeBudgetSchema.parse({ ...base, status: 'uncertain', wallTimeMeasuredMs: counts.measured_ms, wallTimeRemainingMs });
     return RunModelTimeBudgetSchema.parse({ ...base, status: 'known', wallTimeMeasuredMs: counts.measured_ms, wallTimeRemainingMs });
   }
@@ -4965,7 +5950,10 @@ export function openJournal(input: { path: string }) {
     const cut=DramaticCutSchema.parse({worldRevision:run.row.world_revision+1,worldSeq:run.row.last_seq,
       structureRevision:run.row.structure_revision+1,commitIndex:run.row.commit_index+1});
     writeStructuralCommit({run,operationId,principalId,eventKind:'episodeOpened',recordedAt,
-      payload:{episodeId,ordinal:1,title:null,associatedInitialSceneId:scene.id,origin:'runStart'}});
+      payload:{episodeId,ordinal:1,title:null,associatedInitialSceneId:scene.id,origin:'runStart'},
+      snapshotChanges:{humanParticipants:ReadyRunConfigurationSchema.parse(run.configuration).humanParticipants.map(profile=>({
+        participantId:profile.identity.participantId,label:profile.identity.displayName,presence:profile.presence,
+      }))}});
     const cutPayload=hashJson(cut);const emptyArray='[]';
     database.prepare(`INSERT INTO episodes(run_id,episode_id,ordinal,title,lifecycle,opening_cut_json,opening_cut_hash,
       closing_cut_json,closing_cut_hash,consequence_event_ids_json,open_lines_json) VALUES(?,?,1,NULL,'open',?,?,NULL,NULL,?,?)`)
@@ -5032,7 +6020,7 @@ export function openJournal(input: { path: string }) {
     return admitted;
   }
 
-  function activationInvitationIneligibility(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;invitationId:string}):string|undefined {
+  function activationInvitationIneligibility(input:{run:ReturnType<typeof parseWorldRun>;configuration:z.infer<typeof ReadyRunConfigurationSchema>;invitationId:string;allowBlocked?:boolean}):string|undefined {
     const value=database.prepare(`SELECT i.activation_id,i.actor_id,i.identity_version,i.trigger_kind,i.boundary_at,i.state,c.state AS cause_state,
         c.configuration_hash,c.trigger_kind AS cause_trigger_kind,c.boundary_at AS cause_boundary_at
       FROM actor_activation_invitations i JOIN actor_activation_causes c ON c.run_id=i.run_id AND c.activation_id=i.activation_id
@@ -5042,8 +6030,8 @@ export function openJournal(input: { path: string }) {
       trigger_kind:z.enum(['initial-goal','routine-boundary']),boundary_at:z.number().int().nullable(),
       state:z.enum(['pending','assigned','consumed','blocked']),cause_state:z.enum(['pending','running','completed','blocked']),
       configuration_hash:HashSchema,cause_trigger_kind:z.enum(['initial-goal','routine-boundary']),cause_boundary_at:z.number().int().nullable()}).parse(value);
-    if(row.state!=='pending'&&row.state!=='assigned')return 'invitation_not_pending';
-    if(row.cause_state!=='pending'&&row.cause_state!=='running')return 'activation_not_pending';
+    if(row.state!=='pending'&&row.state!=='assigned'&&!(input.allowBlocked===true&&row.state==='blocked'))return 'invitation_not_pending';
+    if(row.cause_state!=='pending'&&row.cause_state!=='running'&&!(input.allowBlocked===true&&row.cause_state==='blocked'))return 'activation_not_pending';
     if(row.configuration_hash!==input.run.row.configuration_hash)return 'configuration_changed';
     const actor=input.run.snapshot.entities.find((entity)=>entity.kind==='character'&&entity.characterId===row.actor_id);
     const scene=input.run.snapshot.scenes.find((item)=>item.id===input.run.snapshot.activeSceneId);
@@ -5114,7 +6102,19 @@ export function openJournal(input: { path: string }) {
         return record(DramaticStructureMutationResultSchema.parse({kind:'conflict',worldRevision:run.row.world_revision,structureRevision:run.row.structure_revision}));
       }
       if(!['running','paused','stopped'].includes(run.row.lifecycle)&&!(run.row.lifecycle==='ready'&&readForkDramaticSeed(run)!==undefined))return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'runNotActive'}));
-      if(database.prepare("SELECT 1 FROM actor_turn_jobs WHERE run_id=? AND state IN('queued','running','blocked') LIMIT 1").get(request.runId)!==undefined){
+      // A job from an older lifecycle epoch has lost authority to cut this
+      // world. Keep its row and any uncertain request reservations intact;
+      // the epoch fence still rejects its commits, while resume/retry keeps
+      // applying the stricter uncertainty guards. Unversioned legacy rows
+      // remain conservative because their authority cannot be established.
+      if(database.prepare(`SELECT 1 FROM actor_turn_jobs current
+        JOIN world_runs current_run ON current_run.run_id=current.run_id
+        WHERE current.run_id=? AND current.state IN('queued','running','blocked')
+          AND (current.lifecycle_revision IS NULL OR current.lifecycle_revision>=current_run.lifecycle_revision)
+          AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs newer
+            WHERE newer.run_id=current.run_id AND newer.actor_id=current.actor_id
+              AND newer.job_id=current.job_id AND newer.generation>current.generation)
+        LIMIT 1`).get(request.runId)!==undefined){
         return record(DramaticStructureMutationResultSchema.parse({kind:'invalidState',code:'actorJobsActive'}));
       }
       const structure=readDramaticStructureForRun(run);
@@ -5245,7 +6245,504 @@ export function openJournal(input: { path: string }) {
     });
   }
 
+  type IcmAuthority = {
+    binding: IcmContextJobBinding;
+    storage: { runId: string; role: string; actorId: string; jobId: string; generation: number };
+    result: z.infer<typeof IcmContextBindingReadResultSchema>;
+  };
+
+  function icmRun(runId: string) {
+    const value=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(runId);
+    if(value===undefined)throw new Error('ICM_CONTEXT_RUN_MISSING');
+    return parseWorldRun(value);
+  }
+
+  function icmWorldAuthority(input:{run:ReturnType<typeof parseWorldRun>;commitIndex:number;configurationRevision:number;
+    jobId:string;generation:number;audience:z.infer<typeof IcmContextPacketScopeSchema>['audience'];preparedContextHash?:string}) {
+    const exact=snapshotAtExactConfigurationCommit(input.run,input.commitIndex);
+    const effective=configurationAtCommit(input.run,input.commitIndex);
+    if(effective.configurationRevision!==input.configurationRevision)throw new Error('ICM_CONTEXT_CONFIGURATION_CUT_MISMATCH');
+    const ready=ReadyRunConfigurationSchema.parse(effective.configuration);
+    if(ready.runId!==input.run.row.run_id||ready.configRevision!==effective.configurationRevision)
+      throw new Error('ICM_CONTEXT_CONFIGURATION_INVALID');
+    // configurationAtCommit already validates the frozen configuration against
+    // its activation snapshot. Rebind its operational world fields to the exact
+    // job cut here; never compare the activation snapshot to a later world cut.
+    const atCut=readyConfigurationAtSnapshot(ready,exact.snapshot);
+    if(ready.icmWorkspace===undefined)return IcmContextBindingReadResultSchema.parse({kind:'legacy-without-icm'});
+    const workspace=IcmWorkspaceSnapshotSchema.parse(verifyIcmWorkspaceSnapshot(atCut.icmWorkspace));
+    const scope=IcmContextPacketScopeSchema.parse({runId:input.run.row.run_id,configurationRevision:effective.configurationRevision,
+      jobId:input.jobId,generation:input.generation,audience:input.audience,cut:{kind:'world-cut',commitIndex:input.commitIndex,
+        worldRevision:exact.snapshot.revision,worldSeq:exact.snapshot.seq}});
+    return IcmContextBindingReadResultSchema.parse({kind:'required',scope,workspace,
+      ...(input.preparedContextHash===undefined?{}:{preparedContextHash:HashSchema.parse(input.preparedContextHash)})});
+  }
+
+  function resolveIcmAuthority(rawBinding:unknown,options:{ignoreActorUnresolvedRequests?:boolean;allowedActorRequest?:{jobId:string;generation:number;requestSeq:number}}={}) :IcmAuthority {
+    const binding=IcmContextJobBindingSchema.parse(rawBinding);
+    switch(binding.kind){
+      case 'actor': {
+        const execution=ActorJobExecutionSchema.parse(binding.execution);
+        const job=claimedActorJob(execution);if(job===undefined)throw new Error('ICM_CONTEXT_ACTOR_CLAIM_INACTIVE');
+        const run=icmRun(execution.runId);
+        if(run.row.lifecycle!=='running'||!actorJobEpochCurrent(job,run))throw new Error('ICM_CONTEXT_ACTOR_EPOCH_INACTIVE');
+        assertJobIdentityBinding(job,run);
+        const cut=frozenActorTurnWorldCut(job);
+        // Legacy jobs remain readable with their exact active lease even when
+        // they predate coordinator_pulses or an ICM-specific frozen cut.
+        // Determine whether the effective configuration opted into ICM first;
+        // only ICM jobs get the stronger pulse/cut admission below.
+        let icmConfigured:boolean|undefined;
+        if(cut!==null){
+          const priorCut=snapshotAndCommitAtCut(run,cut.worldRevision,cut.worldSeq);
+          if(priorCut!==undefined){
+            const priorConfiguration=ReadyRunConfigurationSchema.safeParse(configurationAtCommit(run,priorCut.commitIndex).configuration);
+            if(priorConfiguration.success)icmConfigured=priorConfiguration.data.icmWorkspace!==undefined;
+          }
+        }
+        if(icmConfigured===undefined){
+          const currentConfiguration=ReadyRunConfigurationSchema.safeParse(run.configuration);
+          if(currentConfiguration.success)icmConfigured=currentConfiguration.data.icmWorkspace!==undefined;
+          else {
+            // Older journal rows can predate Ready's full schema. Preserve those
+            // leases as legacy, but never treat an explicitly present malformed
+            // ICM workspace as opting out of packet enforcement.
+            const raw=run.configuration;
+            if(typeof raw==='object'&&raw!==null&&Object.prototype.hasOwnProperty.call(raw,'icmWorkspace'))
+              throw new Error('ICM_CONTEXT_CONFIGURATION_INVALID');
+            icmConfigured=false;
+          }
+        }
+        if(!icmConfigured){
+          return {binding,storage:{runId:execution.runId,role:'actor',actorId:execution.actorId,jobId:execution.jobId,generation:execution.generation},
+            result:IcmContextBindingReadResultSchema.parse({kind:'legacy-without-icm'})};
+        }
+        const pulse=database.prepare('SELECT state,lifecycle_revision FROM coordinator_pulses WHERE run_id=? AND pulse_id=?')
+          .get(execution.runId,job.pulse_id);
+        if(pulse===undefined)throw new Error('ICM_CONTEXT_ACTOR_PULSE_INACTIVE');
+        const pulseRow=z.strictObject({state:z.enum(['running','completed','blocked']),lifecycle_revision:counter.nullable()}).parse(pulse);
+        if(pulseRow.state!=='running'||pulseRow.lifecycle_revision!==run.row.lifecycle_revision)
+          throw new Error('ICM_CONTEXT_ACTOR_PULSE_INACTIVE');
+        if(cut===null)throw new Error('ICM_CONTEXT_ACTOR_CUT_MISSING');
+        const exact=snapshotAndCommitAtCut(run,cut.worldRevision,cut.worldSeq);
+        if(exact===undefined||cut.fictionalAt!==exact.snapshot.clock.instant||cut.worldRevision!==run.snapshot.revision
+          ||cut.worldSeq!==run.snapshot.seq||exact.snapshot.revision!==run.row.world_revision||exact.snapshot.seq!==run.row.last_seq)
+          throw new Error('ICM_CONTEXT_ACTOR_CUT_STALE');
+        const effective=configurationAtCommit(run,exact.commitIndex);
+        if(effective.configurationRevision!==run.row.config_revision||effective.configurationHash!==run.row.configuration_hash)
+          throw new Error('ICM_CONTEXT_ACTOR_CONFIGURATION_STALE');
+        const ready=ReadyRunConfigurationSchema.parse(effective.configuration);
+        const prepared=ready.roster.preparedCharacters.find(actor=>actor.characterId===execution.actorId);
+        const fence=effective.fence.contexts.find(context=>context.actorId===execution.actorId);
+        const scene=exact.snapshot.scenes.find(item=>item.id===exact.snapshot.activeSceneId);
+        const actor=exact.snapshot.entities.find(entity=>entity.kind==='character'&&entity.characterId===execution.actorId);
+        const preparedHash=prepared===undefined?undefined:hashJson(prepared).hash;
+        if(prepared===undefined||fence===undefined||fence.preparedContextHash!==preparedHash
+          ||actor?.kind!=='character'||actor.preparation.kind!=='prepared'||actor.preparation.identityVersion!==prepared.identityVersion
+          ||scene===undefined||scene.lifecycle.kind!=='open'||!scene.participantIds.includes(execution.actorId)
+          ||actor.presence.kind!=='present'||actor.presence.sceneId!==scene.id||!characterCanReceiveAt({snapshot:exact.snapshot,characterId:execution.actorId}))
+          throw new Error('ICM_CONTEXT_ACTOR_PREPARATION_INVALID');
+        const session=currentActorSession(run,execution.actorId);
+        if(session!==undefined&&(session.preparedContextHash!==preparedHash
+          ||canonicalJson(resolveStoredPiProfile(session.profile))!==canonicalJson(resolveReadyInferenceProfile(ready))))
+          throw new Error('ICM_CONTEXT_ACTOR_SESSION_STALE');
+        if(!options.ignoreActorUnresolvedRequests){
+          const allowed=options.allowedActorRequest;
+          if(allowed!==undefined){
+            if(allowed.jobId!==execution.jobId||allowed.generation!==execution.generation
+              ||actorJobReservation(execution,allowed.requestSeq).state!=='reserved')throw new Error('ICM_CONTEXT_ACTOR_REQUEST_UNRESOLVED');
+          }
+          const unresolved=database.prepare(`SELECT 1 FROM request_reservations WHERE run_id=? AND job_id=? AND generation=?
+            AND state IN('reserved','dispatched','ambiguous') AND (? IS NULL OR request_seq<>?) LIMIT 1`)
+            .get(execution.runId,execution.jobId,execution.generation,allowed?.requestSeq??null,allowed?.requestSeq??null);
+          if(unresolved!==undefined)throw new Error('ICM_CONTEXT_ACTOR_REQUEST_UNRESOLVED');
+        }
+        const result=icmWorldAuthority({run,commitIndex:exact.commitIndex,configurationRevision:effective.configurationRevision,jobId:execution.jobId,
+          generation:execution.generation,audience:{role:'actor',actorId:execution.actorId},preparedContextHash:preparedHash});
+        return {binding,storage:{runId:execution.runId,role:'actor',actorId:execution.actorId,jobId:execution.jobId,generation:execution.generation},result};
+      }
+      case 'continuista': {
+        const execution=ContinuistaJobExecutionSchema.parse(binding.execution);
+        const job=claimedContinuistaJob(execution);
+        if(continuistaEligibility(execution).kind!=='active')throw new Error('ICM_CONTEXT_CONTINUISTA_INACTIVE');
+        const parent=resolveIcmAuthority({kind:'actor',execution:execution.actorExecution});
+        if(parent.result.kind!=='required')return {binding,storage:{runId:execution.actorExecution.runId,role:'continuista',actorId:'',jobId:execution.jobId,generation:execution.generation},result:parent.result};
+        const scope=IcmContextPacketScopeSchema.parse({...parent.result.scope,jobId:execution.jobId,generation:execution.generation,audience:{role:'continuista'}});
+        const result=IcmContextBindingReadResultSchema.parse({kind:'required',scope,workspace:parent.result.workspace});
+        if(scope.cut.kind!=='world-cut'||job.context.payload.scope.runId!==scope.runId||job.context.payload.scope.actorId!==execution.actorExecution.actorId
+          ||job.context.payload.scope.jobId!==execution.actorExecution.jobId||job.context.payload.scope.generation!==execution.actorExecution.generation)
+          throw new Error('ICM_CONTEXT_CONTINUISTA_BINDING_STALE');
+        return {binding,storage:{runId:scope.runId,role:'continuista',actorId:'',jobId:execution.jobId,generation:execution.generation},result};
+      }
+      case 'administrative': {
+        const execution=AdministrativeJobExecutionSchema.parse(binding.execution);
+        const job=claimedAdministrativeJob(execution);
+        if(job.row.role==='configurator')throw new Error('ICM_CONTEXT_CONFIGURATOR_REQUIRES_DURABLE_EVOLUTION_JOB');
+        if(administrativeEligibility(execution).kind!=='active')throw new Error('ICM_CONTEXT_ADMINISTRATIVE_INACTIVE');
+        const run=icmRun(job.row.run_id);
+        const exact=snapshotAndCommitAtCut(run,job.row.world_revision,job.row.through_world_seq);
+        if(exact===undefined||run.row.lifecycle_revision!==job.row.lifecycle_revision||run.row.config_revision!==job.context.scope.configurationRevision
+          ||run.row.world_revision!==job.row.world_revision||run.row.last_seq!==job.row.through_world_seq)
+          throw new Error('ICM_CONTEXT_ADMINISTRATIVE_CUT_STALE');
+        const role=job.context.role;
+        if(role!=='director'&&role!=='narrator'&&role!=='narration-reviewer')throw new Error('ICM_CONTEXT_ADMINISTRATIVE_ROLE_UNSUPPORTED');
+        const result=icmWorldAuthority({run,commitIndex:exact.commitIndex,configurationRevision:job.context.scope.configurationRevision,
+          jobId:job.row.job_id,generation:job.row.generation,audience:{role}});
+        return {binding,storage:{runId:job.row.run_id,role,actorId:'',jobId:job.row.job_id,generation:job.row.generation},result};
+      }
+      case 'configurator': {
+        const execution=ConfiguratorJobExecutionSchema.parse(binding.execution);
+        const generationRaw=database.prepare('SELECT job_id,generation,payload_json,payload_hash FROM configurator_generations WHERE job_id=? AND generation=?')
+          .get(execution.scope.jobId,execution.scope.generation);
+        if(generationRaw===undefined)throw new Error('ICM_CONTEXT_CONFIGURATOR_JOB_MISSING');
+        const generationRow=z.strictObject({job_id:JobIdSchema,generation:counter,payload_json:z.string(),payload_hash:HashSchema}).parse(generationRaw);
+        const generationPayload=parseStoredJson(generationRow.payload_json);
+        const generation=ConfiguratorJobStoredSchema.parse(generationPayload);
+        if(canonicalJson(generation)!==generationRow.payload_json||configuratorValueHash({metadata:{job_id:generationRow.job_id,generation:generationRow.generation},payload:generation})!==generationRow.payload_hash)
+          throw new Error('ICM_CONTEXT_CONFIGURATOR_GENERATION_CORRUPT');
+        const jobRaw=database.prepare('SELECT job_id,principal_id,run_id,actor_id,payload_json,payload_hash FROM configurator_jobs WHERE job_id=?')
+          .get(execution.scope.jobId);
+        if(jobRaw===undefined)throw new Error('ICM_CONTEXT_CONFIGURATOR_JOB_MISSING');
+        const jobRow=z.strictObject({job_id:JobIdSchema,principal_id:z.string().min(1),run_id:RunIdSchema,actor_id:CharacterIdSchema,payload_json:z.string(),payload_hash:HashSchema}).parse(jobRaw);
+        const jobPayload=parseStoredJson(jobRow.payload_json);
+        const current=ConfiguratorJobStoredSchema.parse(jobPayload);
+        if(current.context.scope.kind!=='evolution')throw new Error('ICM_CONTEXT_CONFIGURATOR_PREPARATION_JOB_UNSUPPORTED');
+        if(canonicalJson(current)!==jobRow.payload_json||configuratorValueHash({metadata:{job_id:jobRow.job_id,principal_id:jobRow.principal_id,run_id:jobRow.run_id,actor_id:jobRow.actor_id},payload:current})!==jobRow.payload_hash
+          ||canonicalJson(current)!==canonicalJson(generation)||current.job.jobId!==execution.scope.jobId||current.job.generation!==execution.scope.generation
+          ||current.job.state!=='running'||current.lease===null||canonicalJson(current.lease)!==canonicalJson(execution.lease)
+          ||canonicalJson(ConfiguratorJobExecutionSchema.parse({role:'configurator',scope:current.context.scope.scope,
+            contextHash:current.job.contextHash,lease:current.lease}))!==canonicalJson(execution))
+          throw new Error('ICM_CONTEXT_CONFIGURATOR_CLAIM_INACTIVE');
+        const context=validateConfiguratorContext(current.context);
+        if(context.scope.kind!=='evolution')throw new Error('ICM_CONTEXT_CONFIGURATOR_PREPARATION_JOB_UNSUPPORTED');
+        const evolution=context.scope;const preparedCharacter=context.preparedCharacter;
+        if(preparedCharacter===undefined||configuratorValueHash(context)!==current.job.contextHash||current.job.contextHash!==execution.contextHash
+          ||evolution.anchor.preparedContextHash!==configuratorValueHash(preparedCharacter))throw new Error('ICM_CONTEXT_CONFIGURATOR_CONTEXT_INVALID');
+        const run=icmRun(current.job.runId);const source=evolution.anchor.source;const cut=evolution.actorStateCut;
+        if(!['ready','paused','stopped'].includes(run.row.lifecycle)||run.row.lifecycle_revision!==current.lifecycleRevision
+          ||jobRow.run_id!==current.job.runId||jobRow.actor_id!==current.job.actorId||current.job.actorId!==cut.actorId
+          ||configuratorValueHash(current.job.source)!==configuratorValueHash(source)
+          ||run.row.commit_index!==source.commitIndex||run.row.world_revision!==source.worldRevision||run.row.last_seq!==source.worldSeq
+          ||run.row.config_revision!==source.configurationRevision)
+          throw new Error('ICM_CONTEXT_CONFIGURATOR_SOURCE_STALE');
+        const exact=exactActorCutSource(run,source.commitIndex);
+        if(configuratorValueHash(exact.source)!==configuratorValueHash(source)||configuratorValueHash(cut.source)!==configuratorValueHash(source))
+          throw new Error('ICM_CONTEXT_CONFIGURATOR_CUT_MISMATCH');
+        const durableCut=readActorStateCut({runId:source.runId,actorId:cut.actorId,worldRevision:source.worldRevision,worldSeq:source.worldSeq,commitIndex:source.commitIndex});
+        if(durableCut.kind!=='found'||canonicalJson(durableCut.cut)!==canonicalJson(cut))throw new Error('ICM_CONTEXT_CONFIGURATOR_ACTOR_CUT_INVALID');
+        const ready=ReadyRunConfigurationSchema.parse(exact.effective.configuration);
+        if(canonicalJson(resolveReadyInferenceProfile(ready))!==canonicalJson(evolution.scope.profile))
+          throw new Error('ICM_CONTEXT_CONFIGURATOR_PROFILE_STALE');
+        const result=icmWorldAuthority({run,commitIndex:source.commitIndex,configurationRevision:source.configurationRevision,jobId:current.job.jobId,
+          generation:current.job.generation,audience:{role:'configurator'}});
+        return {binding,storage:{runId:current.job.runId,role:'configurator',actorId:'',jobId:current.job.jobId,generation:current.job.generation},result};
+      }
+    }
+  }
+
+  function readStoredIcmPacket(authority:IcmAuthority):z.infer<typeof IcmContextPacketReadResultSchema>|undefined {
+    if(authority.result.kind==='legacy-without-icm'){
+      const row=database.prepare(`SELECT 1 FROM icm_context_packets WHERE run_id=? AND role=? AND actor_id=? AND job_id=? AND generation=?`)
+        .get(authority.storage.runId,authority.storage.role,authority.storage.actorId,authority.storage.jobId,authority.storage.generation);
+      if(row!==undefined)throw new Error('ICM_CONTEXT_PACKET_UNEXPECTED_FOR_LEGACY_CONFIGURATION');
+      return undefined;
+    }
+    const raw=database.prepare(`SELECT * FROM icm_context_packets WHERE run_id=? AND role=? AND actor_id=? AND job_id=? AND generation=?`)
+      .get(authority.storage.runId,authority.storage.role,authority.storage.actorId,authority.storage.jobId,authority.storage.generation);
+    if(raw===undefined)return undefined;
+    const row=z.strictObject({run_id:RunIdSchema,role:z.string(),actor_id:z.string(),job_id:JobIdSchema,generation:counter,
+      scope_json:z.string(),scope_hash:HashSchema,packet_json:z.string(),packet_hash:HashSchema,receipt_json:z.string(),receipt_hash:HashSchema,created_at:counter}).parse(raw);
+    const scope=IcmContextPacketScopeSchema.parse(parseStoredJson(row.scope_json));
+    const packet=IcmContextPacketSchema.parse(parseStoredJson(row.packet_json));
+    const receipt=IcmContextPacketReceiptSchema.parse(parseStoredJson(row.receipt_json));
+    if(canonicalJson(scope)!==row.scope_json||sha256(row.scope_json)!==row.scope_hash
+      ||canonicalJson(packet)!==row.packet_json||sha256(row.packet_json)!==row.packet_hash
+      ||canonicalJson(receipt)!==row.receipt_json||sha256(row.receipt_json)!==row.receipt_hash
+      ||row.run_id!==authority.storage.runId||row.role!==authority.storage.role||row.actor_id!==authority.storage.actorId
+      ||row.job_id!==authority.storage.jobId||row.generation!==authority.storage.generation
+      ||canonicalJson(scope)!==canonicalJson(authority.result.scope)||canonicalJson(packet.scope)!==canonicalJson(scope)
+      ||receipt.packetHash!==packet.packetHash||receipt.workspaceSnapshotHash!==authority.result.workspace.snapshotHash
+      ||canonicalJson(receipt.scope)!==canonicalJson(scope)
+      ||receipt.preparedContextHash!==authority.result.preparedContextHash
+      ||packet.workspaceSnapshotHash!==authority.result.workspace.snapshotHash)
+      throw new Error('ICM_CONTEXT_PACKET_BINDING_CORRUPT');
+    verifyIcmContextPacketAgainstSnapshot(packet,authority.result.workspace);
+    return IcmContextPacketReadResultSchema.parse({packet,packetHash:receipt.packetHash,scope,
+      ...(receipt.preparedContextHash===undefined?{}:{preparedContextHash:receipt.preparedContextHash})});
+  }
+
+  /** The composite packet key is the durable job-generation binding. Start
+   * evidence is job-scoped; actor Pi sessions are intentionally excluded because
+   * they can predate a particular turn and remain shared by that actor. */
+  function icmJobHasStartedEvidence(storage:IcmAuthority['storage']):boolean {
+    const requests=`SELECT 1 FROM request_reservations WHERE run_id=? AND job_id=? AND generation=?`;
+    const job=`job_id=? AND generation=?`;
+    const actorEvidence=`${requests}
+      UNION ALL SELECT 1 FROM actor_job_checkpoints WHERE ${job}
+      UNION ALL SELECT 1 FROM actor_pi_candidates WHERE ${job} LIMIT 1`;
+    const continuistaEvidence=`${requests}
+      UNION ALL SELECT 1 FROM continuista_sessions WHERE ${job}
+      UNION ALL SELECT 1 FROM continuista_checkpoints WHERE ${job} LIMIT 1`;
+    const administrativeEvidence=`${requests}
+      UNION ALL SELECT 1 FROM administrative_sessions WHERE ${job}
+      UNION ALL SELECT 1 FROM administrative_checkpoints WHERE ${job} LIMIT 1`;
+    const configuratorEvidence=`${requests}
+      UNION ALL SELECT 1 FROM configurator_sessions WHERE ${job}
+      UNION ALL SELECT 1 FROM configurator_checkpoints WHERE ${job}
+      UNION ALL SELECT 1 FROM configurator_candidates WHERE ${job} LIMIT 1`;
+    const sql=storage.role==='actor'?actorEvidence:storage.role==='continuista'?continuistaEvidence:
+      storage.role==='configurator'?configuratorEvidence:administrativeEvidence;
+    const evidenceTableCount=storage.role==='actor'||storage.role==='continuista'||storage.role==='narrator'
+      ||storage.role==='narration-reviewer'||storage.role==='director'?2:storage.role==='configurator'?3:2;
+    const bindings=[storage.runId,storage.jobId,storage.generation,
+      ...Array.from({length:evidenceTableCount},()=>[storage.jobId,storage.generation]).flat()];
+    return database.prepare(sql).get(...bindings)!==undefined;
+  }
+
+  function requireIcmPacketPresent(rawBinding:unknown,options:{allowedActorRequest?:{jobId:string;generation:number;requestSeq:number}}={}):void {
+    const authority=resolveIcmAuthority(rawBinding,options);
+    if(authority.result.kind==='legacy-without-icm')return;
+    if(readStoredIcmPacket(authority)===undefined)throw new Error(icmJobHasStartedEvidence(authority.storage)
+      ?'ICM_CONTEXT_PACKET_MISSING_FOR_STARTED_JOB':'ICM_CONTEXT_PACKET_REQUIRED_BEFORE_START');
+  }
+
+  function configuratorBindingForBudgetRequest(input:{runId:string;pulseId?:string;jobId:string;generation:number;ownerToken?:string}) {
+    const raw=database.prepare('SELECT payload_json,payload_hash FROM configurator_generations WHERE job_id=? AND generation=?')
+      .get(input.jobId,input.generation);
+    if(raw===undefined)return undefined;
+    const row=z.strictObject({payload_json:z.string(),payload_hash:HashSchema}).parse(raw);
+    const stored=ConfiguratorJobStoredSchema.parse(parseStoredJson(row.payload_json));
+    if(canonicalJson(stored)!==row.payload_json
+      ||configuratorValueHash({metadata:{job_id:input.jobId,generation:input.generation},payload:stored})!==row.payload_hash)
+      throw new Error('ICM_CONTEXT_CONFIGURATOR_GENERATION_CORRUPT');
+    if(stored.lease===null||stored.job.state!=='running'||input.ownerToken!==stored.lease.ownerToken
+      ||stored.job.jobId!==input.jobId||stored.job.generation!==input.generation||stored.job.runId!==input.runId
+      ||stored.context.scope.kind!=='evolution')
+      throw new Error('ICM_CONTEXT_CONFIGURATOR_CLAIM_INACTIVE');
+    const execution=ConfiguratorJobExecutionSchema.parse({role:'configurator',scope:stored.context.scope.scope,
+      contextHash:stored.job.contextHash,lease:stored.lease});
+    return {kind:'configurator' as const,execution};
+  }
+
+  function ensureIcmPacketWithinTransaction(input:{binding:unknown;hostPolicyMarkdown:string;diegeticContextMarkdown:string}) {
+    // This private relaxation is only for inspecting an already-started job. If
+    // its packet is missing, the durable start evidence below makes recovery
+    // fail closed; it can never authorize compiling replacement instructions.
+    const authority=resolveIcmAuthority(input.binding,{ignoreActorUnresolvedRequests:true});
+    if(authority.result.kind!=='required')throw new Error('ICM_CONTEXT_NOT_CONFIGURED');
+    const existing=readStoredIcmPacket(authority);if(existing!==undefined)return existing;
+    if(icmJobHasStartedEvidence(authority.storage))throw new Error('ICM_CONTEXT_PACKET_MISSING_FOR_STARTED_JOB');
+    const packet=compileIcmContextPacket({workspace:authority.result.workspace,scope:authority.result.scope,
+      hostPolicyMarkdown:input.hostPolicyMarkdown,diegeticContextMarkdown:input.diegeticContextMarkdown,
+      ...(authority.result.preparedContextHash===undefined||authority.result.scope.audience.role!=='actor'?{}:{preparedContextHash:authority.result.preparedContextHash})});
+    const validated=verifyIcmContextPacketAgainstSnapshot(packet,authority.result.workspace);
+    const receipt=IcmContextPacketReceiptSchema.parse({kind:'icm-context-packet-receipt',scope:authority.result.scope,
+      workspaceSnapshotHash:authority.result.workspace.snapshotHash,packetHash:validated.packetHash,
+      ...(authority.result.scope.audience.role==='actor'&&authority.result.preparedContextHash!==undefined
+        ?{preparedContextHash:authority.result.preparedContextHash}: {})});
+    const scopePayload=hashJson(authority.result.scope),packetPayload=hashJson(validated),receiptPayload=hashJson(receipt);
+    const exists=database.prepare(`SELECT 1 FROM icm_context_packets WHERE run_id=? AND role=? AND actor_id=? AND job_id=? AND generation=?`)
+      .get(authority.storage.runId,authority.storage.role,authority.storage.actorId,authority.storage.jobId,authority.storage.generation);
+    if(exists!==undefined)throw new Error('ICM_CONTEXT_PACKET_INSERT_RACE');
+    database.prepare(`INSERT INTO icm_context_packets(run_id,role,actor_id,job_id,generation,scope_json,scope_hash,packet_json,packet_hash,receipt_json,receipt_hash,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(authority.storage.runId,authority.storage.role,authority.storage.actorId,authority.storage.jobId,
+        authority.storage.generation,scopePayload.json,scopePayload.hash,packetPayload.json,packetPayload.hash,receiptPayload.json,receiptPayload.hash,Date.now());
+    const stored=readStoredIcmPacket(authority);if(stored===undefined)throw new Error('ICM_CONTEXT_PACKET_WRITE_MISSING');return stored;
+  }
+
   return {
+    readIcmContextPacketInspection(input:unknown) {
+      database.exec('BEGIN');
+      try { const result=inspectIcmContextPackets({database,request:input,readSource:readForkSourceWithinTransaction});database.exec('COMMIT');return result; }
+      catch(error) { try{database.exec('ROLLBACK');}catch{/* Read transaction only. */}throw error; }
+    },
+    readIcmContextBinding(input:unknown) {
+      return resolveIcmAuthority(input).result;
+    },
+    readIcmContextPacket(input:unknown) {
+      const authority=resolveIcmAuthority(input);
+      return readStoredIcmPacket(authority);
+    },
+    ensureIcmContextPacket(input:unknown) {
+      const request=z.strictObject({binding:IcmContextJobBindingSchema,hostPolicyMarkdown:z.string().min(1).max(200_000),
+        diegeticContextMarkdown:z.string().max(1_000_000)}).parse(input);
+      return transact(()=>ensureIcmPacketWithinTransaction(request));
+    },
+    setPreparationConfiguratorSourceResolver(resolver:NonNullable<typeof preparationConfiguratorSources>) {
+      if(preparationConfiguratorSources!==undefined)throw new Error('PREPARATION_CONFIGURATOR_RESOLVER_ALREADY_CONFIGURED');
+      preparationConfiguratorSources=resolver;
+    },
+    createPreparationConfiguratorJob(input:unknown) {
+      const request=PreparationConfiguratorCreateSchema.parse(input);
+      return transact(()=>{
+        const prior=readPreparationOperation(request.principalId,request.idempotencyKey);
+        if(prior!==undefined){if(prior.operationKind!=='create'||canonicalJson(prior.request)!==canonicalJson(request))throw new Error('PREPARATION_CONFIGURATOR_IDEMPOTENCY_REUSE');return prior.result;}
+        if(database.prepare('SELECT 1 FROM preparation_configurator_jobs WHERE job_id=?').get(request.request.jobId)!==undefined)throw new Error('PREPARATION_CONFIGURATOR_JOB_ID_EXISTS');
+        const draft=readRunDraft({runId:request.request.runId})?.draft;
+        if(draft===undefined||draft.revision!==request.request.draftRevision||hashJson(draft).hash!==request.request.draftHash)throw new Error('PREPARATION_CONFIGURATOR_DRAFT_CHANGED');
+        if(database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(draft.runId)!==undefined)throw new Error('PREPARATION_CONFIGURATOR_ALREADY_READY');
+        if(request.request.generation!==0)throw new Error('PREPARATION_CONFIGURATOR_INITIAL_GENERATION_REQUIRED');
+        if(preparationConfiguratorSources===undefined)throw new Error('PREPARATION_CONFIGURATOR_SOURCE_ADMISSION_UNAVAILABLE');
+        const sources=z.strictObject({actorSources:z.array(DossierSourceSchema),documents:z.array(PreparationConfiguratorDocumentSchema)}).parse(preparationConfiguratorSources({principalId:request.principalId,request:request.request,draft}));
+        const context=compilePreparationConfiguratorContext({request:request.request,admittedDraft:draft,admittedActorSources:sources.actorSources,admittedDocuments:sources.documents});
+        const packet=compilePreparationConfiguratorPacket(context);
+        if(database.prepare("SELECT 1 FROM preparation_configurator_jobs WHERE run_id=? AND json_extract(payload_json,'$.job.state') IN('queued','running') LIMIT 1").get(draft.runId)!==undefined)throw new Error('PREPARATION_CONFIGURATOR_JOB_ACTIVE');
+        assertPreparationBudgetIdle(draft.runId);
+        const authority=PreparationBudgetAuthoritySchema.parse({runId:draft.runId,draftRevision:draft.revision,draftHash:request.request.draftHash,budget:context.budget,profile:context.profile});
+        database.prepare('INSERT INTO run_budgets(run_id,max_calls) VALUES(?,?) ON CONFLICT(run_id) DO UPDATE SET max_calls=excluded.max_calls').run(draft.runId,context.budget.maxPiCallsPerRun??0);
+        const seal=hashJson(authority);
+        database.prepare("INSERT INTO model_budget_authorities VALUES(?,'preparation',?,?) ON CONFLICT(run_id) DO UPDATE SET kind='preparation',payload_json=excluded.payload_json,payload_hash=excluded.payload_hash").run(draft.runId,seal.json,seal.hash);
+        ensureModelTimeRunState(draft.runId);
+        database.prepare('INSERT INTO pulses(pulse_id,run_id,max_calls) VALUES(?,?,?)').run(request.request.jobId,draft.runId,context.budget.maxPiCallsPerPulse??0);
+        const scope={runId:draft.runId,jobId:request.request.jobId,generation:0,draftRevision:draft.revision,draftHash:request.request.draftHash,contextHash:context.contextHash};
+        const now=Date.now();const stored=savePreparationConfiguratorStored({job:{kind:'preparation-configurator-job',principalId:request.principalId,scope,revision:0,state:'queued',failureCode:null,createdAt:now,updatedAt:now},context,packet,lease:null});
+        putPreparationOperation({operationKind:'create',request,result:stored.job});
+        return stored.job;
+      });
+    },
+    readPreparationConfiguratorJob(input:unknown) {
+      const request=z.strictObject({principalId:z.string(),jobId:JobIdSchema}).parse(input);
+      const stored=readPreparationConfiguratorStored(request.jobId);if(stored.job.principalId!==request.principalId)throw new Error('PREPARATION_CONFIGURATOR_JOB_MISSING');return stored;
+    },
+    startPreparationConfiguratorJob(input:unknown) {
+      const request=PreparationConfiguratorMutationSchema.parse(input);
+      return transact(()=>{
+        const prior=readPreparationOperation(request.principalId,request.idempotencyKey);
+        if(prior!==undefined){if(prior.operationKind!=='start'||canonicalJson(prior.request)!==canonicalJson(request))throw new Error('PREPARATION_CONFIGURATOR_IDEMPOTENCY_REUSE');return PreparationConfiguratorStartResultSchema.parse({...prior.result,kind:'existing'});}
+        const stored=readPreparationConfiguratorStored(request.jobId);
+        if(stored.job.principalId!==request.principalId)throw new Error('PREPARATION_CONFIGURATOR_JOB_MISSING');
+        if(stored.job.revision!==request.expectedRevision)throw new Error('PREPARATION_CONFIGURATOR_REVISION_CONFLICT');
+        if(stored.job.state!=='queued')throw new Error('PREPARATION_CONFIGURATOR_NOT_QUEUED');
+        const draft=readRunDraft({runId:stored.job.scope.runId})?.draft;
+        if(draft===undefined||draft.revision!==stored.job.scope.draftRevision||hashJson(draft).hash!==stored.job.scope.draftHash)throw new Error('PREPARATION_CONFIGURATOR_DRAFT_CHANGED');
+        const result={kind:'started',job:stored.job} satisfies z.infer<typeof PreparationConfiguratorStartResultSchema>;
+        putPreparationOperation({operationKind:'start',request,result});return result;
+      });
+    },
+    cancelPreparationConfiguratorJob(input:unknown) {
+      const request=PreparationConfiguratorMutationSchema.parse(input);
+      return transact(()=>{
+        const prior=readPreparationOperation(request.principalId,request.idempotencyKey);
+        if(prior!==undefined){if(prior.operationKind!=='cancel'||canonicalJson(prior.request)!==canonicalJson(request))throw new Error('PREPARATION_CONFIGURATOR_IDEMPOTENCY_REUSE');return prior.result;}
+        const stored=readPreparationConfiguratorStored(request.jobId);
+        if(stored.job.principalId!==request.principalId)throw new Error('PREPARATION_CONFIGURATOR_JOB_MISSING');
+        if(stored.job.revision!==request.expectedRevision)throw new Error('PREPARATION_CONFIGURATOR_REVISION_CONFLICT');
+        const job=['queued','running'].includes(stored.job.state)
+          ?savePreparationConfiguratorStored({...stored,job:{...stored.job,state:'cancelled',failureCode:'operator-cancelled',revision:stored.job.revision+1,updatedAt:Date.now()}}).job:stored.job;
+        putPreparationOperation({operationKind:'cancel',request,result:job});return job;
+      });
+    },
+    setPreparationConfiguratorApplicationResolver(resolver:NonNullable<typeof preparationConfiguratorApplication>) {
+      if(preparationConfiguratorApplication!==undefined)throw new Error('PREPARATION_CONFIGURATOR_APPLICATION_ALREADY_CONFIGURED');preparationConfiguratorApplication=resolver;
+    },
+    readPreparationConfiguratorApplyReceipt(input:unknown) {
+      const request=PreparationConfiguratorApplySchema.parse(input);
+      const prior=readPreparationOperation(request.principalId,request.idempotencyKey);
+      if(prior===undefined)return undefined;
+      if(prior.operationKind!=='apply'||canonicalJson(prior.request)!==canonicalJson(request))throw new Error('PREPARATION_CONFIGURATOR_IDEMPOTENCY_REUSE');
+      const history=readRunDraft({runId:prior.result.runId,revision:prior.result.draftRevision});
+      if(history===undefined||hashJson(history.draft).hash!==prior.result.draftHash)throw new Error('PREPARATION_CONFIGURATOR_APPLICATION_RECEIPT_CORRUPT');
+      return prior.result;
+    },
+    applyPreparationConfiguratorProposal(input:unknown) {
+      const request=PreparationConfiguratorApplySchema.parse(input);
+      return transact(()=>{
+        const prior=readPreparationOperation(request.principalId,request.idempotencyKey);
+        if(prior!==undefined){if(prior.operationKind!=='apply'||canonicalJson(prior.request)!==canonicalJson(request))throw new Error('PREPARATION_CONFIGURATOR_IDEMPOTENCY_REUSE');return prior.result;}
+        const stored=readPreparationConfiguratorStored(request.jobId);
+        if(stored.job.principalId!==request.principalId)throw new Error('PREPARATION_CONFIGURATOR_JOB_MISSING');
+        if(stored.job.state!=='accepted'||stored.job.revision!==request.expectedRevision||stored.lease===null)throw new Error('PREPARATION_CONFIGURATOR_REVISION_CONFLICT');
+        const candidate=readPreparationRecord(request.jobId,stored.job.scope.generation,'candidate'),proof=readPreparationRecord(request.jobId,stored.job.scope.generation,'accepted-proof');
+        const execution=PreparationConfiguratorExecutionSchema.parse({role:'preparation-configurator',scope:stored.job.scope,lease:stored.lease});
+        if(candidate?.kind!=='candidate'||proof?.kind!=='accepted-proof'||canonicalJson(candidate.execution)!==canonicalJson(execution)||canonicalJson(proof.execution)!==canonicalJson(execution)
+          ||candidate.value.candidateId!==request.candidateId||hashJson(candidate.value.proposal).hash!==request.proposalHash||proof.value.candidateHash!==candidate.value.candidateHash)throw new Error('PREPARATION_CONFIGURATOR_ACCEPTED_PROOF_REQUIRED');
+        const validatedProposal=validatePreparationConfiguratorProposal({context:stored.context,proposal:candidate.value.proposal});
+        if(hashJson({execution,candidateId:candidate.value.candidateId,proposal:validatedProposal}).hash!==candidate.value.candidateHash)throw new Error('PREPARATION_CONFIGURATOR_CANDIDATE_HASH');
+        const current=readRunDraft({runId:stored.job.scope.runId})?.draft;
+        if(current===undefined||current.revision!==request.expectedDraftRevision||hashJson(current).hash!==request.expectedDraftHash||current.revision!==stored.job.scope.draftRevision||hashJson(current).hash!==stored.job.scope.draftHash
+          ||database.prepare('SELECT 1 FROM world_runs WHERE run_id=?').get(current.runId)!==undefined)throw new Error('PREPARATION_CONFIGURATOR_DRAFT_CHANGED');
+        if(preparationConfiguratorApplication===undefined)throw new Error('PREPARATION_CONFIGURATOR_APPLICATION_UNAVAILABLE');
+        assertPreparationBudgetIdle(current.runId);
+        const recordedAt=new Date().toISOString();
+        const patch=RunDraftPatchSchema.parse(preparationConfiguratorApplication({principalId:request.principalId,context:stored.context,candidate:candidate.value,selection:request.selection,currentDraft:current,recordedAt}));
+        if(['budget','inferenceProfile','icmWorkspace','humanParticipants','characterDefinitionPolicy'].some(field=>Object.hasOwn(patch,field)))throw new Error('PREPARATION_CONFIGURATOR_OPERATOR_AUTHORITY_FORBIDDEN');
+        const update=updateRunDraftWithinTransaction({principalId:request.principalId,idempotencyKey:request.idempotencyKey,runId:current.runId,expectedRevision:current.revision,patch});
+        if(update.kind!=='stored')throw new Error('PREPARATION_CONFIGURATOR_APPLICATION_CONFLICT');
+        const result=PreparationConfiguratorAppliedSchema.parse({kind:'preparation-configurator-applied',jobId:request.jobId,runId:current.runId,candidateId:request.candidateId,proposalHash:request.proposalHash,baseDraftRevision:current.revision,baseDraftHash:hashJson(current).hash,draftRevision:update.draft.revision,draftHash:hashJson(update.draft).hash,selectionHash:hashJson(request.selection).hash});
+        putPreparationOperation({operationKind:'apply',request,result});return result;
+      });
+    },
+    listPreparationConfiguratorJobs(input:unknown) {
+      const request=PreparationConfiguratorListSchema.parse(input);
+      const rows=database.prepare(`SELECT job_id FROM preparation_configurator_jobs WHERE principal_id=? AND run_id=?
+        ORDER BY json_extract(payload_json,'$.job.createdAt') DESC,job_id LIMIT ? OFFSET ?`).all(request.principalId,request.runId,request.limit+1,request.offset);
+      return PreparationConfiguratorPageSchema.parse({items:rows.slice(0,request.limit).map(raw=>readPreparationConfiguratorStored(z.strictObject({job_id:JobIdSchema}).parse(raw).job_id).job),hasMore:rows.length>request.limit});
+    },
+    claimPreparationConfiguratorJob(input:unknown) {
+      const request=z.strictObject({principalId:z.string(),jobId:JobIdSchema,ownerToken:z.uuid(),expectedRevision:RevisionSchema}).parse(input);
+      return transact(()=>{
+        const stored=readPreparationConfiguratorStored(request.jobId);
+        if(stored.job.principalId!==request.principalId||stored.job.state!=='queued'||stored.job.revision!==request.expectedRevision)throw new Error('PREPARATION_CONFIGURATOR_CLAIM_CONFLICT');
+        const lease={ownerToken:request.ownerToken,claimToken:randomUUID()};
+        const next=savePreparationConfiguratorStored({...stored,lease,job:{...stored.job,state:'running',revision:stored.job.revision+1,updatedAt:Date.now()}});
+        const execution=PreparationConfiguratorExecutionSchema.parse({role:'preparation-configurator',scope:stored.job.scope,lease});
+        activePreparationConfigurator(execution);
+        return {execution,context:next.context,packet:next.packet};
+      });
+    },
+    assertPreparationConfiguratorActive(input:unknown) { return activePreparationConfigurator(PreparationConfiguratorExecutionSchema.parse(input)).job; },
+    recordPreparationConfiguratorRecord(input:unknown) { return transact(()=>putPreparationRecord(input)); },
+    readPreparationConfiguratorRecord(input:unknown) {
+      const request=z.strictObject({jobId:JobIdSchema,generation:RevisionSchema,kind:z.enum(['session','job-base','request-input','terminal-candidate','candidate','accepted-proof']),requestSeq:z.number().int().min(-1).default(-1)}).parse(input);
+      return readPreparationRecord(request.jobId,request.generation,request.kind,request.requestSeq);
+    },
+    finishPreparationConfiguratorJob(input:unknown) {
+      const request=z.strictObject({execution:PreparationConfiguratorExecutionSchema,outcome:z.enum(['accepted','blocked']),failureCode:z.string().nullable()}).parse(input);
+      return transact(()=>{
+        const stored=request.outcome==='accepted'?activePreparationConfigurator(request.execution):readPreparationConfiguratorStored(request.execution.scope.jobId);
+        if(canonicalJson(stored.job.scope)!==canonicalJson(request.execution.scope)||canonicalJson(stored.lease)!==canonicalJson(request.execution.lease))throw new Error('PREPARATION_CONFIGURATOR_CLAIM_INACTIVE');
+        if(stored.job.state==='cancelled'&&request.outcome==='blocked')return stored.job;
+        if(stored.job.state!=='running')throw new Error('PREPARATION_CONFIGURATOR_CLAIM_INACTIVE');
+        if(request.outcome==='accepted'){
+          const candidate=readPreparationRecord(stored.job.scope.jobId,stored.job.scope.generation,'candidate');
+          const proof=readPreparationRecord(stored.job.scope.jobId,stored.job.scope.generation,'accepted-proof');
+          if(candidate?.kind!=='candidate'||proof?.kind!=='accepted-proof'||proof.value.candidateHash!==candidate.value.candidateHash)throw new Error('PREPARATION_CONFIGURATOR_TERMINAL_PROOF_REQUIRED');
+        }
+        return savePreparationConfiguratorStored({...stored,job:{...stored.job,state:request.outcome,failureCode:request.failureCode,revision:stored.job.revision+1,updatedAt:Date.now()}}).job;
+      });
+    },
+    interruptPreparationConfiguratorJobs(input:unknown) {
+      const request=z.strictObject({ownerToken:z.uuid()}).parse(input);
+      return transact(()=>{
+        const rows=database.prepare("SELECT job_id FROM preparation_configurator_jobs WHERE json_extract(payload_json,'$.job.state')='running'").all();let count=0;
+        for(const raw of rows){const row=z.strictObject({job_id:JobIdSchema}).parse(raw);const stored=readPreparationConfiguratorStored(row.job_id);if(stored.lease?.ownerToken===request.ownerToken)continue;
+          savePreparationConfiguratorStored({...stored,job:{...stored.job,state:'interrupted',failureCode:'host-interrupted',revision:stored.job.revision+1,updatedAt:Date.now()}});++count;}
+        return count;
+      });
+    },
+    reservePreparationConfiguratorRequest(input:unknown) {
+      const request=z.strictObject({execution:PreparationConfiguratorExecutionSchema,clockEpochId:ModelTimeClockEpochIdSchema}).parse(input);
+      return transact(()=>{activePreparationConfigurator(request.execution);return reserveNextWithinTransaction({runId:request.execution.scope.runId,pulseId:PulseIdSchema.parse(request.execution.scope.jobId),jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,ownerToken:request.execution.lease.ownerToken,clockEpochId:request.clockEpochId});});
+    },
+    transitionPreparationConfiguratorReservation(input:unknown) {
+      const request=z.strictObject({execution:PreparationConfiguratorExecutionSchema,requestSeq:RevisionSchema,target:ReservationTransitionSchema.shape.target,wallTime:ReservationTransitionSchema.shape.wallTime}).parse(input);
+      return transact(()=>{
+        if(request.target==='dispatched'){
+          activePreparationConfigurator(request.execution);
+          const checkpoint=readPreparationRecord(request.execution.scope.jobId,request.execution.scope.generation,'request-input',request.requestSeq);
+          if(checkpoint?.kind!=='checkpoint'||canonicalJson(checkpoint.execution)!==canonicalJson(request.execution))throw new Error('PREPARATION_CONFIGURATOR_INPUT_CHECKPOINT_REQUIRED');
+        }
+        transitionWithinTransaction({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,target:request.target,ownerToken:request.execution.lease.ownerToken,...(request.wallTime===undefined?{}:{wallTime:request.wallTime})});
+      });
+    },
+    expirePreparationConfiguratorRequest(input:unknown) {
+      const request=z.strictObject({execution:PreparationConfiguratorExecutionSchema,requestSeq:RevisionSchema,clockEpochId:ModelTimeClockEpochIdSchema,reason:z.enum(['timeout','cancelled'])}).parse(input);
+      return transact(()=>{assertBudgetSpanOwner({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,ownerToken:request.execution.lease.ownerToken,clockEpochId:request.clockEpochId});return expireModelTimeWithinTransaction({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,clockEpochId:request.clockEpochId,reason:request.reason});});
+    },
+    settlePreparationConfiguratorRequestWallTime(input:unknown) {
+      const request=z.strictObject({execution:PreparationConfiguratorExecutionSchema,requestSeq:RevisionSchema,clockEpochId:ModelTimeClockEpochIdSchema,monotonicNs:MonotonicNanosecondsSchema}).parse(input);
+      return transact(()=>{assertBudgetSpanOwner({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,ownerToken:request.execution.lease.ownerToken,clockEpochId:request.clockEpochId});return settleModelTimeWithinTransaction({jobId:request.execution.scope.jobId,generation:request.execution.scope.generation,requestSeq:request.requestSeq,clockEpochId:request.clockEpochId,monotonicNs:request.monotonicNs});});
+    },
     setPreparationSourceAdmission(admission: PreparationSourceAdmission) {
       if (preparationSourceAdmission !== undefined) throw new Error('DOSSIER_SOURCE_ADMISSION_ALREADY_CONFIGURED');
       preparationSourceAdmission = admission;
@@ -5728,21 +7225,37 @@ export function openJournal(input: { path: string }) {
         run = parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
         reconcileRunLifecycleEpoch(request.runId, run.row.lifecycle, run.row.lifecycle_revision, now);
         if (request.command.kind === 'resume' && request.command.retryBlockedActors === true) {
-          // Explicit operator recovery of one blocked pulse, never an implicit retry.
-          const blockedPulse = database.prepare(`SELECT j.pulse_id FROM actor_turn_jobs j
+          // Operator-authorized retry only. A later pulse that is technically
+          // drained is parked without completing its cause or consuming queued
+          // testimony, freeing the single-running-pulse slot for the older retry.
+          const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+          const candidates=database.prepare(`SELECT j.actor_id,j.job_id,j.generation,j.pulse_id FROM actor_turn_jobs j
+            LEFT JOIN coordinator_pulses p ON p.run_id=j.run_id AND p.pulse_id=j.pulse_id
             WHERE j.run_id=? AND j.state='blocked'
-              AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs n WHERE n.job_id=j.job_id AND n.generation>j.generation)
-              AND EXISTS(SELECT 1 FROM actor_turn_job_inputs i WHERE i.job_id=j.job_id AND i.generation=j.generation AND i.state='released')
-            ORDER BY j.updated_at,j.job_id LIMIT 1`).get(request.runId);
-          if (blockedPulse !== undefined) {
-            const pulseId=z.strictObject({pulse_id:PulseIdSchema}).parse(blockedPulse).pulse_id;
-            const jobs=database.prepare(`SELECT actor_id,job_id,generation FROM actor_turn_jobs j
-              WHERE j.run_id=? AND j.pulse_id=? AND j.state='blocked'
-                AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs n WHERE n.job_id=j.job_id AND n.generation>j.generation)
-                AND EXISTS(SELECT 1 FROM actor_turn_job_inputs i WHERE i.job_id=j.job_id AND i.generation=j.generation AND i.state='released')
-              ORDER BY j.actor_id,j.job_id`).all(request.runId,pulseId)
-              .map(row=>z.strictObject({actor_id:CharacterIdSchema,job_id:JobIdSchema,generation:RevisionSchema}).parse(row));
-            for (const job of jobs) retryActorTurnJobWithinTransaction({runId:request.runId,pulseId,actorId:job.actor_id,jobId:job.job_id,expectedGeneration:job.generation});
+              AND (p.pulse_id IS NULL OR p.state='blocked')
+              AND NOT EXISTS(SELECT 1 FROM actor_turn_jobs n WHERE n.run_id=j.run_id AND n.actor_id=j.actor_id
+                AND n.job_id=j.job_id AND n.generation>j.generation)
+            ORDER BY j.updated_at,j.actor_id,j.job_id,j.generation`).all(request.runId)
+            .map(row=>z.strictObject({actor_id:CharacterIdSchema,job_id:JobIdSchema,generation:RevisionSchema,pulse_id:PulseIdSchema}).parse(row));
+          const first=candidates.find(job=>retryableBlockedActorTurnJob({run,configuration,actorId:job.actor_id,
+            jobId:job.job_id,generation:job.generation,pulseId:job.pulse_id}));
+          if(first!==undefined){
+            const runningPulse=database.prepare(`SELECT pulse_id FROM coordinator_pulses WHERE run_id=? AND state='running' LIMIT 1`)
+              .get(request.runId);
+            if(runningPulse!==undefined){
+              const occupiedPulseId=z.strictObject({pulse_id:PulseIdSchema}).parse(runningPulse).pulse_id;
+              if(!canParkDrainedCoordinatorPulse(request.runId,occupiedPulseId,first.pulse_id))
+                throw new Error('Retry actoral rechazado: el pulso posterior todavía tiene trabajo, una reserva incierta o una propuesta pendiente de confirmar');
+              const parked=database.prepare(`UPDATE coordinator_pulses SET state='blocked',parked_for_pulse_id=?,updated_at=?
+                WHERE run_id=? AND pulse_id=? AND state='running' AND parked_for_pulse_id IS NULL`)
+                .run(first.pulse_id,now,request.runId,occupiedPulseId);
+              if(parked.changes!==1)throw new Error('El pulso posterior cambió antes de apartarse para el retry');
+            }
+            const jobs=candidates.filter(job=>job.pulse_id===first.pulse_id
+              &&retryableBlockedActorTurnJob({run,configuration,actorId:job.actor_id,jobId:job.job_id,
+                generation:job.generation,pulseId:job.pulse_id}));
+            for(const job of jobs)retryActorTurnJobWithinTransaction({runId:request.runId,pulseId:first.pulse_id,
+              actorId:job.actor_id,jobId:job.job_id,expectedGeneration:job.generation});
           }
         }
 
@@ -5931,7 +7444,9 @@ export function openJournal(input: { path: string }) {
               ? snapshot.places.some((place) => place.id === binding.placeId)
               : binding.kind === 'channel'
                 ? snapshot.channels.some((channel) => channel.id === binding.channelId)
-                : snapshot.offers.some((offer) => offer.id === binding.offerId);
+                : binding.kind === 'human'
+                  ? (snapshot.humanParticipants ?? []).some((human) => human.participantId === binding.participantId)
+                  : snapshot.offers.some((offer) => offer.id === binding.offerId);
           if (!found) throw new Error('Knowledge contiene un binding sin destino en el corte');
         }
         const current = WorldKnowledgeDbRowSchema.parse(database.prepare(
@@ -5985,6 +7500,7 @@ export function openJournal(input: { path: string }) {
           const exactContentHash = request.attempt.kind === 'communicate'
             ? hashCommunicationContent(request.attempt.content) : attemptHash;
           if (record.attemptHash !== attemptHash || record.exactContentHash !== exactContentHash
+            || record.nextInitiative !== request.nextInitiative
             || record.jobId !== request.jobId || record.generation !== request.generation
             || record.proposalSlot !== request.proposalSlot
             || canonicalJson(record.attempt) !== canonicalJson(request.attempt)) {
@@ -6014,6 +7530,9 @@ export function openJournal(input: { path: string }) {
             throw new Error('La propuesta no pertenece al job actoral durable activo');
           }
         }
+        if (request.nextInitiative !== undefined && scheduledJobValue === undefined) {
+          throw new Error('La elección de iniciativa requiere un job actoral durable');
+        }
         const run = parseWorldRun(runValue);
         if (run.row.lifecycle !== 'running') throw new Error('El mundo no acepta propuestas fuera de running');
         if (request.attempt.expectedRevision !== run.row.world_revision) throw new Error('Propuesta parte de una revisión obsoleta');
@@ -6034,6 +7553,7 @@ export function openJournal(input: { path: string }) {
           jobId: request.jobId, generation: request.generation, proposalSlot: request.proposalSlot,
           actorId: request.attempt.actorId, sceneId: scene.id, attemptId: request.attempt.attemptId,
           baseRevision: request.attempt.expectedRevision, exactContentHash, attemptHash: attemptHash.hash,
+          ...(request.nextInitiative === undefined ? {} : { nextInitiative: request.nextInitiative }),
           attempt: request.attempt,
         });
         const maxReformulationsValue = z.record(z.string(), z.unknown()).parse(run.configuration).maxReformulations;
@@ -6350,6 +7870,7 @@ export function openJournal(input: { path: string }) {
           }
         }
         const eventIds = new Set(resolution.events.map((event) => event.id));
+        const ownPhysicalActionPerceptionIds = new Set<string>();
         const activeScene = run.snapshot.scenes.find((scene) => scene.id === run.snapshot.activeSceneId);
         for (const perception of resolution.perceptions) {
           if (perception.runId !== request.runId || activeScene === undefined
@@ -6386,6 +7907,20 @@ export function openJournal(input: { path: string }) {
                 || perception.fictitiousAt !== event.fictitiousAt) {
                 throw new Error('La percepción WorldEvent no coincide con el origen/tiempo del evento');
               }
+              if (perception.recipientCharacterId === record.actorId) {
+                const matchingPhysicalAction = event.origin.kind === 'actor'
+                  && event.origin.actorId === record.actorId
+                  && event.origin.attemptId === record.attemptId
+                  && ((event.kind === 'moved' && record.attempt.kind === 'move')
+                    || (event.kind === 'objectTaken' && record.attempt.kind === 'take')
+                    || (event.kind === 'objectPlaced' && record.attempt.kind === 'putDown')
+                    || (event.kind === 'offerAccepted' && record.attempt.kind === 'acceptOffer')
+                    || (event.kind === 'deviceUsed' && record.attempt.kind === 'useDevice'));
+                if (!matchingPhysicalAction) {
+                  throw new Error('Una percepción propia requiere un evento físico real del intento actoral');
+                }
+                ownPhysicalActionPerceptionIds.add(perception.id);
+              }
             } else {
               throw new Error('Percepción de observación no puede referir un evento del Escenario');
             }
@@ -6402,6 +7937,24 @@ export function openJournal(input: { path: string }) {
             || approvalReceipt.proposalId !== request.proposalId || approvalReceipt.version !== request.version
             || approvalReceipt.exactContentHash !== hashCommunicationContent(record.attempt.content))) {
           throw new Error('Emisión sin receipt de Continuista vigente y exacto');
+        }
+        let actionFeedback: {perception:z.infer<typeof WorldPerceptionSchema>;scheduleFollowup:boolean}|undefined;
+        if(resolution.kind==='notApplied'&&scheduledJobValue!==undefined){
+          const signatureSource=Object.fromEntries(Object.entries(record.attempt)
+            .filter(([key])=>key!=='attemptId'&&key!=='runId'&&key!=='actorId'));
+          const actionSignature=hashJson(signatureSource).hash;
+          const job=ActorTurnJobDbRowSchema.parse(scheduledJobValue);
+          const perceptionId=PerceptionIdSchema.parse(request.ids.perceptionId());
+          const chainId=actionFeedbackChainForActorJob({runId:request.runId,actorId:record.actorId,
+            jobId:job.job_id,generation:job.generation})??perceptionId;
+          const perception=WorldPerceptionSchema.parse({
+            kind:'actionFeedback',id:perceptionId,runId:request.runId,recipientCharacterId:record.actorId,
+            attemptId:record.attemptId,chainId,actionSignature,worldRevision:resolution.revision,
+            reason:resolution.reason,fictitiousAt:run.snapshot.clock.instant,
+          });
+          const repeated=actionFeedbackAlreadyRepeated({runId:request.runId,actorId:record.actorId,chainId,
+            actionSignature,worldRevision:resolution.revision,reason:resolution.reason});
+          actionFeedback={perception,scheduleFollowup:!repeated};
         }
         const resolutionPayload = hashJson(resolution);
         const commitIndex = counter.parse(run.row.commit_index + 1);
@@ -6441,9 +7994,31 @@ export function openJournal(input: { path: string }) {
             eventId, perception.recipientCharacterId, perceptionPayload.json, perceptionPayload.hash,
             'actorAttempt', record.attemptId);
           database.prepare('INSERT INTO world_deliveries(perception_id,state) VALUES(?,\'planned\')').run(perception.id);
-          if (perception.recipientCharacterId !== record.actorId) {
+          // Observations have no world event. Own physical-action perceptions
+          // are private deliveries backed by the exact event validated above.
+          // Do not create a self-echo for speech, offers, waiting or resting.
+          if (perception.recipientCharacterId !== record.actorId || perception.kind === 'observation'
+            || ownPhysicalActionPerceptionIds.has(perception.id)) {
             database.prepare(`INSERT INTO actor_turn_intents(run_id,actor_id,perception_id,world_seq,state,created_at)
               VALUES(?,?,?,?,'awaitingDelivery',?)`).run(request.runId, perception.recipientCharacterId, perception.id, eventSeq, committedAt);
+          }
+        }
+        if(actionFeedback!==undefined){
+          const perception=actionFeedback.perception;
+          const payload=hashJson(perception);
+          database.prepare(`INSERT INTO world_perceptions(
+            perception_id,run_id,world_seq,attempt_id,event_id,recipient_actor_id,payload_json,payload_hash,origin_kind,origin_id
+          ) VALUES(?,?,?,?,NULL,?,?,?,'actorAttempt',?)`).run(perception.id,request.runId,
+            resolution.newSnapshot.seq,record.attemptId,record.actorId,payload.json,payload.hash,record.attemptId);
+          database.prepare('INSERT INTO world_deliveries(perception_id,state) VALUES(?,\'planned\')').run(perception.id);
+          // A rejected action is private execution feedback, not an event. A
+          // distinct failure/action/cut can invite reconsideration; repeating
+          // the same signature and reason at the same revision is recorded but
+          // does not create another automatic turn.
+          if(actionFeedback.scheduleFollowup){
+            database.prepare(`INSERT INTO actor_turn_intents(run_id,actor_id,perception_id,world_seq,state,created_at)
+              VALUES(?,?,?,?,'awaitingDelivery',?)`).run(request.runId,record.actorId,perception.id,
+                resolution.newSnapshot.seq,committedAt);
           }
         }
         const updated = database.prepare(`
@@ -6454,6 +8029,9 @@ export function openJournal(input: { path: string }) {
           run.row.world_revision, run.row.commit_index);
         if (updated.changes !== 1) throw new Error('CAS de world revision falló');
         const committedRun=parseWorldRun(database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId));
+        settleActorInitiativeAfterResolution({run,committedRun,
+          job:scheduledJobValue===undefined?undefined:ActorTurnJobDbRowSchema.parse(scheduledJobValue),record,resolution,commitIndex,
+          at:committedAt});
         const readyConfiguration=ReadyRunConfigurationSchema.safeParse(committedRun.configuration);
         if(readyConfiguration.success)admitRoutineBoundaryActivations(committedRun,readyConfiguration.data,run.snapshot.clock.instant,committedAt);
         database.prepare(`UPDATE world_proposals SET status='resolved' WHERE run_id=? AND proposal_id=? AND version=? AND status='pending'`)
@@ -7075,6 +8653,7 @@ export function openJournal(input: { path: string }) {
         if(evaluation.fence.configurationRevision!==current.job.configurationRevision||evaluation.fence.configurationHash!==current.row.configuration_hash
           ||evaluation.fence.worldRevision!==current.job.worldRevision||evaluation.fence.worldSeq!==current.job.worldSeq
           ||evaluation.fence.fictitiousAt!==current.job.fictitiousAt)throw new Error('La evaluación no corresponde al corte Ready congelado');
+        requireConfiguredIcmPreflightGate(current.configuration,evaluation.result);
         if(evaluation.evidence.provider!==null&&evaluation.evidence.provider!==current.row.provider)throw new Error('La evaluación usa otro proveedor');
         if(evaluation.evidence.profileFingerprint!==null&&evaluation.evidence.profileFingerprint!==current.row.profile_fingerprint)throw new Error('La evaluación usa otro perfil');
         if(evaluation.evidence.accessReceipt!==null){
@@ -7136,7 +8715,7 @@ export function openJournal(input: { path: string }) {
       return transact(()=>{
         const replay=replayRunDraftOperation(operation);if(replay!==undefined)return RunDraftMutationResultSchema.parse(replay);
         const recordedAt=new Date().toISOString();const runId=RunIdSchema.parse(randomUUID());const revision=RevisionSchema.parse(0);
-        const empty=createEmptyRunConfigurationDraft({runId,revision});
+        const empty=RunConfigurationDraftSchema.parse({...createEmptyRunConfigurationDraft({runId,revision}),characterDefinitionPolicy:{kind:'embodied-v1'}});
         const draft=applyRunDraftPatch(empty,request.patch,request.principalId,recordedAt,revision);
         admitPreparationSources(request.principalId,empty,draft);
         database.prepare('INSERT INTO run_configuration_drafts VALUES(?,?,?,?)').run(runId,revision,recordedAt,recordedAt);
@@ -7144,35 +8723,7 @@ export function openJournal(input: { path: string }) {
         return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'created',draft})});
       });
     },
-    updateRunConfigurationDraft(input:unknown){
-      const request=RunDraftUpdateSchema.parse(input);const operation={principalId:request.principalId,idempotencyKey:request.idempotencyKey,kind:'update',requestHash:hashJson(request).hash} satisfies Parameters<typeof replayRunDraftOperation>[0];
-      return transact(()=>{
-        const replay=replayRunDraftOperation(operation);if(replay!==undefined)return RunDraftMutationResultSchema.parse(replay);
-        const recordedAt=new Date().toISOString();const entry=readRunDraft({runId:request.runId});
-        if(entry===undefined)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'missing'})});
-        const worldValue=database.prepare('SELECT * FROM world_runs WHERE run_id=?').get(request.runId);
-        const world=worldValue===undefined?undefined:parseWorldRun(worldValue);
-        if(world!==undefined&&identityPromotedConfiguration(request.runId))return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'identity-promoted'})});
-        if(world!==undefined&&(ReadyRunConfigurationSchema.safeParse(world.configuration).data?.forkOrigin!==undefined||database.prepare('SELECT 1 FROM fork_dramatic_seeds WHERE run_id=?').get(request.runId)!==undefined))
-          return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'readonly',reason:'fork-published'})});
-        if(world!==undefined){const lifecycle=world.row.lifecycle;
-          if(lifecycle!=='draft'&&lifecycle!=='ready')return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'invalidLifecycle',lifecycle})});}
-        if(entry.draft.revision!==request.expectedRevision)return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'conflict',currentRevision:entry.draft.revision})});
-        const revision=RevisionSchema.parse(request.expectedRevision+1);const draft=applyRunDraftPatch(entry.draft,request.patch,request.principalId,recordedAt,revision);
-        admitPreparationSources(request.principalId,entry.draft,draft);
-        const changed=database.prepare('UPDATE run_configuration_drafts SET revision=?,updated_at=? WHERE run_id=? AND revision=?').run(revision,recordedAt,request.runId,request.expectedRevision);
-        if(changed.changes!==1)throw new Error('CAS de borrador cambió durante la transacción');
-        if(world!==undefined){
-          if(world.row.config_revision!==entry.draft.revision)throw new Error('Revisión World/configuración no coincide con el borrador editable');
-          const payload=hashJson(draft);
-          const invalidated=database.prepare(`UPDATE world_runs SET lifecycle='draft',config_revision=?,configuration_json=?,configuration_hash=?,updated_at=?
-            WHERE run_id=? AND config_revision=? AND lifecycle IN('draft','ready')`).run(revision,payload.json,payload.hash,Date.now(),request.runId,world.row.config_revision);
-          if(invalidated.changes!==1)throw new Error('CAS de configuración World cambió al invalidar Ready');
-        }
-        appendRunDraftHistory({draft,principalId:request.principalId,recordedAt});
-        return recordRunDraftOperation({...operation,recordedAt,result:RunDraftMutationResultSchema.parse({kind:'stored',draft})});
-      });
-    },
+    updateRunConfigurationDraft(input:unknown){const request=RunDraftUpdateSchema.parse(input);return transact(()=>updateRunDraftWithinTransaction(request));},
     validateRunConfigurationDraft(input:unknown){
       const request=RunDraftValidateSchema.parse(input);const operation={principalId:request.principalId,idempotencyKey:request.idempotencyKey,kind:'validate',requestHash:hashJson(request).hash} satisfies Parameters<typeof replayRunDraftOperation>[0];
       return transact(()=>{
@@ -7303,6 +8854,7 @@ export function openJournal(input: { path: string }) {
         const eligibility=continuistaEligibility(request.execution);if(eligibility.kind!=='active')throw new Error(`Continuista inactivo: ${eligibility.reason}`);
         if(continuistaSession(request.execution)===undefined)throw new Error('Continuista sin sesión');
         if(database.prepare(`SELECT 1 FROM request_reservations WHERE job_id=? AND generation=? AND state IN('reserved','dispatched','ambiguous') LIMIT 1`).get(request.execution.jobId,request.execution.generation)!==undefined)throw new Error('Request Continuista previa pendiente o incierta');
+        requireIcmPacketPresent({kind:'continuista',execution:request.execution});
         const result=reserveNextWithinTransaction({runId:request.execution.actorExecution.runId,pulseId:request.execution.actorExecution.pulseId,jobId:request.execution.jobId,generation:request.execution.generation,
           ...(request.clockEpochId===undefined?{}:{clockEpochId:request.clockEpochId,ownerToken:request.execution.actorExecution.lease.ownerToken})});
         if(result.kind==='reserved')database.prepare('INSERT INTO continuista_request_leases VALUES(?,?,?,?)').run(request.execution.jobId,request.execution.generation,result.requestSeq,canonicalJson(request.execution));return result;
@@ -7316,6 +8868,7 @@ export function openJournal(input: { path: string }) {
         if(request.target==='dispatched'){
           if(reservation.state!=='reserved')throw new Error('Request Continuista ya despachada o no reservada');
           const eligibility=continuistaEligibility(request.execution);if(eligibility.kind!=='active')throw new Error(`Continuista inactivo: ${eligibility.reason}`);
+          requireIcmPacketPresent({kind:'continuista',execution:request.execution});
           const value=database.prepare(`SELECT checkpoint_hash,payload_json FROM continuista_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='request-input' AND request_seq=?`)
             .get(request.execution.jobId,request.execution.generation,request.requestSeq);
           const stored=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(value);const checkpoint=ContinuistaCheckpointSchema.parse(parseStoredJson(stored.payload_json));
@@ -7613,6 +9166,7 @@ export function openJournal(input: { path: string }) {
         if(administrativeSession(request.execution.scope)===undefined)throw new Error('Job administrativo sin sesión');
         const scope=request.execution.scope;
         if(database.prepare("SELECT 1 FROM request_reservations WHERE job_id=? AND generation=? AND state IN('reserved','dispatched','ambiguous') LIMIT 1").get(scope.jobId,scope.generation)!==undefined)throw new Error('Request administrativa pendiente/incierta');
+        requireIcmPacketPresent({kind:'administrative',execution:request.execution});
         const result=reserveNextWithinTransaction({runId:scope.runId,pulseId:scope.pulseId,jobId:scope.jobId,generation:scope.generation,
           clockEpochId:request.clockEpochId,ownerToken:request.execution.lease.ownerToken});
         if(result.kind==='reserved')database.prepare('INSERT INTO administrative_request_leases VALUES(?,?,?,?)')
@@ -7625,6 +9179,7 @@ export function openJournal(input: { path: string }) {
         const reservation=administrativeReservation(request.execution,request.requestSeq);
         if(request.target==='dispatched'){
           claimedAdministrativeJob(request.execution);if(administrativeEligibility(request.execution).kind!=='active'||reservation.state!=='reserved')throw new Error('Despacho administrativo inactivo o repetido');
+          requireIcmPacketPresent({kind:'administrative',execution:request.execution});
           const value=database.prepare("SELECT checkpoint_hash,payload_json FROM administrative_checkpoints WHERE job_id=? AND generation=? AND purpose_kind='request-input' AND request_seq=?")
             .get(request.execution.scope.jobId,request.execution.scope.generation,request.requestSeq);
           const row=z.strictObject({checkpoint_hash:HashSchema,payload_json:z.string()}).parse(value);
@@ -7880,6 +9435,8 @@ export function openJournal(input: { path: string }) {
               database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
                 WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state IN('queued','running')`)
                 .run(now,stale.run_id,stale.actor_id,stale.job_id,stale.generation);
+              blockActorInitiativeForJob({runId:stale.run_id,actorId:stale.actor_id,jobId:stale.job_id,
+                generation:stale.generation,reason:'lifecycle-epoch-changed',at:now});
               database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='assigned'`)
                 .run(stale.run_id,stale.actor_id,stale.job_id,stale.generation);
               database.prepare(`UPDATE continuista_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
@@ -7911,6 +9468,15 @@ export function openJournal(input: { path: string }) {
             actor_id: CharacterIdSchema, perception_id: PerceptionIdSchema, origin_kind: z.enum(['humanIntervention','actorAttempt','directionCircumstance']), origin_id: z.string(), commit_index: counter }).parse(item));
         if (pending.length > 100_000) throw new Error('Demasiadas intenciones para coordinar un pulso');
         const cause = pending[0];
+        const initiative=nextDueActorInitiative(run,configuration);
+        // Perception causes and explicit initiatives share one fair commit-order queue.
+        // An initiative never jumps ahead of an older delivered perception; when both
+        // belong to the same commit, assignCoordinatorCauseJobs coalesces them into one turn.
+        if(initiative!==undefined&&(cause===undefined||initiative.source_commit_index<cause.commit_index)){
+          const pulse=startActorInitiativePulse(run,configuration,initiative);
+          bindStep(pulse.pulseId);
+          return CoordinatorPulseBeginResultSchema.parse({kind:'started',pulse,jobs:pulse.jobs});
+        }
         if (cause === undefined) {
           let discardedActivation=false;
           while(true){
@@ -7977,9 +9543,21 @@ export function openJournal(input: { path: string }) {
           .get(request.runId, cause.origin_kind, cause.origin_id);
         if (previous !== undefined) {
           const pulseId = z.strictObject({ pulse_id: PulseIdSchema }).parse(previous).pulse_id;
-          const pulse = coordinatorPulseView({ runId: request.runId, pulseId });
+          let pulse = coordinatorPulseView({ runId: request.runId, pulseId });
           if (pulse === undefined) throw new Error('Pulso de causa perdido');
           bindStep(pulseId);
+          if(pulse.state==='blocked'&&canResumeParkedCoordinatorPulse(request.runId,pulseId)){
+            const resumed=database.prepare(`UPDATE coordinator_pulses SET state='running',parked_for_pulse_id=NULL,lifecycle_revision=?,updated_at=?
+              WHERE run_id=? AND pulse_id=? AND state='blocked' AND parked_for_pulse_id IS NOT NULL`)
+              .run(run.row.lifecycle_revision,Date.now(),request.runId,pulseId);
+            if(resumed.changes===1){
+              pulse=coordinatorPulseView({runId:request.runId,pulseId});
+              if(pulse===undefined)throw new Error('Pulso bloqueado desapareció al retomar su causa pendiente');
+            }
+          }
+          if(pulse.state==='running')assignCoordinatorCauseJobs(run,configuration,pulse);
+          pulse=coordinatorPulseView({runId:request.runId,pulseId});
+          if(pulse===undefined)throw new Error('Pulso de causa perdido al asignar');
           return CoordinatorPulseBeginResultSchema.parse({ kind: 'existing', pulse, jobs: pulse.jobs });
         }
         const scene = run.snapshot.scenes.find((item) => item.id === run.snapshot.activeSceneId);
@@ -8034,7 +9612,9 @@ export function openJournal(input: { path: string }) {
          EXISTS(SELECT 1 FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id
            WHERE i.run_id=r.run_id AND i.state='queued' AND d.state='delivered'
            AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))) OR
-         EXISTS(SELECT 1 FROM actor_activation_causes a WHERE a.run_id=r.run_id AND a.state='pending'))
+         EXISTS(SELECT 1 FROM actor_activation_causes a WHERE a.run_id=r.run_id AND a.state='pending') OR
+         EXISTS(SELECT 1 FROM actor_initiatives a WHERE a.run_id=r.run_id AND a.state='pending'
+           AND a.eligible_at<=CAST(json_extract(r.snapshot_json,'$.clock.instant') AS INTEGER)))
         ORDER BY run_id LIMIT ?`).all(request.limit).map((item) => z.strictObject({ run_id: RunIdSchema }).parse(item)).map((item) => ({ runId: item.run_id }));
     },
     closeCoordinatorPulse(input: unknown) {
@@ -8123,6 +9703,8 @@ export function openJournal(input: { path: string }) {
             database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
               WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state IN('queued','running')`)
               .run(Date.now(),activeRow.run_id,activeRow.actor_id,activeRow.job_id,activeRow.generation);
+            blockActorInitiativeForJob({runId:activeRow.run_id,actorId:activeRow.actor_id,jobId:activeRow.job_id,
+              generation:activeRow.generation,reason:'lifecycle-epoch-changed'});
             database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='assigned'`)
               .run(activeRow.run_id,activeRow.actor_id,activeRow.job_id,activeRow.generation);
             return ActorTurnJobScheduleResultSchema.parse({kind:'blocked',job:actorTurnJobView(database.prepare(`SELECT * FROM actor_turn_jobs
@@ -8210,6 +9792,8 @@ export function openJournal(input: { path: string }) {
           database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
             WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state IN('queued','running')`)
             .run(now,row.run_id,row.actor_id,row.job_id,row.generation);
+          blockActorInitiativeForJob({runId:row.run_id,actorId:row.actor_id,jobId:row.job_id,
+            generation:row.generation,reason:'lifecycle-epoch-changed',at:now});
           database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='assigned'`)
             .run(row.run_id,row.actor_id,row.job_id,row.generation);
           const blocked = database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
@@ -8231,6 +9815,25 @@ export function openJournal(input: { path: string }) {
               return ActorTurnJobClaimResultSchema.parse({kind:'blocked',job:actorTurnJobView(blocked)});
             }
           }
+          if(row.initiative_id!==null){
+            const configuration=ReadyRunConfigurationSchema.parse(run.configuration);
+            const initiative=readActorInitiative(row.run_id,row.initiative_id);
+            if(initiative===undefined)throw new Error('ACTOR_INITIATIVE_NOT_FOUND');
+            const reason=actorInitiativeEligibilityFailure({run,configuration,initiative});
+            if(reason!==undefined){
+              const now=Date.now();
+              database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code='job-inactive',updated_at=?
+                WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='queued'`)
+                .run(now,row.run_id,row.actor_id,row.job_id,row.generation);
+              blockActorInitiativeForJob({runId:row.run_id,actorId:row.actor_id,jobId:row.job_id,
+                generation:row.generation,reason,at:now});
+              database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='assigned'`)
+                .run(row.run_id,row.actor_id,row.job_id,row.generation);
+              const blocked=database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
+                .get(row.run_id,row.actor_id,row.job_id,row.generation);
+              return ActorTurnJobClaimResultSchema.parse({kind:'blocked',job:actorTurnJobView(blocked)});
+            }
+          }
         }
         const job = actorTurnJobView(rowValue);
         if (row.state === 'accepted') return ActorTurnJobClaimResultSchema.parse({ kind: 'accepted', job });
@@ -8244,6 +9847,7 @@ export function openJournal(input: { path: string }) {
           }
           return ActorTurnJobClaimResultSchema.parse({ kind: 'busy' });
         }
+        attachDeliveredInboxToInitiativeJob({row,throughWorldSeq:run.snapshot.seq,at:Date.now()});
         let frozenPerceptionIds = frozenActorTurnPerceptionIds(row);
         let frozenWorldCut = frozenActorTurnWorldCut(row);
         if (frozenPerceptionIds === null || frozenWorldCut === null) {
@@ -8314,6 +9918,8 @@ export function openJournal(input: { path: string }) {
         database.prepare(`UPDATE actor_turn_jobs SET state='blocked',failure_code=?,updated_at=?
           WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
           .run(code, Date.now(), execution.runId, execution.actorId, execution.jobId, execution.generation);
+        blockActorInitiativeForJob({runId:execution.runId,actorId:execution.actorId,jobId:execution.jobId,
+          generation:execution.generation,reason:code});
         database.prepare(`UPDATE actor_turn_job_inputs SET state='released' WHERE run_id=? AND actor_id=? AND job_id=? AND generation=? AND state='assigned'`)
           .run(execution.runId, execution.actorId, execution.jobId, execution.generation);
         return ActorTurnJobFailureResultSchema.parse({ kind: 'blocked', job: actorTurnJobView(database.prepare(`SELECT * FROM actor_turn_jobs WHERE run_id=? AND actor_id=? AND job_id=? AND generation=?`)
@@ -8441,6 +10047,7 @@ export function openJournal(input: { path: string }) {
           WHERE job_id=? AND generation=? AND state='reserved' LIMIT 1`)
           .get(execution.jobId, execution.generation);
         if (outstanding !== undefined) throw new Error('El job Pi conserva una reserva sin reconciliar');
+        requireIcmPacketPresent({kind:'actor',execution});
         const result = reserveNextWithinTransaction({
           runId: execution.runId, pulseId: execution.pulseId, jobId: execution.jobId, generation: execution.generation,
           ...(request.clockEpochId===undefined?{}:{clockEpochId:request.clockEpochId,ownerToken:execution.lease.ownerToken}),
@@ -8463,6 +10070,8 @@ export function openJournal(input: { path: string }) {
           if (reservation.state !== 'reserved') throw new Error('Una reserva ya despachada no autoriza otro transporte');
           const eligibility = actorJobEligibility(request.execution);
           if (eligibility.kind !== 'active') throw new Error(`Job Pi inactivo: ${eligibility.reason}`);
+          requireIcmPacketPresent({kind:'actor',execution:request.execution},
+            {allowedActorRequest:{jobId:request.execution.jobId,generation:request.execution.generation,requestSeq:request.requestSeq}});
           const checkpointValue = database.prepare(`SELECT payload_json,checkpoint_hash FROM actor_job_checkpoints
             WHERE job_id=? AND generation=? AND purpose_kind='request-input' AND request_seq=?`)
             .get(request.execution.jobId, request.execution.generation, request.requestSeq);

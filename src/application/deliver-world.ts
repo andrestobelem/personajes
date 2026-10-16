@@ -108,9 +108,9 @@ function createPerceptionExperience(input: {
   worldSeq: z.infer<typeof WorldSeqSchema>;
 }) {
   const { perception } = input;
-  // Direct observations are already a typed private perception. They have no
-  // event ID and therefore cannot be represented as event-backed Experiences.
-  if (perception.kind === 'observation') return undefined;
+  // Direct observations and execution feedback are typed private perceptions.
+  // Neither is a public event, so neither can become an event-backed Experience.
+  if (perception.kind === 'observation' || perception.kind === 'actionFeedback') return undefined;
 
   const common = {
     schemaVersion: 1 as const,
@@ -144,7 +144,7 @@ function createPerceptionExperience(input: {
   });
 }
 
-function experienceContent(perception: Exclude<WorldPerception, { kind: 'observation' }>): string {
+function experienceContent(perception: Exclude<WorldPerception, { kind: 'observation' | 'actionFeedback' }>): string {
   switch (perception.kind) {
     case 'testimony': return perception.content.text;
     case 'communication':

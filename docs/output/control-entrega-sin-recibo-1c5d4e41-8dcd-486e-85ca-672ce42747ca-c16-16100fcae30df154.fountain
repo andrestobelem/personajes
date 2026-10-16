@@ -1,0 +1,49 @@
+Title: CONTROL: entrega sin recibo
+Source: Registro público confirmado de Personajes
+Draft date: 1966-06-18T14:00:12.500Z
+
+[[Representación 1c5d4e41-8dcd-486e-85ca-672ce42747ca; configuración 1; configuración SHA-256 418ec0e2effb25c427565ed9fe4932d54e301da39b48f2e7b3b0af68e683bc62; commit 16; revisión 16; secuencia 13]]
+
+[[Sólo acontecimientos y emisiones públicas confirmadas. Las palabras de un personaje no prueban sus afirmaciones ni acciones. Los vacíos no se completan. La fecha de portada es ficticia UTC. Las voces en off se agrupan por el corte de su fuente; su publicación puede ser posterior y no atribuye percepciones al elenco.]]
+
+.ENTREGA SIN RECIBO - SALA DE ENLACE DE CONTROL / ARCHIVO DE CONTROL
+
+
+[[Apertura de episodio; commit 1; revisión estructural 1]]
+
+@HYMIE
+Max, antes de pasarte el maletín, acordemos algo: ¿te harás responsable de dejarlo cerrado en el Archivo y volverás a avisarme cuando esté allí?
+
+@MAXWELL SMART
+Sí, Hymie. Me hago responsable: lo dejaré cerrado en el Archivo y volveré aquí para avisarte. Puedes confiar en mí; el regreso también forma parte de mi plan.
+
+!Maxwell Smart esperó.
+
+!Hymie ofreció Maletín de traslado de CONTROL a Maxwell Smart.
+
+!Maxwell Smart aceptó la entrega de Maletín de traslado de CONTROL de Hymie.
+
+@HYMIE
+Gracias, Max. Te esperaré aquí.
+
+!Maxwell Smart se desplazó de Sala de enlace de CONTROL a Archivo de CONTROL.
+
+!Maxwell Smart dejó Maletín de traslado de CONTROL en Archivo de CONTROL.
+
+!Maxwell Smart se desplazó de Archivo de CONTROL a Sala de enlace de CONTROL.
+
+@MAXWELL SMART
+Hymie, dejé el maletín cerrado en el Archivo. Y aquí estoy para avisarte, tal como acordamos.
+
+@HYMIE
+Gracias por volver a avisarme, Max. Eso era lo que necesitaba saber. Buen trabajo, compañero.
+
+@MAXWELL SMART
+Gracias, Hymie. Buen trabajo de los dos.
+
+!Hymie asiente.
+
+[[Cierre de escena; commit 15; revisión estructural 2]]
+
+[[Cierre de episodio; commit 16; revisión estructural 3]]
+

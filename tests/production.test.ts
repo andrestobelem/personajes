@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createIcmWorkspaceSnapshot, hashIcmMarkdown } from '../src/domain/icm-workspace.ts';
+import { ICM_CONTEXT_COMPILER_VERSION } from '../src/application/icm-context-compiler.ts';
 import { randomUUID } from 'node:crypto';
 import { projectRunPreflightReport } from '../src/application/run-preflight-jobs.ts';
 import { test } from 'node:test';
@@ -890,4 +892,29 @@ test('bound nonverbal effects require credentials and matching assets independen
  const present=await run('present',[binding]);assert.ok(present.checks.some(check=>check.checkId==='voice'&&check.kind==='passed'),JSON.stringify(present));
  assert.ok((await run('missing',[binding])).checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'&&check.code==='voice-credential-missing'));
  assert.ok((await run('present',[])).checks.some(check=>check.checkId==='voice'&&check.kind==='blocked'&&check.code==='voice-binding-invalid'));
+});
+
+test('selected Markdown requires the explicit supported host capability; legacy does not probe it', async () => {
+  const base = readyFixture();
+  const icmWorkspace = createIcmWorkspaceSnapshot({sources: [
+    {sourceId: 'fixture.actor', audience: {role: 'actor', actorId}},
+    {sourceId: 'fixture.continuista', audience: {role: 'continuista'}},
+    {sourceId: 'fixture.director', audience: {role: 'director'}},
+    {sourceId: 'fixture.configurator', audience: {role: 'configurator'}},
+  ].map(source => ({...source, revision: 0, sourceHash: hashIcmMarkdown('Synthetic admitted source.'),
+    sections: [{sectionId: 'process', markdown: 'Synthetic contract.'}]}))});
+  const configuration = ReadyRunConfigurationSchema.parse({...base, icmWorkspace});
+  const evaluate = (host: ProductionPreflightHostPort) => createProductionPreflightPort({host}).preflight({configuration, observedAt: recordedAt});
+  const missing = await evaluate(hostFixture({}, configuration));
+  assert.equal(missing.kind, 'blocked');
+  assert.ok(missing.checks.some(entry => entry.kind === 'unavailable' && entry.checkId === 'icm-context-runtime'));
+  const wrong = await evaluate(hostFixture({async readIcmContextRuntimeReadiness() {return {kind: 'ready', compilerVersion: 'unknown'};}}, configuration));
+  assert.equal(wrong.kind, 'blocked');
+  const supported = await evaluate(hostFixture({async readIcmContextRuntimeReadiness() {return {kind: 'ready', compilerVersion: ICM_CONTEXT_COMPILER_VERSION};}}, configuration));
+  assert.equal(supported.kind, 'passed', JSON.stringify(supported));
+  assert.ok(supported.checks.some(entry => entry.kind === 'passed' && entry.checkId === 'icm-context-runtime'));
+  let reads = 0;
+  const legacy = await createProductionPreflightPort({host: hostFixture({async readIcmContextRuntimeReadiness() {reads += 1; throw new Error('Legacy does not select ICM');}}, base)})
+    .preflight({configuration: base, observedAt: recordedAt});
+  assert.equal(legacy.kind, 'passed'); assert.equal(reads, 0);
 });

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SessionModeSchema } from "../domain/http.ts";
-import type { RunStageView } from "../domain/run-observation.ts";
+import type { ConversationView, RunStageView } from "../domain/run-observation.ts";
 import { HumanInterventionRequestSchema } from "../domain/interaction-schema.ts";
 import {
   captureHumanIntent,
@@ -26,7 +26,7 @@ export function HumanInteractionPanel({
   api = defaultApi,
 }: {
   runId: string;
-  participants: RunStageView["humanParticipants"];
+  participants: Array<Pick<RunStageView["humanParticipants"][number],"participantId"|"label">>;
   lifecycle: RunStageView["lifecycle"];
   api?: HumanInteractionClient;
 }) {
@@ -85,6 +85,31 @@ export function HumanInteractionPanel({
     session?.view.mode.kind === "interlocutor" &&
     session.view.mode.runId === runId &&
     session.view.mode.participantId === participantId;
+  const [reception,setReception]=useState<{scope:string;items:ConversationView[]}|null>(null);
+  const [receptionError,setReceptionError]=useState('');
+  const receptionScope=`${runId}:${participantId}`;
+  useEffect(()=>{
+    setReception(null);setReceptionError('');
+    if(!active||api.receptions===undefined)return;
+    let live=true;
+    let inFlight=false;
+    let throughWorldSeq=0;
+    const confirmed=new Map<string,ConversationView>();
+    async function poll(){
+      if(inFlight)return;inFlight=true;
+      try{
+        const page=await api.receptions(runId,participantId,throughWorldSeq);
+        if(live){
+          for(const item of page.items)confirmed.set(item.eventId,item);
+          throughWorldSeq=page.throughWorldSeq;
+          setReception({scope:receptionScope,items:[...confirmed.values()].sort((a,b)=>a.worldSeq-b.worldSeq)});setReceptionError('');
+        }
+      }catch(error){if(live){setReception(null);setReceptionError(error instanceof Error?error.message:'Recepción no disponible');}}
+      finally{inFlight=false;}
+    }
+    void poll();const timer=setInterval(()=>void poll(),2000);
+    return()=>{live=false;clearInterval(timer);};
+  },[api,active,runId,participantId,receptionScope]);
   async function refresh() {
     const started = epoch.current;
     setBusy(true);
@@ -172,6 +197,13 @@ export function HumanInteractionPanel({
       aria-label="Interlocución humana"
     >
       <h3>Interlocución humana</h3>
+      {active&&<section aria-label="Recepción de la identidad activa">
+        <h4>Recepción humana confirmada</h4>
+        <p>Emisiones que alcanzaron esta identidad. Recibir no confirma lectura ni memoria ICM. Los registros históricos sin audiencia humana no se atribuyen retroactivamente.</p>
+        {receptionError&&<p role="alert">{receptionError}</p>}
+        {reception?.scope===receptionScope&&reception.items.length===0&&<p>No hay emisiones recibidas por esta identidad en el registro consultado.</p>}
+        {reception?.scope===receptionScope?<ol>{reception.items.map(item=><li key={item.eventId}><strong>{item.speaker.label}</strong>: {item.content.kind==='speech'?item.content.text:'Gesto confirmado'} · {item.channel.label}</li>)}</ol>:<p>Consultando recepción…</p>}
+      </section>}
       <p>
         Modo confirmado:{" "}
         {session === null

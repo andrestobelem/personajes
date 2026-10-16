@@ -13,9 +13,10 @@ import { configuratorValueHash } from '../../src/application/configurator-contex
 import { compileConfiguratorEvolutionContext } from '../../src/application/configurator-evolution-context.ts';
 import { freezeExperience } from '../../src/application/experience-envelope.ts';
 import { setup,actorId } from './continuista.ts';
+import type { IcmWorkspaceSnapshot } from '../../src/domain/icm-workspace.ts';
 
 /** Synthetic test identities anchored to an actual SQLite commit and delivered experience archive. */
-export async function configuratorEvolutionFixture(){
+export async function configuratorEvolutionFixture(options:{icmWorkspace?:IcmWorkspaceSnapshot}={}){
   const originalBase=await setup();
   const original=await readDossier({catalog:await loadCatalog({repositoryRoot:process.cwd()}),characterId:'maxwell-smart'});
   const originalDossier=DossierSchema.parse({...original,characterId:actorId,displayName:'Expediente sintético para pruebas del Configurador',unknowns:[...original.unknowns,'Vacío sintético conservado'],contradictions:[...original.contradictions,'Discrepancia documental sintética conservada']});
@@ -24,7 +25,7 @@ export async function configuratorEvolutionFixture(){
     const section=<T extends {provenance:{dossierRevision:number;dossierHash:string}}>(value:T)=>({...value,provenance:{...value.provenance,dossierRevision:originalDossier.revision,dossierHash:originalDossier.contentHash}});
     return PreparedCharacterSchema.parse({...actor,dossierRevision:originalDossier.revision,dossierHash:originalDossier.contentHash,identity:section(actor.identity),voice:section(actor.voice),antecedents:{...section(actor.antecedents),value:actor.antecedents.value.map(section)},goals:section(actor.goals),relationships:section(actor.relationships),capabilities:section(actor.capabilities),inventory:section(actor.inventory),initialExperience:section(actor.initialExperience),unknownPolicy:section(actor.unknownPolicy)});
   });
-  const configuration=ReadyRunConfigurationSchema.parse({...originalBase.configuration,roster:{...originalBase.configuration.roster,preparedCharacters},preparedActorFences:preparedCharacters.map(actor=>({characterId:actor.characterId,identityVersion:actor.identityVersion,dossierRevision:actor.dossierRevision,dossierHash:actor.dossierHash,continuity:{continuityId:actor.continuity.continuityId,revision:actor.continuity.revision,contentHash:actor.continuity.contentHash}}))});
+  const configuration=ReadyRunConfigurationSchema.parse({...originalBase.configuration,...(options.icmWorkspace===undefined?{}:{icmWorkspace:options.icmWorkspace}),roster:{...originalBase.configuration.roster,preparedCharacters},preparedActorFences:preparedCharacters.map(actor=>({characterId:actor.characterId,identityVersion:actor.identityVersion,dossierRevision:actor.dossierRevision,dossierHash:actor.dossierHash,continuity:{continuityId:actor.continuity.continuityId,revision:actor.continuity.revision,contentHash:actor.continuity.contentHash}}))});
   const journalPath=join(originalBase.directory,'configurator.sqlite');const journal=openJournal({path:journalPath});
   const base={...originalBase,configuration,journal,close(){journal.close();originalBase.close();}};
   try{

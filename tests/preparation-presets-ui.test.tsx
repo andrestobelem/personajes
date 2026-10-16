@@ -26,8 +26,16 @@ test('el selector permite cancelar, crear en blanco y revisar ensayo o continuid
     defineGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       requests.push({ url, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : null });
-      if (url === '/api/v1/session') return Response.json({ csrfToken: 's'.repeat(32), expiresAt: '2026-10-15T12:00:00Z' });
+      if (url === '/api/v1/session') return init?.method === 'POST'
+        ? Response.json({ csrfToken: 's'.repeat(32), expiresAt: '2026-10-15T12:00:00Z' })
+        : Response.json({ kind: 'authenticated', expiresAt: '2026-10-15T12:00:00Z', capabilities: ['session.mode'], mode: { kind: 'observer' }, sessionRevision: 0 }, { headers: { ETag: '"session:r0"' } });
       if (url.startsWith('/api/v1/runs?')) return Response.json({ items: [] });
+      if (url.startsWith('/api/v1/icm-workspace/sources?')) {
+        const query = new URL(url, 'http://localhost').searchParams;
+        const role = query.get('role');
+        const audience = role === 'actor' ? { role, actorId: query.get('actorId') } : { role };
+        return Response.json({ kind: 'icm-workspace-sources', audience, sources: [] });
+      }
       if (url === '/api/v1/runs' && init?.method === 'POST') return Response.json({ error: { kind: 'validation', code: 'test-stop', message: 'Guardado detenido por el servidor de prueba.', issues: [] }, requestId: '00000000-0000-4000-8000-000000000001' }, { status: 400 });
       throw new Error(`Solicitud inesperada: ${url}`);
     }),
@@ -38,7 +46,7 @@ test('el selector permite cancelar, crear en blanco y revisar ensayo o continuid
     const container = dom.window.document.getElementById('root');
     assert.ok(container);
     const root = createRoot(container); unmount = () => root.unmount();
-    const catalog = ['maxwell-smart', 'hymie'].map((id) => CatalogCharacterSummarySchema.parse({ characterId: id, displayName: id === 'hymie' ? 'Hymie' : 'Maxwell Smart', revision: 0, hash: 'a'.repeat(64), curationStatus: 'unreviewed', avatarRef: { kind: 'catalog-reference', slug: id } }));
+    const catalog = ['maxwell-smart', 'hymie', 'agente-99', 'jefe'].map((id) => CatalogCharacterSummarySchema.parse({ characterId: id, displayName: id === 'hymie' ? 'Hymie' : 'Maxwell Smart', revision: 0, hash: 'a'.repeat(64), curationStatus: 'unreviewed', avatarRef: { kind: 'catalog-reference', slug: id } }));
     await act(async () => root.render(React.createElement(RunDraftWorkspace, { catalog })));
     const button = (text: string) => {
       const match = [...container.querySelectorAll('button')].find((entry) => entry.textContent === text);
@@ -72,7 +80,8 @@ test('el selector permite cancelar, crear en blanco y revisar ensayo o continuid
     const accept = nameSection.querySelector('button'); assert.ok(accept);
     await act(async () => accept.click());
     assert.match(nameSection.textContent ?? '', /Configurado/);
-    assert.equal(requests.filter((request) => request.url !== '/api/v1/session' && !request.url.startsWith('/api/v1/runs?')).length, 0, 'Seleccionar y confirmar propuestas sólo edita el candidato local.');
+    const sourceReads = (request: typeof requests[number]) => request.url.startsWith('/api/v1/icm-workspace/sources?') && request.method === 'GET' && request.body === null;
+    assert.equal(requests.filter((request) => request.url !== '/api/v1/session' && !request.url.startsWith('/api/v1/runs?') && !sourceReads(request)).length, 0, 'Seleccionar y confirmar propuestas sólo edita el candidato local; el editor puede consultar fuentes ICM.');
     await click('Guardar borrador');
     await until(() => requests.some((request) => request.url === '/api/v1/runs'));
     const saved = requests.find((request) => request.url === '/api/v1/runs'); assert.ok(saved?.body);
@@ -87,11 +96,19 @@ test('el selector permite cancelar, crear en blanco y revisar ensayo o continuid
     await until(() => container.textContent?.includes('Guardado detenido por el servidor de prueba.') === true);
     assert.match(container.textContent ?? '', /Ensayo de conocimiento: Max y Hymie/);
     await click('＋ Nueva preparación'); await click('Descartar cambios y abrir');
+    const beforeEnsemble = requests.length;
+    await click('Proponer puesta Max, 99 y Jefe');
+    await until(() => container.querySelector('.draft-editor') !== null);
+    assert.match(container.textContent ?? '', /Puesta de CONTROL propuesta/);
+    assert.match(container.textContent ?? '', /exige biografía y deseos completos/);
+    assert.match(container.textContent ?? '', /0 contextos preparados/);
+    assert.equal(requests.slice(beforeEnsemble).some((request) => request.method !== 'GET'), false, 'Proposing the ensemble neither saves nor invokes a model.');
+    await click('＋ Nueva preparación'); await click('Descartar cambios y abrir');
     assert.equal(button('Proponer continuidad elegida').disabled, true);
     const cut = DOCUMENTED_CONTINUITY_CUTS[0]; assert.ok(cut);
     const select = container.querySelector('#documented-continuity-cut');
     assert.ok(select instanceof dom.window.HTMLSelectElement);
-    const priorRequestCount = requests.length;
+    const priorRequests = requests.length;
     await act(async () => { select.value = cut.id; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
     const sources = container.querySelector('[aria-label="Fuentes y límites del corte"]'); assert.ok(sources);
     for (const source of cut.sources) {
@@ -100,7 +117,7 @@ test('el selector permite cancelar, crear en blanco y revisar ensayo o continuid
     }
     await click('Proponer continuidad elegida');
     await until(() => container.textContent?.includes('Corte documental propuesto.') === true);
-    assert.equal(requests.length, priorRequestCount, 'Elegir un corte documentado no escribe ni consulta servicios.');
+    assert.ok(requests.slice(priorRequests).every(request => sourceReads(request) || request.url === '/api/v1/session' && request.method === 'GET' && request.body === null), 'Elegir un corte documentado sólo consulta sesión y fuentes ICM; no cambia el modo, guarda ni ejecuta.');
     assert.equal(container.querySelector('#draft-fictionalAt input')?.getAttribute('value'), '');
     await click('Guardar borrador');
     await until(() => requests.filter((request) => request.url === '/api/v1/runs').length === 2);

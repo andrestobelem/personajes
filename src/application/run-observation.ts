@@ -83,12 +83,15 @@ export function projectRunStage(input:{snapshot:WorldSnapshot;configuration:unkn
   }
   const connections=world.connections.filter((connection)=>visiblePlaces.has(connection.from)&&visiblePlaces.has(connection.to));
   const doorIds=new Set(connections.flatMap((connection)=>connection.doorId===null?[]:[connection.doorId]));
-  const humanParticipants=configuration.humanParticipants.flatMap<RunStageView['humanParticipants'][number]>((profile)=>{
-    const presence=profile.presence;
-    if (presence.kind==='remote') return [{participantId:profile.identity.participantId,label:profile.identity.displayName,presence:'remote',placeId:null,position:null}];
-    const place=places.find((candidate)=>candidate.id===presence.placeId);
-    if (presence.sceneId!==scene.id||place===undefined||presence.position.x<0||presence.position.x>place.width||presence.position.y<0||presence.position.y>place.height) return [];
-    return [{participantId:profile.identity.participantId,label:profile.identity.displayName,presence:'inScene',placeId:presence.placeId,position:presence.position}];
+  const humanParticipants=configuration.humanParticipants.map<RunStageView['humanParticipants'][number]>((profile)=>{
+    const confirmed=world.humanParticipants?.find(human=>human.participantId===profile.identity.participantId);
+    const presence=confirmed?.presence??profile.presence;
+    const base={participantId:profile.identity.participantId,label:confirmed?.label??profile.identity.displayName,
+      presence:presence.kind,presenceConfirmation:confirmed===undefined?'prepared':'confirmed'};
+    const place=places.find(candidate=>candidate.id===presence.placeId);
+    const located=place!==undefined&&presence.position.x>=0&&presence.position.x<=place.width&&presence.position.y>=0&&presence.position.y<=place.height
+      &&(presence.kind==='remote'?confirmed!==undefined:presence.sceneId===scene.id);
+    return RunStageViewSchema.shape.humanParticipants.element.parse({...base,placeId:located?presence.placeId:null,position:located?presence.position:null});
   });
   return RunStageViewSchema.parse({kind:'run-stage',runId:world.runId,configRevision:configuration.configRevision,
     worldRevision:world.revision,worldSeq:world.seq,commitIndex:input.commitIndex??0,fictionalAt:world.clock.instant,clock:world.clock,...cycle,lifecycle:input.lifecycle,lifecycleAsOf:'current',
@@ -124,7 +127,7 @@ function speakerFor(event:WorldEvent,snapshot:WorldSnapshot,stage:RunStageView) 
   const ref=characterReference(snapshot,stage,event.origin.actorId);
   return ref===undefined?undefined:PublicSpeakerSchema.parse({kind:'character',...ref});
 }
-function eventSummary(event:WorldEvent,stage:RunStageView,speaker:z.infer<typeof PublicSpeakerSchema>|null):string|undefined {
+function eventSummary(event:WorldEvent,snapshot:WorldSnapshot,stage:RunStageView,speaker:z.infer<typeof PublicSpeakerSchema>|null):string|undefined {
   const label=speaker?.label??'Escenario';
   const object=(entityId:string)=>stage.entities.find((entity)=>entity.entityId===entityId)?.label;
   switch(event.kind) {
@@ -137,7 +140,34 @@ function eventSummary(event:WorldEvent,stage:RunStageView,speaker:z.infer<typeof
       return from===undefined||to===undefined?undefined:`${label} se desplazó de ${from} a ${to}.`;
     }
     case 'objectTaken':return object(event.objectEntityId)===undefined?undefined:`${label} tomó ${object(event.objectEntityId)}.`;
-    case 'offerCreated':case 'offerAccepted':case 'offerInvalidated':return object(event.objectEntityId)===undefined?undefined:`Una oferta sobre ${object(event.objectEntityId)} cambió de estado.`;
+    case 'objectPlaced': {
+      const item=object(event.objectEntityId);
+      const place=stage.places.find(candidate=>candidate.id===event.placeId);
+      return item===undefined||place===undefined?undefined:`${label} dejó ${item} en ${place.name}.`;
+    }
+    case 'offerCreated': {
+      const item=object(event.objectEntityId);
+      if(item===undefined)return undefined;
+      const recipient=characterReference(snapshot,stage,event.recipientCharacterId);
+      return `${label} ofreció ${item}${recipient===undefined?'':` a ${recipient.label}`}.`;
+    }
+    case 'offerAccepted': {
+      const item=object(event.objectEntityId);
+      if(item===undefined)return undefined;
+      const owner=stage.entities.find(entity=>entity.kind==='character'&&entity.entityId===event.fromHolderEntityId);
+      return `${label} aceptó la entrega de ${item}${owner===undefined?'':` de ${owner.label}`}.`;
+    }
+    case 'offerInvalidated': {
+      const item=object(event.objectEntityId);
+      if(item===undefined)return undefined;
+      switch(event.cause) {
+        case 'expired':return `Venció la oferta de ${item}.`;
+        case 'withdrawn':return `Se retiró la oferta de ${item}.`;
+        case 'acceptedElsewhere':return `La oferta de ${item} quedó sin efecto por otra entrega aceptada.`;
+        case 'objectUnavailable':return `La oferta de ${item} quedó sin efecto porque el objeto dejó de estar disponible para esa entrega.`;
+        default:{const exhaustive:never=event.cause;throw new Error(String(exhaustive));}
+      }
+    }
     case 'deviceUsed':return object(event.deviceEntityId)===undefined?undefined:`${label} utilizó ${object(event.deviceEntityId)}.`;
     case 'waited':return `${label} esperó.`;
     case 'rested':return `${label} descansó.`;
@@ -199,7 +229,7 @@ export function createRunObservationApplication(input:{journal:Journal}) {
     for(const {event,snapshot,commitIndex} of rows) {
       const stage=projectRunStage({snapshot,configuration,lifecycle:state.lifecycle});
       const speaker=speakerFor(event,snapshot,stage);if(speaker===undefined)continue;
-      const summary=eventSummary(event,stage,speaker);if(summary===undefined)continue;
+      const summary=eventSummary(event,snapshot,stage,speaker);if(summary===undefined)continue;
       events.push(ConfirmedEventViewSchema.parse({kind:'confirmed-event',eventId:event.id,runId:request.runId,
         worldSeq:event.seq,commitIndex,fictionalAt:event.fictitiousAt,durationMs:event.durationMs,sceneId:stage.activeSceneId,eventType:event.kind,speaker,summary}));
       if((event.kind!=='communicated'&&event.kind!=='humanIntervention')||speaker===null)continue;
@@ -214,6 +244,8 @@ export function createRunObservationApplication(input:{journal:Journal}) {
       conversations.push(ConversationViewSchema.parse({kind:'published-communication',eventId:event.id,runId:request.runId,
         worldSeq:event.seq,commitIndex,fictionalAt:event.fictitiousAt,sceneId:stage.activeSceneId,speaker,channel:{id:channel.id,label:channel.label},
         content:event.content,emission:'emitted',requestedRecipients:refs(event.requestedAudience),effectiveAudience:refs(event.effectiveAudience),
+        ...(event.kind==='communicated'&&event.requestedHumanAudience!==undefined?{requestedHumanRecipients:event.requestedHumanAudience.map((participantId)=>({participantId,label:snapshot.humanParticipants?.find((human)=>human.participantId===participantId)?.label??participantId}))}:{}),
+        ...(event.kind==='communicated'&&event.effectiveHumanAudience!==undefined?{effectiveHumanAudience:event.effectiveHumanAudience.map((participantId)=>({participantId,label:snapshot.humanParticipants?.find((human)=>human.participantId===participantId)?.label??participantId}))}:{}),
         requestedRecipientCount:event.requestedAudience.length,effectiveAudienceCount:event.effectiveAudience.length,deliveries}));
     }
     const last=rows.at(-1);

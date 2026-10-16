@@ -14,6 +14,7 @@ import {
 import { resolveHumanIntervention } from '../src/domain/human-intervention.ts';
 import { projectHumanInteractionContext } from '../src/domain/interaction.ts';
 import { createEmptyRunConfigurationDraft } from '../src/domain/production.ts';
+import { createIcmWorkspaceSnapshot, hashIcmMarkdown, type IcmWorkspaceAudience } from '../src/domain/icm-workspace.ts';
 import { WorldSnapshotSchema } from '../src/domain/world.ts';
 import { HumanInterventionCommitSchema } from '../src/domain/world-journal.ts';
 import { draftFixture } from './fixtures/continuista.ts';
@@ -490,8 +491,26 @@ test('HTTP promueve atómicamente una configuración válida y devuelve un recei
   const session = await createSession(origin);
   const clientRunId = '00000000-0000-4000-8000-000000000502';
   const candidate = draftFixture();
+  assert.equal(candidate.roster.kind, 'configured');
+  const activeActor = candidate.roster.value.activeCharacterIds[0]; assert.ok(activeActor);
+  const audiences: IcmWorkspaceAudience[] = [
+    { role: 'actor', actorId: activeActor },
+    { role: 'continuista' }, { role: 'director' }, { role: 'configurator' },
+  ];
+  const workspace = createIcmWorkspaceSnapshot({ sources: audiences.map((audience, index) => ({
+    sourceId: `test.promotion.${index}`, audience, revision: 0, sourceHash: hashIcmMarkdown('Contrato de prueba.'),
+    sections: [{ sectionId: 'process', markdown: 'Contrato de prueba.' }],
+  })) });
+  // This HTTP promotion test supplies a controlled source authority. Real
+  // filesystem admission is exercised by icm-workspace-save-http.test.ts.
+  journal.setPreparationSourceAdmission(({ candidate: admitted }) => {
+    assert.equal(admitted.icmWorkspace?.kind, 'configured');
+    if (admitted.icmWorkspace?.kind === 'configured') assert.deepEqual(admitted.icmWorkspace.value, workspace);
+  });
   const configuration = {
     ...candidate,
+    icmWorkspace: { kind: 'configured', value: workspace,
+      evidence: { kind: 'operator-choice', operatorId: 'http-test', recordedAt: '2026-10-15T12:00:00Z' } },
     runId: clientRunId,
     revision: 0,
     worldSnapshot: candidate.worldSnapshot.kind === 'configured'

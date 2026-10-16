@@ -18,8 +18,8 @@ export function PreparationPresetChooser(props: {
     <div className="form-row">
       {PREPARATION_PRESETS.map((preset) => <section className="edit-notice" key={preset.id}>
         <h3>{preset.label}</h3><p>{preset.description}</p>
-        <button className={preset.id === 'fibonacci' ? 'primary-button' : undefined} onClick={() => props.onChoose(preset.id)}>{preset.id === 'fibonacci' ? 'Proponer ensayo Max y Hymie' : 'Empezar en blanco'}</button>
-        {preset.id === 'fibonacci' ? <details><summary>Ver propuestas y límites del ensayo</summary>
+        <button className={preset.id === 'control-ensemble' ? 'primary-button' : undefined} onClick={() => props.onChoose(preset.id)}>{preset.buttonLabel}</button>
+        {preset.id !== 'blank' ? <details><summary>Ver propuestas y límites de la puesta</summary>
           <p>Propone fecha, lugar, mapa, reparto y propósito. La identidad y los antecedentes de cada actor requieren curación explícita. Tras prepararlos, colocalos en la escena desde el editor del Escenario.</p>
           <p>Sugerencias de objetivos para revisar durante la curación:</p><ul>{preset.goalSuggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}</ul>
           <p>Estas sugerencias no se agregan automáticamente a los objetivos ni garantizan una respuesta.</p>

@@ -37,6 +37,7 @@ export function remapForkWorld(input:{snapshot:WorldSnapshot;targetRunId:RunId;i
     connections:source.connections.map(connection=>({...connection,doorId:connection.doorId===null?null:ids.id('door',connection.doorId)})),
     perceptualPaths:source.perceptualPaths.map(path=>({...path,throughDoorIds:path.throughDoorIds.map(id=>ids.id('door',id)),...(path.kind==='auditory'?{channelId:ids.id('channel',path.channelId)}:{})})),
     channels:source.channels.map(channel=>({...channel,id:ids.id('channel',channel.id)})),entities,
+    ...(source.humanParticipants===undefined?{}:{humanParticipants:source.humanParticipants.map(human=>({...human,presence:{...human.presence,channelId:ids.id('channel',human.presence.channelId),...(human.presence.kind==='inScene'?{sceneId:ids.id('scene',human.presence.sceneId)}:{})}}))}),
     inventory:source.inventory.map(entry=>({...entry,objectEntityId:ids.id('entity',entry.objectEntityId),location:entry.location.kind==='atPlace'?entry.location:entry.location.kind==='heldBy'?{...entry.location,entityId:ids.id('entity',entry.location.entityId)}:{...entry.location,eventId:ids.id('event',entry.location.eventId)}})),
     scenes:source.scenes.map(scene=>({...scene,id:ids.id('scene',scene.id)})),
     activeSceneId:source.activeSceneId===null?null:ids.id('scene',source.activeSceneId),
@@ -55,6 +56,7 @@ export function remapForkActorKnowledge(input:{knowledge:ActorKnowledge;targetRu
       case 'entity':return {...binding,handle,entityId:ids.id('entity',binding.entityId)};
       case 'place':return {...binding,handle};
       case 'channel':return {...binding,handle,channelId:ids.id('channel',binding.channelId)};
+      case 'human':return {...binding,handle};
       case 'offer':return {...binding,handle,offerId:ids.id('offer',binding.offerId)};
       default:{const exhaustive:never=binding;throw new Error(`Binding no contemplado: ${exhaustive}`);}
     }

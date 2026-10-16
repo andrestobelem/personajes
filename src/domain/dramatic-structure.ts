@@ -62,6 +62,11 @@ export const DramaticStructureViewSchema = z.strictObject({
   unassignedLegacyScenes: z.array(WorldSceneSchema).max(10_000),
 });
 
+/** Presentation-only metadata from the confirmed world cut; excluded from durable structure hashes. */
+export const DramaticStructurePresentationSchema = DramaticStructureViewSchema.extend({
+  sceneLabels: z.array(z.strictObject({ id: SceneIdSchema, label: z.string().min(1).max(200) })).max(10_000).optional(),
+});
+
 export const DramaticStructureSceneOptionsSchema = z.strictObject({
   runId: RunIdSchema,
   worldRevision: RevisionSchema,

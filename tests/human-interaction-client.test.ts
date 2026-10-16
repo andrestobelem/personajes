@@ -136,3 +136,25 @@ test("domain participant slug is preserved and invalid IDs cannot build a reques
     ),
   );
 });
+
+test('recepciones no aceptan una página de otra identidad y no envían selector de identidad al servidor',async()=>{
+  let seen='';
+  const api=createHumanInteractionClient(async(input)=>{
+    seen=String(input);
+    return new Response(JSON.stringify({kind:'human-reception-page',runId,participantId:'otra-identidad',fromWorldSeq:0,toWorldSeq:0,lastWorldSeq:0,nextCursor:null,items:[]}));
+  });
+  await assert.rejects(api.receptions(runId,participantId),/otra identidad/);
+  assert.equal(seen,`/api/v1/runs/${runId}/human-receptions?limit=100`);
+});
+
+test('bandeja incremental mantiene corte de paginación incluso sin recepciones en páginas intermedias',async()=>{
+  const urls:string[]=[];
+  const api=createHumanInteractionClient(async(input)=>{
+    urls.push(String(input));
+    const next=urls.length===1?'cursor-segundo':null;
+    return new Response(JSON.stringify({kind:'human-reception-page',runId,participantId,fromWorldSeq:8,toWorldSeq:20,lastWorldSeq:21,nextCursor:next,items:[]}));
+  });
+  const result=await api.receptions(runId,participantId,8);
+  assert.deepEqual(result.items,[]);assert.equal(result.throughWorldSeq,20);
+  assert.match(urls[0]??'',/fromWorldSeq=8/);assert.match(urls[1]??'',/pageCursor=cursor-segundo/);
+});

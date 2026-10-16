@@ -7,9 +7,15 @@ import { ForkSourceSchema } from '../domain/fork-origin.ts';
 import { ConfiguratorApprovalSchema } from '../domain/configurator.ts';
 import { ConfiguratorJobViewSchema,ConfiguratorJobStoredSchema,ConfiguratorJobExecutionSchema,ConfiguratorJobSessionSchema,ConfiguratorCheckpointSchema,ConfiguratorCandidateSchema,type ConfiguratorJobExecution } from '../domain/configurator-jobs.ts';
 import { AcceptedConfiguratorProposalSchema,IdentityPromotionAuthorityRequestSchema } from '../domain/identity-promotion.ts';
-import { CharacterIdSchema,RevisionSchema,RunIdSchema,HashSchema } from '../domain/values.ts';
+import { CharacterIdSchema,RevisionSchema,WorldSeqSchema,RunIdSchema,HashSchema } from '../domain/values.ts';
 import { compileConfiguratorEvolutionContext } from '../application/configurator-evolution-context.ts';
-import { configuratorValueHash,validateConfiguratorProposal,validateConfiguratorApproval } from '../application/configurator-context.ts';
+import { CONFIGURATOR_SYSTEM_PROMPT,configuratorValueHash,validateConfiguratorProposal,validateConfiguratorApproval } from '../application/configurator-context.ts';
+import { CONFIGURATOR_ICM_PROMPT } from '../application/configurator-prompt.ts';
+import { ReadyRunConfigurationSchema } from '../application/production-preflight.ts';
+import { renderIcmContextPacket } from '../application/icm-context-compiler.ts';
+import { IcmContextPacketSchema,IcmContextPacketScopeSchema } from '../domain/icm-workspace.ts';
+import { IcmContextPacketReceiptSchema } from '../domain/icm-context-jobs.ts';
+import { WorldSnapshotSchema } from '../domain/world-schema.ts';
 import { canonicalDirectorValue } from '../application/director-context.ts';
 import { readPiSessionCheckpointPrefix,verifyPiSessionCheckpointChain } from './pi-session-integrity.ts';
 
@@ -80,6 +86,88 @@ export function openConfiguratorJobLedger(input:{journalPath:string;privateDataR
  function prefix(execution:ConfiguratorJobExecution,snapshot:z.infer<typeof ConfiguratorCheckpointSchema>['snapshot']){if(snapshot.sessionPath===null||snapshot.candidateLeafId===null)throw new Error('CONFIGURATOR_CHECKPOINT_LEAF_MISSING');const proof=readPiSessionCheckpointPrefix({privateDataRoot:input.privateDataRoot,runId:execution.scope.runId,role:'configurador',sessionId:snapshot.sessionId,sessionPath:snapshot.sessionPath,leafId:snapshot.candidateLeafId});if(proof.kind!=='verified')throw new Error('CONFIGURATOR_CHECKPOINT_INVALID');return PrefixSchema.parse(proof);}
  function verifyAccepted(record:z.infer<typeof StoredCandidateSchema>){if(record.acceptedProof===null)throw new Error('CONFIGURATOR_ACCEPTED_PROOF_MISSING');const actual=terminalProof(record.candidate.execution,record.candidate);const {fileHash:priorFile,...prior}=record.acceptedProof;const {fileHash:currentFile,...current}=actual;void priorFile;void currentFile;if(canonicalDirectorValue(prior)!==canonicalDirectorValue(current))throw new Error('CONFIGURATOR_ACCEPTED_PROOF_CHANGED');}
  function updateState(stored:z.infer<typeof ConfiguratorJobStoredSchema>,state:z.infer<typeof ConfiguratorJobViewSchema>['state'],failureCode:string|null){return save({...stored,job:{...stored.job,state,failureCode,revision:stored.job.revision+1,updatedAt:now()}});}
+ function inputSnapshot(runId:string,commitIndex:number){
+  const raw=commitIndex===0
+   ?db.prepare('SELECT initial_snapshot_json snapshot_json,initial_snapshot_hash snapshot_hash FROM world_runs WHERE run_id=?').get(runId)
+   :db.prepare('SELECT snapshot_json,snapshot_hash,world_revision,last_seq FROM world_commits WHERE run_id=? AND commit_index=?').get(runId,commitIndex);
+  if(raw===undefined)throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+  const row=z.object({snapshot_json:z.string(),snapshot_hash:HashSchema,world_revision:RevisionSchema.optional(),last_seq:WorldSeqSchema.optional()}).parse(raw);
+  const snapshot=WorldSnapshotSchema.parse(JSON.parse(row.snapshot_json));
+  if(canonicalDirectorValue(snapshot)!==row.snapshot_json||createHash('sha256').update(row.snapshot_json).digest('hex')!==row.snapshot_hash
+   ||snapshot.runId!==runId||(commitIndex!==0&&(snapshot.revision!==row.world_revision||snapshot.seq!==row.last_seq)))
+   throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+  return {snapshot,hash:row.snapshot_hash};
+ }
+ /** Authority can be checked inside the journal's promotion transaction. Read
+  * immutable historical bytes on this connection; never call a host read that
+  * starts another transaction. The job's sealed anchor supplies the exact hash. */
+ function inputConfiguration(anchor:z.infer<typeof ForkSourceSchema>){
+  const source=inputSnapshot(anchor.runId,anchor.commitIndex);
+  if(source.hash!==anchor.snapshotHash||source.snapshot.revision!==anchor.worldRevision||source.snapshot.seq!==anchor.worldSeq)
+   throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+  const archived=db.prepare('SELECT * FROM run_configuration_revisions WHERE run_id=? AND effective_commit_index<=? ORDER BY effective_commit_index').all(anchor.runId,anchor.commitIndex);
+  function configurationBytes(json:string,hash:string,revision:number,activation:ReturnType<typeof inputSnapshot>){
+   const configuration=ReadyRunConfigurationSchema.parse(JSON.parse(json));
+   if(createHash('sha256').update(json).digest('hex')!==hash||canonicalDirectorValue(configuration)!==json
+     ||configuration.configRevision!==revision||configuration.runId!==anchor.runId
+     ||canonicalDirectorValue(configuration.worldSnapshot)!==canonicalDirectorValue(activation.snapshot))throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+   return configuration;
+  }
+  let configuration:ReturnType<typeof ReadyRunConfigurationSchema.parse>|undefined;
+  if(archived.length===0){
+   if(db.prepare('SELECT 1 FROM run_configuration_revisions WHERE run_id=? LIMIT 1').get(anchor.runId)!==undefined)throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+   const original=z.strictObject({configuration_json:z.string(),configuration_hash:HashSchema,config_revision:RevisionSchema}).parse(db.prepare('SELECT configuration_json,configuration_hash,config_revision FROM world_runs WHERE run_id=?').get(anchor.runId));
+   configuration=configurationBytes(original.configuration_json,original.configuration_hash,original.config_revision,inputSnapshot(anchor.runId,0));
+  }else{
+   let previousRevision:number|undefined;
+   for(const raw of archived){
+   const row=z.strictObject({run_id:RunIdSchema,effective_commit_index:RevisionSchema,configuration_revision:RevisionSchema,configuration_json:z.string(),configuration_hash:HashSchema,
+    continuity_fence_json:z.string(),continuity_fence_hash:HashSchema,activation_snapshot_hash:HashSchema,record_hash:HashSchema}).parse(raw);
+   const {record_hash,...record}=row;
+   if(configuratorValueHash(record)!==record_hash||createHash('sha256').update(row.continuity_fence_json).digest('hex')!==row.continuity_fence_hash
+     ||(previousRevision===undefined?row.effective_commit_index!==0:row.configuration_revision!==previousRevision+1))
+    throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+   const activation=inputSnapshot(anchor.runId,row.effective_commit_index);
+   if(activation.hash!==row.activation_snapshot_hash)throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+   configuration=configurationBytes(row.configuration_json,row.configuration_hash,row.configuration_revision,activation);
+   previousRevision=row.configuration_revision;
+   }
+  }
+  if(configuration===undefined||configuratorValueHash(configuration)!==anchor.configurationHash||configuration.configRevision!==anchor.configurationRevision)
+   throw new Error('CONFIGURATOR_INPUT_SOURCE_MISMATCH');
+  return configuration;
+ }
+ function expectedInput(execution:ConfiguratorJobExecution,stored:z.infer<typeof ConfiguratorJobStoredSchema>){
+  if(stored.context.scope.kind!=='evolution')throw new Error('CONFIGURATOR_INPUT_EXECUTION_MISMATCH');
+  if(canonicalDirectorValue(session(execution).execution)!==canonicalDirectorValue(execution)
+    ||canonicalDirectorValue(execution)!==canonicalDirectorValue(ConfiguratorJobExecutionSchema.parse({role:'configurator',scope:stored.context.scope.scope,contextHash:stored.job.contextHash,lease:stored.lease})))
+   throw new Error('CONFIGURATOR_INPUT_EXECUTION_MISMATCH');
+  const anchor=stored.job.source;
+  const configuration=inputConfiguration(anchor);
+  const raw=db.prepare("SELECT * FROM icm_context_packets WHERE run_id=? AND role='configurator' AND actor_id='' AND job_id=? AND generation=?")
+   .get(stored.job.runId,stored.job.jobId,stored.job.generation);
+  const workspace=configuration.icmWorkspace;
+  if(workspace===undefined){if(raw!==undefined)throw new Error('CONFIGURATOR_INPUT_UNEXPECTED_ICM_PACKET');return canonicalDirectorValue(stored.context);}
+  if(raw===undefined)throw new Error('CONFIGURATOR_INPUT_ICM_PACKET_MISSING');
+  const row=z.strictObject({run_id:RunIdSchema,role:z.literal('configurator'),actor_id:z.literal(''),job_id:z.uuid(),generation:RevisionSchema,
+   scope_json:z.string(),scope_hash:HashSchema,packet_json:z.string(),packet_hash:HashSchema,receipt_json:z.string(),receipt_hash:HashSchema,created_at:RevisionSchema}).parse(raw);
+  const checksum=(text:string)=>createHash('sha256').update(text).digest('hex');
+  if(checksum(row.scope_json)!==row.scope_hash||checksum(row.packet_json)!==row.packet_hash||checksum(row.receipt_json)!==row.receipt_hash)
+   throw new Error('CONFIGURATOR_INPUT_ICM_PACKET_MISMATCH');
+  const scope=IcmContextPacketScopeSchema.parse(JSON.parse(row.scope_json));
+  const packet=IcmContextPacketSchema.parse(JSON.parse(row.packet_json));
+  const receipt=IcmContextPacketReceiptSchema.parse(JSON.parse(row.receipt_json));
+  const expectedScope=IcmContextPacketScopeSchema.parse({runId:stored.job.runId,configurationRevision:anchor.configurationRevision,jobId:stored.job.jobId,generation:stored.job.generation,audience:{role:'configurator'},cut:{kind:'world-cut',commitIndex:anchor.commitIndex,worldRevision:anchor.worldRevision,worldSeq:anchor.worldSeq}});
+  if(canonicalDirectorValue(scope)!==row.scope_json||canonicalDirectorValue(packet)!==row.packet_json
+    ||canonicalDirectorValue(receipt)!==row.receipt_json
+    ||canonicalDirectorValue(scope)!==canonicalDirectorValue(expectedScope)||canonicalDirectorValue(packet.scope)!==row.scope_json
+    ||canonicalDirectorValue(receipt.scope)!==row.scope_json||receipt.packetHash!==packet.packetHash
+    ||receipt.workspaceSnapshotHash!==workspace.snapshotHash||receipt.preparedContextHash!==undefined
+    ||packet.hostPolicyMarkdown!==CONFIGURATOR_SYSTEM_PROMPT||packet.diegeticContextMarkdown!==canonicalDirectorValue(stored.context))
+   throw new Error('CONFIGURATOR_INPUT_ICM_PACKET_MISMATCH');
+  renderIcmContextPacket({packet,expectedPacketHash:receipt.packetHash,scope:expectedScope,workspace});
+  return CONFIGURATOR_ICM_PROMPT;
+ }
  function terminalProof(execution:ConfiguratorJobExecution,candidate:z.infer<typeof ConfiguratorCandidateSchema>){
   const storedSession=session(execution);const terminal=checkpoint(execution,'terminal-candidate');const purpose=terminal.checkpoint.purpose;
   if(purpose.kind!=='terminal-candidate'||purpose.outcome!=='completed'||purpose.lastRequestSeq===null||terminal.prefix===null)throw new Error('CONFIGURATOR_TERMINAL_INCOMPLETE');
@@ -107,7 +195,7 @@ export function openConfiguratorJobLedger(input:{journalPath:string;privateDataR
   if(chain.at(-1)?.id!==requestInput.prefix.leafId)throw new Error('CONFIGURATOR_INPUT_NOT_ANCESTOR');chain.reverse();
   const messages=chain.filter(entry=>entry.type==='message').map(entry=>z.object({role:z.string()}).passthrough().parse(entry.message));
   const user=messages[0];const stored=byJob(execution.scope.jobId);const text=user===undefined?'':typeof user.content==='string'?user.content:z.array(z.object({type:z.literal('text'),text:z.string()})).parse(user.content).map(item=>item.text).join('');
-  if(user?.role!=='user'||text!==canonicalDirectorValue(stored.context))throw new Error('CONFIGURATOR_INPUT_CONTEXT_MISMATCH');
+  if(user?.role!=='user'||text!==expectedInput(execution,stored))throw new Error('CONFIGURATOR_INPUT_CONTEXT_MISMATCH');
   const toolCalls=messages.flatMap((message,messageIndex)=>{
    if(message.role!=='assistant')return [];
    if(message.provider!==execution.scope.profile.provider||message.model!==execution.scope.profile.model||message.api!==execution.scope.profile.api)throw new Error('CONFIGURATOR_MODEL_PROFILE_MISMATCH');

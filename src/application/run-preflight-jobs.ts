@@ -86,7 +86,15 @@ export async function createRunPreflightJobs(input: {
       if (signal.aborted) throw new Error('Preflight canceled');
       const checkedAt = new Date().toISOString();
       const report = await createProductionPreflightPort({ host }).preflight({ configuration, observedAt: checkedAt });
-      const evidence = RunPreflightPrivateEvidenceSchema.parse(host.readPrivateEvidence({ configuration }));
+      const observedEvidence = RunPreflightPrivateEvidenceSchema.parse(host.readPrivateEvidence({ configuration }));
+      const receipt = observedEvidence.accessReceipt;
+      // An expired (or future) probe can explain a deferred access check, but it
+      // cannot certify access at this evaluation's cut. Preserve the observed
+      // account/profile without attaching that receipt as current proof. The
+      // completion schema still rejects a passed check without its exact proof.
+      const evidence = RunPreflightPrivateEvidenceSchema.parse({ ...observedEvidence,
+        accessReceipt: receipt !== null && Date.parse(receipt.checkedAt) <= Date.parse(checkedAt)
+          && Date.parse(checkedAt) < Date.parse(receipt.expiresAt) ? receipt : null });
       if (signal.aborted) throw new Error('Preflight canceled');
       const evaluation = { fence: frozen.fence, result: projectRunPreflightReport(report, checkedAt), evidence };
       let completed = RunPreflightJobMutationResultSchema.parse(input.journal.completeRunPreflightJob({ runId: job.runId, jobId: job.jobId,

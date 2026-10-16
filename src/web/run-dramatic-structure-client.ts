@@ -4,13 +4,13 @@ import {
   DramaticStructureEventSchema,
   DramaticStructureMutationResultSchema,
   DramaticStructureSceneOptionsSchema,
-  DramaticStructureViewSchema,
+  DramaticStructurePresentationSchema,
 } from '../domain/dramatic-structure.ts';
 import { RunIdSchema, RevisionSchema } from '../domain/values.ts';
 import { bootstrapSession } from './client.ts';
 
 const IdempotencyKeySchema = z.string().uuid();
-const StructureDocumentSchema = DramaticStructureViewSchema.extend({
+const StructureDocumentSchema = DramaticStructurePresentationSchema.extend({
   worldRevision: RevisionSchema, worldSeq: RevisionSchema.optional(), commitIndex: RevisionSchema.optional(),
 });
 const StructureEventsPageSchema = z.strictObject({
