@@ -113,3 +113,13 @@ test('un antecedente con inclusión inexistente recibe la continuidad admitida y
   });
   assert.equal(tool.readCandidate(),undefined);
 });
+
+test('quitar un vacío o contradicción requerido devuelve la lista exacta que falta conservar',async()=>{
+  const f=actorFixture(),actor=f.proposal.actors[0];assert.ok(actor);
+  const tool=createPreparationConfiguratorProposalTool({context:f.context,checkEligibility:()=>({kind:'active'})});
+  await assert.rejects(tool.tool.execute('gaps-removed',{...f.proposal,actors:[{...actor,contradictions:[]}]}),error=>{
+    assert.ok(error instanceof Error);assert.match(error.message,/^PREPARATION_CONFIGURATOR_DOCUMENTARY_GAPS_REMOVED: /);
+    assert.ok(error.message.includes(JSON.stringify([f.documentary])));assert.match(error.message,/personaje-prueba/);return true;
+  });
+  assert.equal(tool.readCandidate(),undefined);
+});

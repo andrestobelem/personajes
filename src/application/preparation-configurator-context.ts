@@ -76,6 +76,18 @@ export function compilePreparationConfiguratorPacket(raw:unknown){
     hostPolicyMarkdown:preparationConfiguratorPolicy(context),diegeticContextMarkdown:canonicalJson(projectPreparationConfiguratorModelContext(context))});
 }
 
+/** Gaps a proposal must keep for an actor: the frozen dossier's plus those already curated in this draft. */
+export function requiredDocumentaryGaps(context:PreparationConfiguratorContext,characterId:string):{unknowns:string[];contradictions:string[]}{
+  const source=context.actorSources.find(value=>value.characterId===characterId);
+  if(source===undefined)return {unknowns:[],contradictions:[]};
+  const existing=context.draft.roster.kind==='empty'?undefined:context.draft.roster.value.preparedCharacters.find(value=>value.characterId===characterId);
+  const partial=context.draft.roster.kind==='empty'?undefined:context.draft.roster.value.preparationDrafts?.find(value=>value.characterId===characterId);
+  const priorUnknownPolicy=partial?.unknownPolicy.kind==='declared'?partial.unknownPolicy.value:existing?.unknownPolicy;
+  const priorIdentity=partial?.identity.kind==='declared'?partial.identity.value:existing?.identity;
+  return {unknowns:[...source.frozenDossier.unknowns,...(priorUnknownPolicy?.value.fields.map(value=>value.topic)??[])],
+    contradictions:[...source.frozenDossier.contradictions,...(priorIdentity?.value.contradictions??[])]};
+}
+
 export function validatePreparationConfiguratorProposal(input:{context:unknown;proposal:unknown}){
   const context=validatePreparationConfiguratorContext(input.context),proposal=PreparationConfiguratorProposalSchema.parse(input.proposal);
   if(proposal.contextHash!==context.contextHash)throw new Error('PREPARATION_CONFIGURATOR_PROPOSAL_CONTEXT_MISMATCH');
@@ -103,13 +115,11 @@ export function validatePreparationConfiguratorProposal(input:{context:unknown;p
     const allowed=new Set([...documentRefs,...source.frozenDossier.sourceRefs.map(ref=>ref.id)]);
     const existing=context.draft.roster.kind==='empty'?undefined:context.draft.roster.value.preparedCharacters.find(value=>value.characterId===actor.characterId);
     const partial=context.draft.roster.kind==='empty'?undefined:context.draft.roster.value.preparationDrafts?.find(value=>value.characterId===actor.characterId);
-    const priorUnknownPolicy=partial?.unknownPolicy.kind==='declared'?partial.unknownPolicy.value:existing?.unknownPolicy;
     const priorIdentity=partial?.identity.kind==='declared'?partial.identity.value:existing?.identity;
     const priorAntecedents=partial?.antecedents.kind==='declared'?partial.antecedents.value:existing?.antecedents;
     const priorInitialExperience=partial?.initialExperience.kind==='declared'?partial.initialExperience.value:existing?.initialExperience;
     const priorGoals=partial?.goals.kind==='declared'?partial.goals.value:existing?.goals;
-    const unknowns=[...source.frozenDossier.unknowns,...(priorUnknownPolicy?.value.fields.map(value=>value.topic)??[])];
-    const contradictions=[...source.frozenDossier.contradictions,...(priorIdentity?.value.contradictions??[])];
+    const {unknowns,contradictions}=requiredDocumentaryGaps(context,actor.characterId);
     if(unknowns.some(value=>!actor.unknowns.includes(value))||contradictions.some(value=>!actor.contradictions.includes(value)))throw new Error('PREPARATION_CONFIGURATOR_DOCUMENTARY_GAPS_REMOVED');
     unique(actor.sections.map(section=>section.section),'PREPARATION_CONFIGURATOR_DUPLICATE_SECTION');
     const identity=actor.sections.find(section=>section.section==='identity');

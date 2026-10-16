@@ -5,7 +5,7 @@ import type {PiCustomTool,RequestEligibility} from '../adapters/pi.ts';
 import {sha256CanonicalJson} from '../domain/canonical-json.ts';
 import {HashSchema} from '../domain/values.ts';
 import {PreparationConfiguratorProposalSchema} from '../domain/preparation-configurator.ts';
-import {validatePreparationConfiguratorContext,validatePreparationConfiguratorProposal} from './preparation-configurator-context.ts';
+import {requiredDocumentaryGaps,validatePreparationConfiguratorContext,validatePreparationConfiguratorProposal} from './preparation-configurator-context.ts';
 
 export const PreparationConfiguratorLocalCandidateSchema=z.strictObject({kind:z.literal('local-preparation-configurator-candidate'),candidateId:z.uuid(),contextHash:HashSchema,proposalHash:HashSchema,proposal:PreparationConfiguratorProposalSchema});
 const EligibilitySchema=z.discriminatedUnion('kind',[z.strictObject({kind:z.literal('active')}),z.strictObject({kind:z.literal('inactive'),reason:z.string().min(1).max(120)})]);
@@ -43,6 +43,20 @@ function toolRejection(code:string,context:ToolContext,raw:unknown):string|undef
     }
     case 'PREPARATION_CONFIGURATOR_REFERENCE_NOT_ADMITTED':return `Usaste un sourceRef que no está admitido. IDs admitidos: ${admittedRefs(context)}. No uses URLs, hashes ni nombres de archivo. ${resend}`;
     case 'PREPARATION_CONFIGURATOR_PROPOSAL_ACTORS_MISMATCH':return `actors debe contener exactamente una entrada por cada personaje seleccionado (${selected}), y placements sólo puede referirse a ellos. ${resend}`;
+    case 'PREPARATION_CONFIGURATOR_DOCUMENTARY_GAPS_REMOVED':
+    case 'PREPARATION_CONFIGURATOR_BIOGRAPHY_GAPS_REMOVED':{
+      const parsed=PreparationConfiguratorProposalSchema.safeParse(raw);
+      const where=code==='PREPARATION_CONFIGURATOR_DOCUMENTARY_GAPS_REMOVED'?'actors[].unknowns y actors[].contradictions':'identity.lifeHistory.unknowns y identity.lifeHistory.contradictions';
+      const missing=(parsed.success?parsed.data.actors:[]).flatMap(actor=>{
+        const required=requiredDocumentaryGaps(context,actor.characterId);
+        const identity=actor.sections.find(section=>section.section==='identity');
+        const kept=code==='PREPARATION_CONFIGURATOR_DOCUMENTARY_GAPS_REMOVED'?{unknowns:actor.unknowns,contradictions:actor.contradictions}
+          :identity?.section==='identity'&&identity.value.lifeHistory!==undefined?{unknowns:identity.value.lifeHistory.unknowns,contradictions:identity.value.lifeHistory.contradictions}:{unknowns:[],contradictions:[]};
+        const unknowns=required.unknowns.filter(value=>!kept.unknowns.includes(value)),contradictions=required.contradictions.filter(value=>!kept.contradictions.includes(value));
+        return unknowns.length+contradictions.length===0?[]:[`${actor.characterId}: vacíos ${JSON.stringify(unknowns)}; contradicciones ${JSON.stringify(contradictions)}`];
+      });
+      return `Faltan vacíos o contradicciones que deben conservarse textualmente, exactamente con estas cadenas, en ${where} (los del expediente y los ya curados en este borrador): ${missing.join(' | ')||'(revisá ambas listas)'}. Podés agregar otros, pero no quitar ni reformular estos. ${resend}`;
+    }
     case 'PREPARATION_CONFIGURATOR_CONTINUITY_MISMATCH':return `Un antecedente o una condición de revisión de un Goal cita un hito o una inclusión que no existe en la continuidad admitida, o un estado de hito distinto. ${admittedContinuity(context,raw)} Usá sólo esos IDs; no inventes milestoneId ni inclusionId. Si no hay ninguno, registrá el antecedente con kind biography y applicability unconditional, y usá condiciones de revisión de tipo circumstance. ${resend}`;
     case 'PREPARATION_CONFIGURATOR_MILESTONE_CONDITION_REQUIRED':return `Un antecedente kind milestone necesita applicability milestone-state o explicit-inclusion con un ID admitido. ${admittedContinuity(context,raw)} Si no hay ninguno, usá kind biography con applicability unconditional. ${resend}`;
     default:return undefined;
