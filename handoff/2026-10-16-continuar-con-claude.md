@@ -18,9 +18,9 @@ Implementado recientemente: iniciativa propia durable v45 sin percepciones inven
 
 ## Próxima acción concreta
 
-1. ~~Corregir el Escenario inválido del borrador «CONTROL»~~ Hecho en `d90c75f`: la escena no tenía `participantIds` porque hay cero actores colocados. El dato no se modificó; la validación ahora informa `scene-has-no-participant` (ver PENDIENTES). Al retomar, `npm start` en 4182 falló con `ALREADY_OWNED`: `host-ownership.json` registra el PID 298 (08:03 UTC), que ya no existe. Recuperar con `recoverHostOwnership` y el nonce registrado, que borra el registro sólo si el proceso no existe; respaldar antes `world.sqlite`. Esa recuperación espera la confirmación del operador.
-2. Comprobar acceso real al perfil elegido y preparar un actor por trabajo con el Configurador. Revisar/aplicar sólo resultados completos. Después completar memoria, Ready y preflight.
-3. Ejecutar y observar una obra completa; probar intervención humana, evolución e iniciativa libre y exportar el registro real a Fountain en docs/output.
+1. ~~Corregir el Escenario inválido del borrador «CONTROL»~~ Hecho en `d90c75f`: la escena no tenía participantes porque no había actores colocados. Al retomar, el lock huérfano del host (PID 298) se liberó con `recoverHostOwnership`, con autorización del usuario y respaldo previo en `/private/tmp/personajes-before-claude-20261016.sqlite`.
+2. ~~Acceso real, Configurador, memoria, Ready y preflight~~ Hecho el 16 de octubre: Max, 99 y Jefe preparados y aplicados, revisión 7, preflight aprobado. Ver PENDIENTES.
+3. En curso: la representación de CONTROL corre desde las 17:28 UTC. Un atasco por iniciativas duplicadas se corrigió en `16df141`. Falta observarla hasta su cierre; probar intervención humana, evolución e iniciativa libre y exportar el registro real a Fountain en docs/output.
 4. Reconciliar documentación y completar las entregas restantes de PENDIENTES. Mantener estado y evidencia por requisito; corregir errores y continuar.
 
 Último borrador privado: run `803a8675-2ad0-47ed-9d76-c7f8a64743a1`, revisión 3, Max/99/Jefe, cero actores preparados. Fecha de adaptación 1966-06-20 09:00 UTC−04, Washington, tres espacios y dos documentos sin valor de verdad confirmado. Dos trabajos del Configurador bloqueados; el último agotó timeout sin candidato aceptado. Detalle en [recuperación del Configurador](../docs/auditoria/recuperacion-configurador-tras-timeout.md). La recuperación nueva está probada con transporte controlado, falta acreditarla live.
@@ -34,3 +34,15 @@ Git no lleva credenciales, SQLite ni sesiones Pi: otra máquina necesita prepara
 Cada actor usa Pi, contexto, memoria SQLite e historial independientes. Perfiles de la aplicación: OpenAI Codex OAuth Sol 6.1 low predeterminado o Anthropic OAuth Opus 5.5 medium alternativo, sin fallback. Continuar el desarrollo con Claude no cambia automáticamente el modelo de los personajes. Sin cuotas acumuladas de llamadas, tokens ni tiempo; timeout individual y concurrencia siguen siendo controles separados.
 
 El coordinador marca el pulso y el Director observa; las decisiones pertenecen a los actores. Admitir historia según continuidad, distinguir curación de conocimiento y conservar fuentes. Registrar resultados observados, sin fabricar escenas, biografías aceptadas, recuerdos ni inferencias exitosas.
+
+## Operación tras reiniciar el host
+
+Un reinicio no reanuda la representación. Hay que seguir este orden:
+
+1. Reabrir las memorias con un trabajo `reopen-existing`, para recuperar los sidecars WAL.
+2. Pausar.
+3. Renovar la comprobación de acceso, que vence a los 15 minutos.
+4. Correr un preflight nuevo.
+5. Reanudar con ese preflight.
+
+Sin el paso 1, el preflight queda bloqueado con `icm-readonly-sidecars-not-provisioned`. Renovar el acceso también antes de cada trabajo del Configurador. El diagnóstico del coordinador ahora informa el actor y el código del error.
