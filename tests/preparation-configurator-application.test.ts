@@ -321,3 +321,15 @@ test('aceptar worldLayout preserva ofertas existentes y no completa una ausencia
     assert.equal(WorldSnapshotSchema.safeParse(result.nextDraft.worldSnapshot.value).success,Object.hasOwn(candidate,'offers'),'un candidato que no declara ofertas sigue pendiente');
   }
 });
+
+test('placement presente en una escena sin participantes los incorpora como al colocar manualmente',()=>{
+  const f=fixture(),physical=physicalProposal(f);
+  const proposal=PreparationConfiguratorProposalSchema.parse({...physical,settings:physical.settings.map(setting=>setting.section==='worldLayout'
+    ?{...setting,value:{...setting.value,scenes:setting.value.scenes?.map(({participantIds:_omitted,...scene})=>scene)}}:setting)});
+  const result=apply(f,{settings:['continuity','worldLayout'],actors:fullActors(f),placements:f.sources.map(source=>source.characterId)},proposal);
+  if(result.nextDraft.worldSnapshot.kind!=='configured')assert.fail('Sin world');
+  const world=result.nextDraft.worldSnapshot.value;
+  const present=(world.entities??[]).flatMap(entity=>entity.kind==='character'&&entity.presence.kind==='present'?[{characterId:entity.characterId,sceneId:entity.presence.sceneId}]:[]);
+  assert.equal(present.length,2);
+  for(const actor of present)assert.ok(world.scenes?.find(scene=>scene.id===actor.sceneId)?.participantIds?.includes(actor.characterId));
+});

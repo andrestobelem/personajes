@@ -155,8 +155,13 @@ Fuentes externas admitidas revisadas por ${metadata.principalId}: ${externalRefs
       const old=entities.findIndex(entity=>entity.kind==='character'&&entity.characterId===characterId);
       if(old>=0)entities.splice(old,1);entities.push(actor);appliedFields.push(`placements.${characterId}`);
     }
-    const {entities:_entities,...withoutEntities}=world;
-    put('worldSnapshot',WorldPreparationCandidateSchema.parse({...withoutEntities,...(entities.length===0?{}:{entities})}));
+    // Like a manual placement, presence in a scene makes the actor one of its participants.
+    const scenes=world.scenes?.map(scene=>{
+      const joined=entities.flatMap(entity=>entity.kind==='character'&&selection.placements.includes(entity.characterId)&&entity.presence.kind==='present'&&entity.presence.sceneId===scene.id?[entity.characterId]:[]);
+      return joined.length===0?scene:{...scene,participantIds:[...new Set([...(scene.participantIds??[]),...joined])]};
+    });
+    const {entities:_entities,scenes:_scenes,...withoutEntities}=world;
+    put('worldSnapshot',WorldPreparationCandidateSchema.parse({...withoutEntities,...(scenes===undefined?{}:{scenes}),...(entities.length===0?{}:{entities})}));
   }
   const patch=RunDraftPatchSchema.parse(updates);
   next=RunConfigurationDraftSchema.parse({...draft,...patch});
