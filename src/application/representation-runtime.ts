@@ -314,7 +314,7 @@ export async function createRepresentationRuntime(input: {
     onFailure(failure) {
       // Only an uppercase host code crosses this boundary; free-form errors may carry private data.
       const error = 'error' in failure ? failure.error : undefined;
-      const errorCode = error instanceof Error && /^[A-Z][A-Z0-9_]{2,119}$/.test(error.message) ? error.message : error instanceof Error ? error.name : undefined;
+      const errorCode = error instanceof Error ? /^[A-Z][A-Z0-9_]{2,119}(?=$|[:\s])/.exec(error.message)?.[0] ?? error.name : undefined;
       report({ kind: 'coordinator', runId: failure.runId, failureKind: failure.kind,
         ...(failure.kind === 'worker' ? { actorId: failure.job.actorId } : {}), ...(errorCode === undefined ? {} : { errorCode }) });
     },

@@ -1,24 +1,33 @@
-# CONTROL: un informe, tres versiones — preparación
+# CONTROL: un informe, tres versiones
 
-Estado del 16 de octubre de 2026: **borrador guardado, no representación ejecutada**. Run local `803a8675-2ad0-47ed-9d76-c7f8a64743a1`, revisión 3. No se generaron diálogos, recuerdos ni un guion de esta puesta.
+Puesta editorial sintética en Washington D. C., 20 de junio de 1966, 09:00 UTC−04:00. Run `803a8675-2ad0-47ed-9d76-c7f8a64743a1`, configuración Ready 7. No corresponde a un episodio emitido. Tres espacios: Oficina, Pasillo y Archivo de CONTROL. Dos objetos editoriales sin valor de verdad confirmado: un aviso sin firma y un registro de mantenimiento.
 
-El selector ofrece una adaptación sin Fibonacci con Max, Agente 99 y el Jefe. Propone una oficina de CONTROL en Washington D. C., el 20 de junio de 1966 a las 09:00 UTC−04:00. Fecha, lugar, continuidad, reparto y conflicto siguen siendo propuestas editables. La revisión 3 amplía el Escenario a oficina, pasillo y Archivo, con cuatro conexiones transitables de 2000 ms y sin percepción entre salas. Permite separarse y buscar a otros sin una secuencia obligatoria de escenas. Hay dos documentos físicos. Uno es un aviso sin firma: «Prueba de alarma: resultado sin confirmar». Su existencia no prueba una alarma ni su causa. El otro, en el Archivo, es un registro sin fecha ni firma sobre un circuito desconectado para revisión; su texto tampoco prueba el estado actual del circuito ni quién escribió el aviso. No hay culpable, respuesta ni desenlace prefijados.
+## Preparación comprobada
 
-La política `embodied-v1` exige biografía y deseos completos para cada actor activo. El preset no prepara actores ni les adjudica recuerdos, conocimientos, herramientas o posiciones: el reparto guardado contiene tres identidades seleccionadas y cero contextos preparados. Las sugerencias de motivos se muestran sólo al operador. La curación posterior debe admitir por separado identidad, historia de vida, deseos, Goals y conocimiento situado.
+Max, 99 y el Jefe se prepararon con el Configurador real, cada uno en su propio trabajo. Se usaron el perfil OpenAI Codex OAuth `gpt-6.1-sol`/`low` y la preparación recomendada del siguiente pendiente. Trabajos aceptados y aplicados completos: Max `917be10b`, 99 `17373dc5` y Jefe `371ac67b`. Cada uno trae las nueve secciones y la ubicación en la Oficina.
 
-Se ampliaron las fuentes curatoriales de [99](../personajes/get-smart/agente-99.md) y [el Jefe](../personajes/get-smart/jefe.md), distinguiendo evidencia de producción, hechos de la ficción e hipótesis actorales. El catálogo se versionó como `get-smart-original-1965-1970-2026-10-16.1`, con hashes exactos de ambos archivos. Esto no modifica las fuentes congeladas de representaciones anteriores ni convierte estos expedientes en biografías exhaustivas admitidas para 1966.
+Las biografías separan evidencia documental de hipótesis editorial y conservan vacíos y contradicciones. No importan episodios posteriores al corte, como el matrimonio de Max y 99 o la vida familiar del Jefe. Ninguna sección cita `sourceRefs`, porque este corte no admite referencias documentales: todo quedó como adaptación declarada.
 
-## Verificación
+Después vinieron la validación Ready (revisión 7), las memorias `initialize-empty` de los tres actores (job `51719826`) y el preflight `c9a0532b`, con 16 controles aprobados. Inicio a las 17:28 UTC del 16 de octubre de 2026. Narrador y audio desactivados; sin interlocutores humanos.
 
-- Typecheck y build aprobados. Suite global: 1488 pruebas, 1487 aprobadas, cero fallidas y una omitida. Log local `/private/tmp/personajes-ensemble-verify.log`.
-- Tras exigir `embodied-v1` en el preset, se repitieron typecheck, build y las ocho pruebas de presets y selector montado: todas aprobadas. Log `/private/tmp/personajes-ensemble-tests.log`.
-- Navegador real: creación de la propuesta, exigencia explícita de biografía/deseos y guardado confirmado. Lectura SQLite independiente confirma reparto, cero contextos y política `embodied-v1`.
-- En este borrador se configuraron llamadas y tiempo acumulado sin límite, concurrencia 1 y timeout por request de 300000 ms en la revisión 3 (antes 180000 ms). No se hicieron inferencias para crear el preset. Dos trabajos posteriores de curación se bloquearon: uno por acceso vencido, otro por timeout; ninguno entregó una propuesta aceptada. Ver [recuperación del Configurador](../auditoria/recuperacion-configurador-tras-timeout.md).
+## Lo ocurrido
 
-![Preparación inicial guardada, revisión 0](un-informe-tres-versiones-preparacion.png)
+27 eventos y 11 parlamentos del proveedor, sin diálogos escritos por el operador.
 
-![Escenario ampliado, revisión 3](un-informe-tres-versiones-escenario.png)
+- **Apertura:** 99 pregunta quién dejó el aviso. El Jefe admite que no lo sabe y reparte tareas: 99 averigua quién programó la prueba y Max, quién dejó el aviso.
+- **Investigación de 99:** recorre el Pasillo y el Archivo, observa el registro de mantenimiento y vuelve. Cita su texto, aclara que no tiene fecha ni firma y que no acredita el estado actual del circuito.
+- **El Jefe se corrige:** reconoce que se adelantó al mandarla a buscar al responsable sin una pista.
+- **Max:** va al Pasillo y al Archivo sin hablar con nadie más. Su observación del registro no está confirmada en el registro público.
+- **Reposo:** los tres eligen esperar sin pedir continuar. El último pulso termina sin iniciativas pendientes y la representación sigue `running`, pero inactiva.
 
-## Próximo paso
+Guion: [control-un-informe-tres-versiones-…-c33.fountain](../output/control-un-informe-tres-versiones-803a8675-2ad0-47ed-9d76-c7f8a64743a1-c33-132ec7c7addb9a69.fountain), commit 33, SHA-256 `132ec7c7…`.
 
-Curar los tres actores con el Configurador y revisión de fuentes, confirmar circunstancias, ubicar el reparto, seleccionar contratos ICM por audiencia, inicializar memorias y pasar validación/preflight. Luego ejecutar y observar el desarrollo hasta un desenlace sustentado, cerrar la estructura y exportar el guion real a `docs/output`. Nada de esto se acredita mediante el preset ni por estas pruebas. El objetivo integral continúa abierto.
+## Fallas encontradas y corregidas durante la función
+
+- `16df141`: un actor con una iniciativa `pending` actuó por otra causa y pidió continuar. Eso violaba `actor_initiatives_one_open_per_actor` y suspendía el pulso. Ahora la iniciativa anterior queda reemplazada (`superseded-by-later-turn`).
+- `53eadbc`: las observaciones directas no se convierten en experiencias, así que el Continuista no podía verificar lo que 99 había leído. Marcaba la revisión como incompleta y el turno seguía bloqueado en cada reintento. Ahora el contexto del Continuista incluye las observaciones ya entregadas al actor.
+- Un `wait` de Max falló una vez con `execution-failed` al confirmarse. El reintento posterior lo confirmó y la causa no quedó identificada. El diagnóstico del coordinador ahora informa el actor y el prefijo del código de error.
+
+## Límites de la evidencia
+
+No es una obra completa: es el primer tramo hasta el reposo, sin cierre de escena ni de episodio. Tampoco se probó la intervención humana, porque la puesta no tiene interlocutores humanos configurados. El reposo muestra que, cuando todos esperan, nadie aporta una causa nueva. Seguir requiere una decisión de dirección: una circunstancia, una intervención humana o el cierre estructural. Tras cada reinicio del host fue necesario reabrir las memorias, pausar, correr un preflight nuevo y reanudar.
