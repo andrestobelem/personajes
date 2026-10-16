@@ -2267,13 +2267,14 @@ export function openJournal(input: { path: string }) {
 
   function canParkDrainedCoordinatorPulse(runId:string,pulseId:string,dependencyPulseId:string):boolean {
     const dependency=database.prepare(`SELECT 1 FROM coordinator_pulses
-      WHERE run_id=? AND pulse_id=? AND origin_kind='actorActivation' AND state='blocked'`).get(runId,dependencyPulseId);
+      WHERE run_id=? AND pulse_id=? AND origin_kind IN('actorActivation','actorInitiative') AND state='blocked'`).get(runId,dependencyPulseId);
     if(dependency===undefined)return false;
     const pulse=database.prepare(`SELECT origin_kind,origin_id FROM coordinator_pulses WHERE run_id=? AND pulse_id=? AND state='running'`)
       .get(runId,pulseId);
     if(pulse===undefined)return false;
-    const origin=z.strictObject({origin_kind:z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation']),origin_id:z.string()}).parse(pulse);
-    if(origin.origin_kind==='actorActivation')return false;
+    const origin=z.strictObject({origin_kind:z.enum(['humanIntervention','actorAttempt','directionCircumstance','actorActivation','actorInitiative']),origin_id:z.string()}).parse(pulse);
+    // Technical causes carry no testimony to set aside; only perception-backed pulses are parked.
+    if(origin.origin_kind==='actorActivation'||origin.origin_kind==='actorInitiative')return false;
     const hasPendingCauseInput=database.prepare(`SELECT 1 FROM actor_turn_intents intent
       JOIN world_perceptions perception ON perception.perception_id=intent.perception_id
       JOIN world_deliveries delivery ON delivery.perception_id=intent.perception_id
