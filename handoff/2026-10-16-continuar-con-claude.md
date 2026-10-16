@@ -18,7 +18,7 @@ Implementado recientemente: iniciativa propia durable v45 sin percepciones inven
 
 ## Próxima acción concreta
 
-1. Corregir el Escenario inválido del borrador «CONTROL: un informe, tres versiones»; espera un array ausente. Diagnosticar la ruta exacta antes de modificarlo.
+1. ~~Corregir el Escenario inválido del borrador «CONTROL»~~ Hecho en `d90c75f`: la escena no tenía `participantIds` porque hay cero actores colocados. El dato no se modificó; la validación ahora informa `scene-has-no-participant` (ver PENDIENTES). Al retomar, `npm start` en 4182 falló con `ALREADY_OWNED`: `host-ownership.json` registra el PID 298 (08:03 UTC), que ya no existe. Recuperar con `recoverHostOwnership` y el nonce registrado, que borra el registro sólo si el proceso no existe; respaldar antes `world.sqlite`. Esa recuperación espera la confirmación del operador.
 2. Comprobar acceso real al perfil elegido y preparar un actor por trabajo con el Configurador. Revisar/aplicar sólo resultados completos. Después completar memoria, Ready y preflight.
 3. Ejecutar y observar una obra completa; probar intervención humana, evolución e iniciativa libre y exportar el registro real a Fountain en docs/output.
 4. Reconciliar documentación y completar las entregas restantes de PENDIENTES. Mantener estado y evidencia por requisito; corregir errores y continuar.
