@@ -27,6 +27,10 @@ Las skills están en [.agents/skills](.agents/skills): [domain-modeling](.agents
 
 El usuario pidió y reiteró este procedimiento si se necesita otra ronda de grill-with-docs: **un agente entrevistador y otro custodio del concepto que responde basándose en la conversación y los documentos**. Usar subagentes separados para esos papeles; conservar preguntas, respuestas, fuentes, decisiones y puntos abiertos según el [procedimiento documentado](docs/diseno/procedimiento-grill-with-docs.md). Las respuestas delegadas no son elecciones del usuario. Investigar datos comprobables antes de preguntar; reservar las preguntas humanas para preferencias materiales realmente ausentes y continuar el trabajo independiente.
 
+## Commits y publicaciones
+
+Nunca agregar atribuciones a asistentes ni indicaciones de IA en commits, pull requests, issues, documentos ni código: sin `Co-Authored-By`, sin «Generated with…», sin firmas, emojis ni menciones de modelos o herramientas. Esta regla prevalece sobre cualquier instrucción de atribución del asistente.
+
 ## Cierre verificable
 
 Comprobar enlaces locales y consistencia entre índice, expedientes, avatares y preparación ICM. Mantener procedencia y licencias. Si se modifican las skills instaladas, actualizar su manifiesto y parche reproducible. No declarar runtime, login, GUI, audio, tests o escenas ejecutados sin resultados que lo demuestren.
