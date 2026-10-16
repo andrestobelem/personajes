@@ -43,6 +43,7 @@ export function LivePerformance({ stage, items, jobs, map, connected, error, onE
         <footer role="status">
           {stage.lifecycle !== 'running' ? lifecycleLabels[stage.lifecycle] : working.length > 0
             ? working.map(job=>`${roles[job.kind]}${job.actor ? ` · ${job.actor.label}` : ''}: ${job.state === 'cancel-requested' ? 'cancelación solicitada' : 'trabajando'}`).join(' · ')
+            : stage.activity === 'idle' ? 'En reposo: ningún personaje tiene una causa pendiente y el reloj no avanza solo. Para continuar, usá la Dirección (circunstancia, intervención o cierre de escena).'
             : 'Sin trabajo activo en la lectura actual. Esperando la próxima actividad.'}
           {stage.lifecycle !== 'running' && working.length > 0 && <small>Hay registros técnicos pendientes de finalizar en esta lectura; no confirman actividad actual de la representación.</small>}
           {(latestJob?.state === 'blocked' || latestJob?.state === 'failed') && <small>El último trabajo registrado {latestJob.state === 'failed' ? 'falló' : 'está bloqueado'}; su diagnóstico se conserva en los controles.</small>}

@@ -12,7 +12,7 @@ import {
 import type { RunStageView } from '../domain/run-observation.ts';
 import { RunIdSchema, WorldSeqSchema } from '../domain/values.ts';
 
-type Journal = Pick<ReturnType<typeof openJournal>,'readWorldLifecycle'|'readWorldConfiguration'|'readInspectorWorldCut'|'loadWorld'|'readObservationEvents'|'readObservationDeliveries'|'readObservationJobs'|'readDirectorObservationHistory'>;
+type Journal = Pick<ReturnType<typeof openJournal>,'readWorldLifecycle'|'readWorldConfiguration'|'readInspectorWorldCut'|'loadWorld'|'readObservationEvents'|'readObservationDeliveries'|'readObservationJobs'|'readDirectorObservationHistory'> & Partial<Pick<ReturnType<typeof openJournal>,'readRunCoordinatorActivity'>>;
 const missing = {kind:'missing'} satisfies {kind:'missing'};
 const invalidCut = {kind:'invalidRequest',code:'invalid-cut'} satisfies {kind:'invalidRequest';code:'invalid-cut'};
 const invalidCursor = {kind:'invalidRequest',code:'invalid-cursor'} satisfies {kind:'invalidRequest';code:'invalid-cursor'};
@@ -207,7 +207,10 @@ export function createRunObservationApplication(input:{journal:Journal}) {
       ...(request.atCommitIndex===undefined?{}:{atCommitIndex:request.atCommitIndex})});
     if(cut===undefined)return invalidCut;
     const configuration=input.journal.readWorldConfiguration({runId:request.runId});if(configuration===undefined)return missing;
-    return {kind:'found',value:projectRunStage({snapshot:cut.snapshot,commitIndex:cut.commitIndex,configuration,lifecycle:state.lifecycle})} satisfies {kind:'found';value:RunStageView};
+    const stage=projectRunStage({snapshot:cut.snapshot,commitIndex:cut.commitIndex,configuration,lifecycle:state.lifecycle});
+    const activity=request.atWorldSeq===undefined&&request.atCommitIndex===undefined&&state.lifecycle==='running'
+      ?input.journal.readRunCoordinatorActivity?.({runId:request.runId}):undefined;
+    return {kind:'found',value:activity===undefined?stage:RunStageViewSchema.parse({...stage,activity})} satisfies {kind:'found';value:RunStageView};
   }
 
   function readPage(rawInput:unknown,surface:'events'|'conversations') {

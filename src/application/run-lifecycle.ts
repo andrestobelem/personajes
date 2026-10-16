@@ -16,7 +16,8 @@ import { JobIdSchema, RunIdSchema } from '../domain/values.ts';
 import { RunPreflightJobDocumentSchema } from '../domain/run-preflight-jobs.ts';
 
 type Journal = Pick<ReturnType<typeof openJournal>, 'readWorldLifecycle' | 'readWorldConfiguration' | 'loadWorld'
-  | 'readRunModelTimeBudget' | 'readRunLifecycleCommand' | 'applyRunLifecycleCommand' | 'readRunStepJob' | 'readDramaticStructure'>;
+  | 'readRunModelTimeBudget' | 'readRunLifecycleCommand' | 'applyRunLifecycleCommand' | 'readRunStepJob' | 'readDramaticStructure'>
+  & Partial<Pick<ReturnType<typeof openJournal>, 'readRunCoordinatorActivity'>>;
 type PreflightReader = { readJob(input: { runId: string; jobId: string }): unknown | Promise<unknown> };
 type Runtime = {
   scheduleRun(input: unknown): Promise<boolean>;
@@ -145,6 +146,8 @@ export function createRunLifecycleApplication(input: {
       clock: snapshot.clock,
       limits,
       budget,
+      ...(lifecycle.kind === 'running' && input.journal.readRunCoordinatorActivity !== undefined
+        ? { activity: input.journal.readRunCoordinatorActivity({ runId }) } : {}),
       createdAt: state.createdAt === null ? null : new Date(state.createdAt).toISOString(),
       updatedAt: new Date(state.updatedAt).toISOString(),
     });

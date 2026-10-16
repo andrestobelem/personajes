@@ -87,3 +87,13 @@ test("destructive close warning identifies the exact representation", () => {
   assert.match(html, /Cerrar definitivamente/);
   assert.match(html, /conservar su historia/);
 });
+
+test("una corrida en reposo lo dice y orienta a la Dirección sin presentarlo como falla", () => {
+  const running = RunViewSchema.parse({ ...runViewFixture(), lifecycle: { kind: "running" } });
+  const idle = renderToStaticMarkup(React.createElement(RunStatusView, { view: RunViewSchema.parse({ ...running, activity: "idle" }) }));
+  assert.match(idle, /En ejecución · en reposo/);
+  assert.match(idle, /circunstancia de Dirección/);
+  const working = renderToStaticMarkup(React.createElement(RunStatusView, { view: RunViewSchema.parse({ ...running, activity: "working" }) }));
+  assert.doesNotMatch(working, /en reposo/);
+  assert.throws(() => RunViewSchema.parse({ ...runViewFixture(), lifecycle: { kind: "paused" }, activity: "idle" }));
+});

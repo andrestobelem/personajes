@@ -546,6 +546,16 @@ function hashJson(value: unknown): { json: string; hash: z.infer<typeof HashSche
 }
 
 /** Internal adapter. Its path is chosen by the host, never by actor input. */
+/** Work a running coordinator can still process, over alias `r` for world_runs. */
+const PENDING_COORDINATOR_WORK = `(EXISTS(SELECT 1 FROM run_step_jobs s WHERE s.run_id=r.run_id AND s.state IN('queued','running')) OR
+         EXISTS(SELECT 1 FROM coordinator_pulses c WHERE c.run_id=r.run_id AND c.state='running') OR
+         EXISTS(SELECT 1 FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id
+           WHERE i.run_id=r.run_id AND i.state='queued' AND d.state='delivered'
+           AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))) OR
+         EXISTS(SELECT 1 FROM actor_activation_causes a WHERE a.run_id=r.run_id AND a.state='pending') OR
+         EXISTS(SELECT 1 FROM actor_initiatives a WHERE a.run_id=r.run_id AND a.state='pending'
+           AND a.eligible_at<=CAST(json_extract(r.snapshot_json,'$.clock.instant') AS INTEGER)))`;
+
 export function openJournal(input: { path: string }) {
   let preparationSourceAdmission: PreparationSourceAdmission | undefined;
   let preparationConfiguratorApplication:((input:{principalId:string;context:z.infer<typeof PreparationConfiguratorStoredSchema>['context'];candidate:z.infer<typeof PreparationConfiguratorCandidateSchema>;selection:z.infer<typeof PreparationConfiguratorApplySchema>['selection'];currentDraft:z.infer<typeof RunConfigurationDraftSchema>;recordedAt:string})=>unknown)|undefined;
@@ -9611,17 +9621,19 @@ export function openJournal(input: { path: string }) {
 
     readCoordinatorPulse(input: unknown) { return coordinatorPulseView(CoordinatorPulseLookupSchema.parse(input)); },
     listActorTurnJobsForPulse(input: unknown) { return coordinatorPulseView(CoordinatorPulseLookupSchema.parse(input))?.jobs ?? []; },
+    /** Running with no pulse, cause, inbox or delivery in flight: actors may have chosen to wait; nothing wakes them by itself. */
+    readRunCoordinatorActivity(input: unknown): 'working' | 'idle' | undefined {
+      const { runId } = z.strictObject({ runId: RunIdSchema }).parse(input);
+      const row = database.prepare(`SELECT lifecycle, ${PENDING_COORDINATOR_WORK} OR EXISTS(SELECT 1 FROM world_deliveries d JOIN world_perceptions p ON p.perception_id=d.perception_id
+          WHERE p.run_id=r.run_id AND d.state IN('planned','delivering')) AS pending FROM world_runs r WHERE run_id=?`).get(runId);
+      if (row === undefined) return undefined;
+      const parsed = z.strictObject({ lifecycle: z.string(), pending: z.number().int() }).parse(row);
+      if (parsed.lifecycle !== 'running') return undefined;
+      return parsed.pending === 0 ? 'idle' : 'working';
+    },
     listCoordinatorPulseTargets(input: unknown = {}) {
       const request = z.strictObject({ limit: counter.min(1).max(1_000).default(100) }).parse(input);
-      return database.prepare(`SELECT run_id FROM world_runs r WHERE lifecycle='running' AND
-        (EXISTS(SELECT 1 FROM run_step_jobs s WHERE s.run_id=r.run_id AND s.state IN('queued','running')) OR
-         EXISTS(SELECT 1 FROM coordinator_pulses c WHERE c.run_id=r.run_id AND c.state='running') OR
-         EXISTS(SELECT 1 FROM actor_turn_intents i JOIN world_deliveries d ON d.perception_id=i.perception_id
-           WHERE i.run_id=r.run_id AND i.state='queued' AND d.state='delivered'
-           AND NOT EXISTS(SELECT 1 FROM actor_turn_job_inputs a WHERE a.perception_id=i.perception_id AND a.state IN('assigned','consumed'))) OR
-         EXISTS(SELECT 1 FROM actor_activation_causes a WHERE a.run_id=r.run_id AND a.state='pending') OR
-         EXISTS(SELECT 1 FROM actor_initiatives a WHERE a.run_id=r.run_id AND a.state='pending'
-           AND a.eligible_at<=CAST(json_extract(r.snapshot_json,'$.clock.instant') AS INTEGER)))
+      return database.prepare(`SELECT run_id FROM world_runs r WHERE lifecycle='running' AND ${PENDING_COORDINATOR_WORK}
         ORDER BY run_id LIMIT ?`).all(request.limit).map((item) => z.strictObject({ run_id: RunIdSchema }).parse(item)).map((item) => ({ runId: item.run_id }));
     },
     closeCoordinatorPulse(input: unknown) {

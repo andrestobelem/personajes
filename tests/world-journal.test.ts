@@ -3486,3 +3486,32 @@ test('un turno por otra causa reemplaza la iniciativa pendiente del actor en lug
     assert.equal(rows[1]?.source_attempt_id,turn.attemptId);
   }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
 });
+
+test('la actividad del coordinador distingue trabajo pendiente del reposo cuando nadie tiene causa', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-coordinator-idle-'));
+  const journal=openJournal({path:join(directory,'world.sqlite')});
+  try{
+    await createQueuedHumanIntentFixture(journal,['Max, ¿estás ahí?'],coordinatorConfigurationFixture([maxId,agentId]));
+    assert.equal(journal.readRunCoordinatorActivity({runId}),'working','la intervención entregada es una causa pendiente');
+    const pulse=journal.beginCoordinatorPulse({runId});
+    if(pulse.kind!=='started')assert.fail('La intervención debe convocar a Max');
+    assert.equal(journal.readRunCoordinatorActivity({runId}),'working');
+    const job=pulse.jobs.find((item)=>item.actorId===maxId);
+    if(job===undefined)assert.fail('Falta el turno de Max');
+    const turn=await acceptActorAttemptForTest({journal,directory,job,seed:45_100,makeAttempt:(cut)=>waitAttempt(45_110,maxId,cut.worldRevision)});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:turn.proposalId,version:1,ids:idSource(45_120)}).resolution.kind,'applied');
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:pulse.pulse.pulseId}).state,'completed');
+    for(const actorId of [maxId,agentId])assert.equal((await createDeliverWorldWorker({journal,runId,actorId}).drain()).kind,'completed');
+    const witnesses=journal.beginCoordinatorPulse({runId});
+    if(witnesses.kind==='started'){
+      for(const witnessJob of witnesses.jobs){
+        const quiet=await acceptActorAttemptForTest({journal,directory,job:witnessJob,seed:45_200,makeAttempt:(cut)=>waitAttempt(45_210,witnessJob.actorId,cut.worldRevision)});
+        assert.equal(journal.commitWorldAttempt({runId,proposalId:quiet.proposalId,version:1,ids:idSource(45_220)}).resolution.kind,'applied');
+      }
+      assert.equal(journal.closeCoordinatorPulse({runId,pulseId:witnesses.pulse.pulseId}).state,'completed');
+      for(const actorId of [maxId,agentId])assert.equal((await createDeliverWorldWorker({journal,runId,actorId}).drain()).kind,'completed');
+    }
+    assert.equal(journal.readRunCoordinatorActivity({runId}),'idle','esperar sin pedir continuar deja la obra en reposo');
+    assert.deepEqual(journal.listCoordinatorPulseTargets(),[]);
+  }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
+});

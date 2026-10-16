@@ -38,7 +38,13 @@ export function RunStatusView({ view }: { view: RunView }) {
   return (
     <>
       <h2>{view.config.name}</h2>
-      <p role="status">Estado: {labels[view.lifecycle.kind]}</p>
+      <p role="status">Estado: {labels[view.lifecycle.kind]}{view.activity === "idle" ? " · en reposo" : ""}</p>
+      {view.activity === "idle" && (
+        <p className="edit-notice">
+          Ningún personaje tiene una causa pendiente: todos eligieron esperar y el reloj no avanza solo. La obra no está trabada.
+          Para continuar podés introducir una circunstancia de Dirección, intervenir como interlocutor, cerrar la escena o pausar.
+        </p>
+      )}
       <p>Perfil configurado: {view.config.inferenceProfile === undefined ? 'Sin selección explícita registrada' : `${view.config.inferenceProfile.model} · ${view.config.inferenceProfile.provider} · esfuerzo ${view.config.inferenceProfile.reasoningEffort}`}. Sin sustitución automática de modelo. El acceso se comprueba por separado.</p>
       <dl className="budget-metrics">
         <div>

@@ -85,3 +85,15 @@ test('actividad en vivo respeta ciclo actual aunque un registro durable siga run
     assert.match(html,/El último trabajo registrado falló/);
   }
 });
+
+test('la vista en vivo distingue el reposo de una espera técnica', async()=>{
+  const {renderToStaticMarkup}=await import('react-dom/server');
+  const {RunStageViewSchema}=await import('../src/domain/run-observation.ts');
+  const base=stageFixture();
+  const running=RunStageViewSchema.parse({...base,lifecycle:'running'});
+  const idle=RunStageViewSchema.parse({...running,activity:'idle'});
+  const idleMarkup=renderToStaticMarkup(<LivePerformance stage={idle} items={[]} jobs={[]} map={stageMapData(idle)} connected error={null} onExit={()=>{}}/>);
+  assert.match(idleMarkup,/En reposo: ningún personaje tiene una causa pendiente/);
+  const plain=renderToStaticMarkup(<LivePerformance stage={running} items={[]} jobs={[]} map={stageMapData(running)} connected error={null} onExit={()=>{}}/>);
+  assert.match(plain,/Esperando la próxima actividad/);
+});

@@ -456,9 +456,12 @@ export const RunViewSchema = z.strictObject({
   clock: WorldClockSchema,
   limits: RunLimitsSchema,
   budget: RunBudgetViewSchema,
+  /** Only while running: `idle` means no pending cause; every actor chose to wait and nothing advances without direction. */
+  activity: z.enum(['working', 'idle']).optional(),
   createdAt: z.string().datetime({ offset: true }).nullable(),
   updatedAt: z.string().datetime({ offset: true }),
 }).superRefine((view, context) => {
+  if (view.activity !== undefined && view.lifecycle.kind !== 'running') context.addIssue({ code: 'custom', path: ['activity'], message: 'La actividad sólo describe una corrida en ejecución.' });
   if (view.config.runId !== view.runId) context.addIssue({ code: 'custom', path: ['config', 'runId'], message: 'La configuración refiere otra corrida.' });
   if (view.config.configRevision !== view.configRevision) context.addIssue({ code: 'custom', path: ['config', 'configRevision'], message: 'La revisión de configuración no coincide.' });
   if (view.config.fictionalAt !== view.clock.instant) context.addIssue({code:'custom',path:['config','fictionalAt'],message:'El momento de configuración pública no coincide con el reloj confirmado.'});
