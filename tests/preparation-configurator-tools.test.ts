@@ -101,3 +101,15 @@ test('rechazos documentales y de reparto indican ubicación, IDs admitidos y que
   });
   assert.equal(tool.readCandidate(),undefined);
 });
+
+test('un antecedente con inclusión inexistente recibe la continuidad admitida y la alternativa sin hitos',async()=>{
+  const f=actorFixture(),actor=f.proposal.actors[0];assert.ok(actor);
+  const tool=createPreparationConfiguratorProposalTool({context:f.context,checkEligibility:()=>({kind:'active'})});
+  const invented=PreparationConfiguratorProposalSchema.parse({...f.proposal,actors:[{...actor,sections:[{section:'antecedents',value:[{antecedentId:'asociacion-temprana',kind:'milestone',statement:'Antecedente sintético de prueba.',applicability:{kind:'explicit-inclusion',inclusionId:randomUUID()}}],reason:'Adaptación de prueba.',sourceRefs:[],treatment:'declared-adaptation',unknowns:[]}]}]});
+  await assert.rejects(tool.tool.execute('invented-inclusion',invented),error=>{
+    assert.ok(error instanceof Error);assert.match(error.message,/^PREPARATION_CONFIGURATOR_CONTINUITY_MISMATCH: /);
+    assert.match(error.message,/Hitos admitidos: ninguno\. Inclusiones admitidas: ninguna\./);
+    assert.match(error.message,/kind biography y applicability unconditional/);return true;
+  });
+  assert.equal(tool.readCandidate(),undefined);
+});

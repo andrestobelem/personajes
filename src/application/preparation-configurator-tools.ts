@@ -23,6 +23,14 @@ function admittedRefs(context:ToolContext){
   const refs=[...context.documents.map(document=>document.sourceId),...context.actorSources.flatMap(source=>source.frozenDossier.sourceRefs.map(ref=>ref.id))];
   return refs.length===0?'ninguno: este corte no admite referencias documentales':refs.join(', ');
 }
+function admittedContinuity(context:ToolContext,raw:unknown){
+  const parsed=PreparationConfiguratorProposalSchema.safeParse(raw);
+  const proposed=parsed.success?parsed.data.settings.find(setting=>setting.section==='continuity'):undefined;
+  const continuity=proposed?.section==='continuity'?proposed.value:context.draft.continuity.kind==='empty'?undefined:context.draft.continuity.value;
+  const milestones=continuity?.milestones.map(value=>`${value.milestoneId} (${value.status})`)??[];
+  const inclusions=continuity?.inclusions.map(value=>value.inclusionId)??[];
+  return `Hitos admitidos: ${milestones.join(', ')||'ninguno'}. Inclusiones admitidas: ${inclusions.join(', ')||'ninguna'}.`;
+}
 /** Rejections are returned to the model; a bare code gives it nothing to correct. */
 function toolRejection(code:string,context:ToolContext,raw:unknown):string|undefined{
   const selected=context.actorSources.map(source=>source.characterId).join(', ');
@@ -35,6 +43,8 @@ function toolRejection(code:string,context:ToolContext,raw:unknown):string|undef
     }
     case 'PREPARATION_CONFIGURATOR_REFERENCE_NOT_ADMITTED':return `Usaste un sourceRef que no está admitido. IDs admitidos: ${admittedRefs(context)}. No uses URLs, hashes ni nombres de archivo. ${resend}`;
     case 'PREPARATION_CONFIGURATOR_PROPOSAL_ACTORS_MISMATCH':return `actors debe contener exactamente una entrada por cada personaje seleccionado (${selected}), y placements sólo puede referirse a ellos. ${resend}`;
+    case 'PREPARATION_CONFIGURATOR_CONTINUITY_MISMATCH':return `Un antecedente o una condición de revisión de un Goal cita un hito o una inclusión que no existe en la continuidad admitida, o un estado de hito distinto. ${admittedContinuity(context,raw)} Usá sólo esos IDs; no inventes milestoneId ni inclusionId. Si no hay ninguno, registrá el antecedente con kind biography y applicability unconditional, y usá condiciones de revisión de tipo circumstance. ${resend}`;
+    case 'PREPARATION_CONFIGURATOR_MILESTONE_CONDITION_REQUIRED':return `Un antecedente kind milestone necesita applicability milestone-state o explicit-inclusion con un ID admitido. ${admittedContinuity(context,raw)} Si no hay ninguno, usá kind biography con applicability unconditional. ${resend}`;
     default:return undefined;
   }
 }
