@@ -333,3 +333,22 @@ test('placement presente en una escena sin participantes los incorpora como al c
   assert.equal(present.length,2);
   for(const actor of present)assert.ok(world.scenes?.find(scene=>scene.id===actor.sceneId)?.participantIds?.includes(actor.characterId));
 });
+
+test('una excepción de conocimiento comparte su adaptación con la política y sus antecedentes y deja al actor preparado',()=>{
+  const f=fixture(),actor=f.proposal.actors[0];assert.ok(actor);
+  const sections=actor.sections.map(section=>section.section==='antecedents'?{...section,treatment:'declared-adaptation' as const,value:[
+      {antecedentId:'formacion-propuesta',kind:'biography' as const,statement:'Formación añadida para esta adaptación, no canon encontrado.',applicability:{kind:'unconditional' as const}},
+      ...section.value]}
+    :section.section==='unknownPolicy'?{...section,treatment:'declared-adaptation' as const,value:{...section.value,fields:[...section.value.fields,
+      {kind:'character-knowledge-adaptation' as const,topic:'Formación matemática no establecida',reason:'Propuesta editorial para esta puesta',antecedentIds:['formacion-propuesta']}]}}:section);
+  const proposal=PreparationConfiguratorProposalSchema.parse({...f.proposal,actors:[{...actor,sections},...f.proposal.actors.slice(1)]});
+  const result=apply(f,{settings:['continuity'],actors:fullActors(f),placements:[]},proposal);
+  if(result.nextDraft.roster.kind!=='configured')assert.fail('Sin reparto');
+  const prepared=result.nextDraft.roster.value.preparedCharacters.find(value=>value.characterId===actor.characterId);
+  if(prepared===undefined)assert.fail('La excepción de conocimiento no debe impedir la preparación completa');
+  const exception=prepared.unknownPolicy.value.fields.find(field=>field.kind==='character-knowledge-adaptation');
+  if(exception?.kind!=='character-knowledge-adaptation')assert.fail('Falta la excepción de conocimiento');
+  assert.equal(prepared.unknownPolicy.provenance.kind==='explicit-adaptation'?prepared.unknownPolicy.provenance.adaptationId:undefined,exception.adaptationId);
+  const linked=prepared.antecedents.value.find(value=>value.antecedentId==='formacion-propuesta');
+  assert.equal(linked?.provenance.kind==='explicit-adaptation'?linked.provenance.adaptationId:undefined,exception.adaptationId);
+});

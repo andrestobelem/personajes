@@ -91,6 +91,11 @@ export function applyPreparationConfiguratorSelection(input:{context:unknown;pro
     // A different continuity/source is not permission to relabel prior curation.
     // Old declared values remain visible and prepareCharacter reports mismatch.
     const patch:Record<string,unknown>={};
+    // A knowledge exception, its unknownPolicy provenance and the antecedents it links must share one explicit adaptation.
+    const knowledgeSection=suggestion.sections.find(value=>value.section==='unknownPolicy');
+    const knowledgeFields=knowledgeSection?.section==='unknownPolicy'?knowledgeSection.value.fields.flatMap(value=>value.kind==='character-knowledge-adaptation'?[value]:[]):[];
+    const knowledge=knowledgeFields.length===0?undefined:{adaptationId:input.host.uuid(`actors.${selected.characterId}.knowledge.adaptation`),
+      antecedentIds:new Set(knowledgeFields.flatMap(value=>value.antecedentIds))};
     for(const field of selected.sections){
       const section=suggestion.sections.find(value=>value.section===field);
       if(section===undefined)throw new Error('PREPARATION_CONFIGURATOR_SELECTED_ACTOR_SECTION_MISSING');
@@ -108,7 +113,7 @@ Fuentes externas admitidas revisadas por ${metadata.principalId}: ${externalRefs
       const provenance=PreparationProvenanceSchema.parse(section.treatment==='declared-adaptation'?{
         kind:'explicit-adaptation',dossierRevision:source.revision,dossierHash:source.contentHash,
         continuity:{continuityId:continuity.continuityId,revision:continuity.revision,contentHash:continuity.contentHash},
-        adaptationId:input.host.uuid(`actors.${selected.characterId}.${field}.adaptation`),reason,
+        adaptationId:field==='unknownPolicy'&&knowledge!==undefined?knowledge.adaptationId:input.host.uuid(`actors.${selected.characterId}.${field}.adaptation`),reason,
         authoredBy:metadata.principalId,createdAt:metadata.recordedAt,sourceRefs:permittedRefs,
       }:externalRefs.length>0?{kind:'curator-declaration',dossierRevision:source.revision,dossierHash:source.contentHash,
         continuity:{continuityId:continuity.continuityId,revision:continuity.revision,contentHash:continuity.contentHash},
@@ -116,7 +121,7 @@ Fuentes externas admitidas revisadas por ${metadata.principalId}: ${externalRefs
       }:{kind:'dossier-evidence',dossierRevision:source.revision,dossierHash:source.contentHash,
         continuity:{continuityId:continuity.continuityId,revision:continuity.revision,contentHash:continuity.contentHash},
         curatedBy:metadata.principalId,curatedAt:metadata.recordedAt,sourceRefs:section.sourceRefs});
-      const value=sectionValue({section,partial,provenance,actorId:selected.characterId,uuid:input.host.uuid});
+      const value=sectionValue({section,partial,provenance,actorId:selected.characterId,uuid:input.host.uuid,knowledge});
       patch[field]={kind:'declared',value:{value,provenance}};
       appliedFields.push(`actors.${selected.characterId}.${field}`);
     }
@@ -170,17 +175,19 @@ Fuentes externas admitidas revisadas por ${metadata.principalId}: ${externalRefs
   return {patch,nextDraft:next,review,appliedFields};
 }
 
-function sectionValue(input:{section:ActorSection;partial:PreparationDraft;provenance:z.infer<typeof PreparationProvenanceSchema>;actorId:string;uuid:(key:string)=>string}):unknown{
-  const {section}=input;
+function sectionValue(input:{section:ActorSection;partial:PreparationDraft;provenance:z.infer<typeof PreparationProvenanceSchema>;actorId:string;uuid:(key:string)=>string;
+  knowledge:{adaptationId:string;antecedentIds:ReadonlySet<string>}|undefined}):unknown{
+  const {section,knowledge}=input;
   switch(section.section){
-    case 'antecedents':return section.value.map(antecedent=>({...antecedent,provenance:input.provenance}));
+    case 'antecedents':return section.value.map(antecedent=>({...antecedent,provenance:knowledge!==undefined&&knowledge.antecedentIds.has(antecedent.antecedentId)&&input.provenance.kind==='explicit-adaptation'
+      ?{...input.provenance,adaptationId:knowledge.adaptationId}:input.provenance}));
     case 'initialExperience':{
       if(section.value.kind==='none')return section.value;
       if(input.partial.initialExperience.kind!=='declared')throw new Error('PREPARATION_CONFIGURATOR_INITIAL_EXPERIENCE_MISSING');
       return input.partial.initialExperience.value.value;
     }
     case 'unknownPolicy':return {...section.value,fields:section.value.fields.map((field,index)=>field.kind==='source-not-established'?field:{...field,
-      adaptationId:input.uuid(`actors.${input.actorId}.unknownPolicy.fields.${index}.adaptation`)})};
+      adaptationId:knowledge?.adaptationId??input.uuid(`actors.${input.actorId}.unknownPolicy.fields.${index}.adaptation`)})};
     default:return section.value;
   }
 }
