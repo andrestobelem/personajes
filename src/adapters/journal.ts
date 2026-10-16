@@ -3992,6 +3992,13 @@ export function openJournal(input: { path: string }) {
     if (job === undefined || job.lifecycle_revision === null) throw new Error('ACTOR_INITIATIVE_REQUIRES_DURABLE_ACTOR_JOB');
     const actor = input.resolution.newSnapshot.entities.find((entity) => entity.kind === 'character' && entity.characterId === input.record.actorId);
     if (actor?.kind !== 'character' || actor.preparation.kind !== 'prepared') throw new Error('ACTOR_INITIATIVE_RESULT_ACTOR_MISSING');
+    // One open initiative per actor. A turn taken for another cause supersedes an older
+    // pending continuation; an assigned one is already scheduled and keeps its slot.
+    const open = database.prepare(`SELECT state FROM actor_initiatives WHERE run_id=? AND actor_id=? AND state IN('pending','assigned')`)
+      .all(input.run.row.run_id,input.record.actorId).map((row) => z.strictObject({state:z.enum(['pending','assigned'])}).parse(row).state);
+    if (open.includes('assigned')) return;
+    if (open.includes('pending')) database.prepare(`UPDATE actor_initiatives SET state='blocked',failure_reason='superseded-by-later-turn',updated_at=?
+      WHERE run_id=? AND actor_id=? AND state='pending'`).run(input.at,input.run.row.run_id,input.record.actorId);
     const effectiveConfiguration = configurationAtCommit(input.committedRun,input.commitIndex);
     const initiativeId = ActorInitiativeIdSchema.parse(randomUUID());
     const source = {

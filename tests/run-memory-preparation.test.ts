@@ -290,3 +290,38 @@ test('reintenta con clave nueva tras fallo parcial del CLI y conserva el SQLite 
     f.close();
   }
 });
+
+test('reabrir memorias existentes conserva los sidecars WAL que exige el preflight de sólo lectura', {
+  skip: realIcmBinary === undefined ? 'Definí PERSONAJES_ICM_TEST_BINARY para ejecutar el gate ICM real.' : false,
+}, async () => {
+  const f = fixture();
+  const options = { host: f.host, ...(realIcmBinary === undefined ? {} : { icmBinaryPath: realIcmBinary }), acquireMaintenance: async () => () => undefined };
+  const first = createRunMemoryPreparation(options);
+  let memoryPath = '';
+  try {
+    const started = first.start(startInput(f));
+    if (started.kind !== 'accepted') assert.fail('Se esperaba una aceptación.');
+    assert.equal(started.job.purpose, 'initialize-empty');
+    assert.equal((await waitForJob(first, { runId: f.runId, jobId: started.job.jobId, principalId: started.job.principalId })).state, 'completed');
+    memoryPath = join(f.host.privateDataRoot, 'runs', f.runId, 'actors', started.job.actors[0]!.actorId, 'memory.sqlite');
+  } finally { await first.close(); }
+  const header = readFileSync(memoryPath).subarray(18, 20);
+  assert.deepEqual([...header], [2, 2], 'ICM deja la base en modo WAL');
+  assert.equal(existsSync(`${memoryPath}-shm`), false, 'cerrar el servicio libera los sidecars');
+  assert.equal(f.host.journal.setWorldLifecycle({ runId: f.runId, expectedWorldRevision: f.expectedWorldRevision,
+    expectedConfigRevision: f.expectedConfigurationRevision, target: 'running' }), 'updated');
+  assert.equal(f.host.journal.setWorldLifecycle({ runId: f.runId, expectedWorldRevision: f.expectedWorldRevision,
+    expectedConfigRevision: f.expectedConfigurationRevision, target: 'paused' }), 'updated');
+  const second = createRunMemoryPreparation(options);
+  try {
+    const reopened = second.start(startInput(f));
+    if (reopened.kind !== 'accepted') assert.fail(`Se esperaba reabrir: ${JSON.stringify(reopened)}`);
+    assert.equal(reopened.job.purpose, 'reopen-existing');
+    assert.equal((await waitForJob(second, { runId: f.runId, jobId: reopened.job.jobId, principalId: reopened.job.principalId })).state, 'completed');
+    assert.equal(existsSync(`${memoryPath}-wal`), true);
+    assert.equal(existsSync(`${memoryPath}-shm`), true);
+  } finally {
+    await second.close();
+    f.close();
+  }
+});

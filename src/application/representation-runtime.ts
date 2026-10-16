@@ -72,7 +72,7 @@ export type RepresentationRuntimeDiagnostic =
   | {kind:'director-failure';stage:string;code:string}
   | { kind: 'memory-projection'; runId: RunId; actorId: ActorId; outcome: 'failed'; reason: 'busy' | 'store_failed' | 'journal_failed' | 'adapter_failed'; adapterCode?: string }
   | { kind: 'delivery'; runId: RunId; actorId: ActorId; outcome: 'failed'; reason: 'delivery_failed' | 'journal_failed' }
-  | { kind: 'coordinator'; runId: RunId; failureKind: 'worker' | 'journal' | 'supervisor' };
+  | { kind: 'coordinator'; runId: RunId; failureKind: 'worker' | 'journal' | 'supervisor'; actorId?: string; errorCode?: string };
 
 /**
  * Composes workers around a host that already owns its private root and journal.
@@ -312,7 +312,11 @@ export async function createRepresentationRuntime(input: {
       if(!admissionsBlocked(runId))input.host.journal.completeRunStepJob({runId,jobId:step.jobId,failed});
     },
     onFailure(failure) {
-      report({ kind: 'coordinator', runId: failure.runId, failureKind: failure.kind });
+      // Only an uppercase host code crosses this boundary; free-form errors may carry private data.
+      const error = 'error' in failure ? failure.error : undefined;
+      const errorCode = error instanceof Error && /^[A-Z][A-Z0-9_]{2,119}$/.test(error.message) ? error.message : error instanceof Error ? error.name : undefined;
+      report({ kind: 'coordinator', runId: failure.runId, failureKind: failure.kind,
+        ...(failure.kind === 'worker' ? { actorId: failure.job.actorId } : {}), ...(errorCode === undefined ? {} : { errorCode }) });
     },
   });
 

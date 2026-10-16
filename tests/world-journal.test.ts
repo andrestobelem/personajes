@@ -3441,3 +3441,48 @@ test('v16 reconcilia terminal y admin aceptado de v15 con nuevo claim sin reescr
     assert.equal(actor.prompts.length,1);
   }finally{reopened?.close();fixture.close();}
 });
+
+test('un turno por otra causa reemplaza la iniciativa pendiente del actor en lugar de violar la única abierta', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'personajes-initiative-supersede-'));
+  const path=join(directory,'world.sqlite');
+  const journal=openJournal({path});
+  try{
+    await createQueuedHumanIntentFixture(journal,['Max, escuchame un momento.'],coordinatorConfigurationFixture([maxId,agentId]));
+    const firstPulse=journal.beginCoordinatorPulse({runId});
+    if(firstPulse.kind!=='started')assert.fail('La intervención humana debe convocar a Max');
+    const firstJob=firstPulse.jobs.find((job)=>job.actorId===maxId);
+    if(firstJob===undefined)assert.fail('Falta el turno de Max');
+    const first=await acceptActorAttemptForTest({journal,directory,job:firstJob,seed:44_100,
+      nextInitiative:'after-resolution',makeAttempt:(cut)=>waitAttempt(44_110,maxId,cut.worldRevision)});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:first.proposalId,version:1,ids:idSource(44_120)}).resolution.kind,'applied');
+    assert.equal(journal.closeCoordinatorPulse({runId,pulseId:firstPulse.pulse.pulseId}).state,'completed');
+    const resolved=journal.loadWorld({runId});
+    if(resolved===undefined)assert.fail('Falta el mundo resuelto');
+    const later=journal.commitHumanIntervention({runId,participantId:'interlocutor-andres',expectedRevision:resolved.revision,idempotencyKey:uuid(44_125),
+      request:{kind:'speech',recipientCharacterIds:[maxId],channelId,content:{kind:'speech',text:'Max, ¿seguís ahí?'}}});
+    if(later.kind!=='stored'||later.resolution.kind!=='applied')assert.fail('La nueva intervención debe quedar confirmada');
+    assert.equal((await createDeliverWorldWorker({journal,runId,actorId:maxId}).drain()).kind,'completed');
+    const second=journal.beginCoordinatorPulse({runId});
+    if(second.kind!=='started')assert.fail('La iniciativa debe convocar a Max');
+    const secondJob=second.jobs.find((job)=>job.actorId===maxId);
+    if(secondJob?.initiative===undefined)assert.fail('El turno debe llevar la iniciativa');
+    // Live state from CONTROL: the actor holds a pending initiative while acting in a job without one.
+    const database=new DatabaseSync(path);
+    const perceptionId=journal.readQueuedActorTurnIntents({runId,actorId:maxId,limit:10})[0]?.perceptionId;
+    if(perceptionId===undefined)assert.fail('La intervención debe estar entregada');
+    database.prepare(`UPDATE actor_turn_jobs SET initiative_id=NULL WHERE run_id=? AND job_id=?`).run(runId,secondJob.jobId);
+    database.prepare(`INSERT INTO actor_turn_job_inputs(run_id,actor_id,job_id,generation,perception_id,state,assigned_at,consumed_at)
+      VALUES(?,?,?,?,?,'assigned',?,NULL)`).run(runId,maxId,secondJob.jobId,secondJob.generation,perceptionId,Date.now());
+    database.prepare(`UPDATE actor_initiatives SET state='pending',assigned_pulse_id=NULL,assigned_job_id=NULL,assigned_generation=NULL WHERE run_id=?`).run(runId);
+    database.close();
+    const turn=await acceptActorAttemptForTest({journal,directory,job:secondJob,seed:44_200,
+      nextInitiative:'after-resolution',makeAttempt:(cut)=>waitAttempt(44_210,maxId,cut.worldRevision)});
+    assert.equal(journal.commitWorldAttempt({runId,proposalId:turn.proposalId,version:1,ids:idSource(44_220)}).resolution.kind,'applied');
+    const reader=new DatabaseSync(path);
+    const rows=z.array(z.strictObject({state:z.string(),failure_reason:z.string().nullable(),source_attempt_id:z.string()}))
+      .parse(reader.prepare('SELECT state,failure_reason,source_attempt_id FROM actor_initiatives WHERE run_id=? ORDER BY created_at').all(runId));
+    reader.close();
+    assert.deepEqual(rows.map((row)=>[row.state,row.failure_reason]),[['blocked','superseded-by-later-turn'],['pending',null]]);
+    assert.equal(rows[1]?.source_attempt_id,turn.attemptId);
+  }finally{journal.close();rmSync(directory,{recursive:true,force:true});}
+});
