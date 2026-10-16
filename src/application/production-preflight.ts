@@ -15,6 +15,7 @@ import {
   CircadianPolicySchema, DramaticLineSchema, DramaticReferencesSchema, ProductionValidationIssueSchema,
   HumanParticipantProfilesSchema, NarrationModeSchema, ProductionAudioSchema, ProductionRosterSchema, RunBudgetSchema,
   RunConfigurationDraftSchema, SpeechBindingIdSchema, SoundBindingIdSchema, CharacterDefinitionPolicySchema,
+  sceneAwaitingParticipantsDetail, scenesAwaitingParticipants,
 } from '../domain/production.ts';
 import type {
   DramaticLine, NarrationMode, ProductionAudio, ProductionRoster,
@@ -382,11 +383,18 @@ export function validateRunConfiguration(input: unknown): RunConfigurationValida
 
   const worldResult = WorldSnapshotSchema.safeParse(rawWorld);
   if (!worldResult.success) {
-    const worldIssues = worldResult.error.issues.map((issue) => ValidationIssueSchema.parse({
+    const awaiting = scenesAwaitingParticipants(rawWorld);
+    const pendingIssues = awaiting.map((scene) => ValidationIssueSchema.parse({
+      code: 'scene-has-no-participant',
+      field: `worldSnapshot.scenes.${scene.index}.participantIds`,
+      detail: sceneAwaitingParticipantsDetail(scene.label).slice(0, 2_000),
+    }));
+    const worldIssues = [...pendingIssues, ...worldResult.error.issues.filter((issue) => !(issue.path[0] === 'scenes' && issue.path[2] === 'participantIds'
+      && awaiting.some((scene) => scene.index === issue.path[1]))).map((issue) => ValidationIssueSchema.parse({
       code: 'invalid-world-snapshot',
       field: ['worldSnapshot', ...issue.path.map(String)].join('.'),
       detail: issue.message.slice(0, 2_000),
-    }));
+    }))];
     return RunConfigurationValidationResultSchema.parse({ kind: 'invalid', runId: draft.runId, issues: worldIssues });
   }
   const world = worldResult.data;

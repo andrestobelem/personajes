@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InventoryItemIdSchema, WorldActionSchema } from '../domain/preparation.ts';
-import { WorldSnapshotDraftSchema, type RunConfigurationDraft } from '../domain/production.ts';
+import { sceneAwaitingParticipantsDetail, scenesAwaitingParticipants, WorldSnapshotDraftSchema, type RunConfigurationDraft } from '../domain/production.ts';
 import { WorldSnapshotSchema, type WorldEntity } from '../domain/world-schema.ts';
 import { changeDraftField } from './draft-form.ts';
 
@@ -41,8 +41,13 @@ export function chooseActiveScene(input: { draft: RunConfigurationDraft; sceneId
   return changeDraftField({ draft: input.draft, field: 'worldSnapshot', value: { ...candidate, activeSceneId: scene.id } });
 }
 export function worldPreparationIssues(draft: RunConfigurationDraft): string[] {
-  const parsed = WorldSnapshotSchema.safeParse(worldCandidate(draft));
-  return parsed.success ? [] : parsed.error.issues.map((issue) => `${issue.path.join(' / ')}: ${issue.message}`);
+  const candidate = worldCandidate(draft);
+  const parsed = WorldSnapshotSchema.safeParse(candidate);
+  if (parsed.success) return [];
+  const awaiting = scenesAwaitingParticipants(candidate);
+  return [...awaiting.map((scene) => `scenes / ${scene.index} / participantIds: ${sceneAwaitingParticipantsDetail(scene.label)}`),
+    ...parsed.error.issues.filter((issue) => !(issue.path[0] === 'scenes' && issue.path[2] === 'participantIds' && awaiting.some((scene) => scene.index === issue.path[1])))
+      .map((issue) => `${issue.path.join(' / ')}: ${issue.message}`)];
 }
 type WorldMapItem = { id: WorldEntity['entityId']; kind: WorldEntity['kind']; label: string; x: number; y: number; radius: number };
 export function worldMapItems(draft: RunConfigurationDraft, placeId: string) {

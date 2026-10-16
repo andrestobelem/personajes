@@ -252,6 +252,15 @@ export const WorldPreparationCandidateSchema = z.strictObject({
 /** Compatibility name for serialized world preparation candidates. */
 export const WorldSnapshotDraftSchema = WorldPreparationCandidateSchema;
 
+/** Scenes still waiting for a prepared actor: participants are added only by placing one, never invented. */
+export function scenesAwaitingParticipants(candidate: z.infer<typeof WorldPreparationCandidateSchema>): { index: number; label: string }[] {
+  return (candidate.scenes ?? []).flatMap((scene, index) => (scene.participantIds?.length ?? 0) === 0
+    ? [{ index, label: scene.label ?? scene.id ?? `escena ${index + 1}` }] : []);
+}
+export function sceneAwaitingParticipantsDetail(label: string): string {
+  return `La escena «${label}» todavía no tiene participantes. Prepará un actor y colocalo en ella; no se añade interlocutor automáticamente.`;
+}
+
 /** Host policy for fresh preparations. Missing historical values stay absent. */
 export const CharacterDefinitionPolicySchema=z.strictObject({kind:z.literal('embodied-v1')});
 

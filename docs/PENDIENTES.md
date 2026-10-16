@@ -15,7 +15,7 @@ Esta lista complementa las 14 entregas detalladas de abajo: conserva su alcance 
 
 ### Próxima representación completa
 
-- [ ] Diagnosticar y corregir el array requerido ausente del Escenario de «CONTROL: un informe, tres versiones» (run `803a8675-2ad0-47ed-9d76-c7f8a64743a1`, revisión 3 al último corte). Volver a validar sin alterar hechos ya confirmados.
+- [x] Diagnosticar y corregir el array requerido ausente del Escenario de «CONTROL: un informe, tres versiones» (run `803a8675-2ad0-47ed-9d76-c7f8a64743a1`, revisión 3). Diagnóstico sobre copia de la base: la escena «Un informe, tres versiones · propuesta» no tiene `participantIds` porque los participantes sólo se agregan al colocar un actor preparado, y hay cero. El dato es coherente y no se modificó; la validación Ready y el editor del Escenario ahora informan `scene-has-no-participant` con una indicación accionable en lugar del error crudo de Zod. Revalidada la revisión 3: es el único problema estructural; se resuelve al preparar y colocar el primer actor. Test: `tests/scene-awaiting-participants.test.ts`.
 - [ ] Comprobar login y acceso real al perfil seleccionado; renovar la prueba de acceso antes de inferir. La página de login abierta no acredita autenticación.
 - [ ] Preparar y revisar Max, 99 y Jefe con el Configurador real, preferentemente un pendiente por trabajo: identidad, biografía, antecedentes, memoria admitida, deseos, Goals, relaciones, forma de hablar, medios y posición inicial. Actualmente hay cero contextos preparados en ese borrador.
 - [ ] Acreditar un nuevo trabajo real después del timeout anterior. Los trabajos bloqueados y su consumo conservan su historia; sólo una nueva propuesta completa revisada puede aplicarse.
@@ -37,7 +37,7 @@ Esta lista complementa las 14 entregas detalladas de abajo: conserva su alcance 
 - [ ] Completar aceptación ampliada de presupuesto, catálogo, importación/exportación portable, backups/recuperación entre hosts, accesibilidad y demás requisitos V2. Mantener su prioridad posterior al recorrido central.
 - [ ] Ejecutar los 25 escenarios y registrar evidencia individual para los 77 criterios; corregir y repetir sólo los controles afectados hasta cerrar el producto.
 
-Última verificación de código registrada: 1513 pruebas, 1512 aprobadas, cero fallidas, una omitida; typecheck y build aprobados. Los [defaults elegibles](auditoria/defaults-elegibles.md) ya están implementados y verificados en interfaz. La ejecución integral sigue pendiente. Continuar desde el [handoff vigente](../handoff/README.md).
+Última verificación de código registrada: 1515 pruebas, 1514 aprobadas, cero fallidas, una omitida; typecheck y build aprobados. Los [defaults elegibles](auditoria/defaults-elegibles.md) ya están implementados y verificados en interfaz. La ejecución integral sigue pendiente. Continuar desde el [handoff vigente](../handoff/README.md).
 
 ## Prioridad operativa actual
 
