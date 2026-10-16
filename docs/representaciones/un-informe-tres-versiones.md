@@ -20,7 +20,16 @@ Después vinieron la validación Ready (revisión 7), las memorias `initialize-e
 - **Max:** va al Pasillo y al Archivo sin hablar con nadie más. Su observación del registro no está confirmada en el registro público.
 - **Reposo:** los tres eligen esperar sin pedir continuar. El último pulso termina sin iniciativas pendientes y la representación sigue `running`, pero inactiva.
 
-Guion: [control-un-informe-tres-versiones-…-c33.fountain](../output/control-un-informe-tres-versiones-803a8675-2ad0-47ed-9d76-c7f8a64743a1-c33-132ec7c7addb9a69.fountain), commit 33, SHA-256 `132ec7c7…`.
+## Cierre
+
+A pedido del usuario, la Dirección pausó y cerró la escena tras el reposo (commit 34, sin turnos nuevos). Después cerró el episodio (commit 35):
+
+- **Consecuencias:** el informe de 99 sobre el registro (#13), el encargo del Jefe de verificar el circuito (#16) y su reconocimiento de que se adelantó (#18).
+- **Líneas abiertas:** el autor del aviso (#8 y #9) y el responsable de mantenimiento sin localizar (#17).
+
+La representación quedó `stopped`, sin el cierre irreversible de la corrida.
+
+Guion final: [control-un-informe-tres-versiones-…-c35.fountain](../output/control-un-informe-tres-versiones-803a8675-2ad0-47ed-9d76-c7f8a64743a1-c35-118984c9b0b7f9b3.fountain), commit 35. El corte previo al cierre también se conserva: [c33](../output/control-un-informe-tres-versiones-803a8675-2ad0-47ed-9d76-c7f8a64743a1-c33-132ec7c7addb9a69.fountain).
 
 ## Fallas encontradas y corregidas durante la función
 
@@ -30,4 +39,4 @@ Guion: [control-un-informe-tres-versiones-…-c33.fountain](../output/control-un
 
 ## Límites de la evidencia
 
-No es una obra completa: es el primer tramo hasta el reposo, sin cierre de escena ni de episodio. Tampoco se probó la intervención humana, porque la puesta no tiene interlocutores humanos configurados. El reposo muestra que, cuando todos esperan, nadie aporta una causa nueva. Seguir requiere una decisión de dirección: una circunstancia, una intervención humana o el cierre estructural. Tras cada reinicio del host fue necesario reabrir las memorias, pausar, correr un preflight nuevo y reanudar.
+Es un episodio breve cerrado por dirección tras el reposo, no un desenlace propio de los personajes. Tampoco se probó la intervención humana, porque la puesta no tiene interlocutores humanos configurados. El reposo muestra que, cuando todos esperan, nadie aporta una causa nueva. Seguir requiere una decisión de dirección: una circunstancia, una intervención humana o el cierre estructural. Tras cada reinicio del host fue necesario reabrir las memorias, pausar, correr un preflight nuevo y reanudar.
