@@ -6,6 +6,10 @@ import { PreparedCharacterSchema, ContinuityContextSchema, SpanishVarietyForActi
 import { HashSchema } from './values.ts';
 import { ActorTurnJobScopeSchema, ContinuistaCriterionSchema, ContinuistaReviewInputSchema, FrozenActorWorldCutSchema, WorldProposalRecordSchema } from './world-journal.ts';
 import { ActorWorldProjectionSchema } from './actor-world-projection.ts';
+import { WorldPerceptionSchema } from './world-schema.ts';
+
+/** A direct observation already delivered to the actor: private knowledge with no public event or Experience. */
+const PrivateObservationSchema = WorldPerceptionSchema.options[1];
 
 const PreparationSchema = z.strictObject({
   identity: PreparedCharacterSchema.shape.identity.shape.value,
@@ -42,12 +46,15 @@ export const ContinuistaContextPayloadSchema = z.strictObject({
   circumstances: CircumstancesSchema,
   projection: ActorWorldProjectionSchema,
   experiences: z.array(ExperienceSchema).max(10_000),
+  /** Absent in historical contexts; present only when the actor already received direct observations. */
+  privateObservations: z.array(PrivateObservationSchema).min(1).max(10_000).optional(),
   limits: z.strictObject({ directionIndications: z.literal('no-authorized-ledger'), rhythmCalibration: z.literal('not-measured') }),
 });
 const EvidenceSectionSchema = z.enum(['proposal', 'preparation', 'continuity', 'circumstances', 'projection']);
 const EvidenceEntrySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('section'), section: EvidenceSectionSchema, contentHash: HashSchema }),
   z.strictObject({ kind: z.literal('experience'), experienceId: ExperienceSchema.options[0].shape.experienceId, contentHash: HashSchema }),
+  z.strictObject({ kind: z.literal('observation'), perceptionId: PrivateObservationSchema.shape.id, contentHash: HashSchema }),
 ]);
 const EvidenceMapSchema = z.record(z.string().min(1).max(120), EvidenceEntrySchema);
 const ContextObjectSchema = z.strictObject({
@@ -81,6 +88,13 @@ export function validateContinuistaReviewContext(rawContext: unknown): Continuis
     if (seen.has(experience.experienceId)) throw new Error('Experiencia duplicada en el contexto Continuista');
     seen.add(experience.experienceId);
   }
+  const observed = new Set<string>();
+  for (const observation of context.payload.privateObservations ?? []) {
+    if (observation.recipientCharacterId !== scope.actorId || observation.runId !== scope.runId
+      || observation.fictitiousAt > inputCut.fictionalAt) throw new Error('Observación ajena o futura en el contexto Continuista');
+    if (observed.has(observation.id)) throw new Error('Observación duplicada en el contexto Continuista');
+    observed.add(observation.id);
+  }
   for (const experience of preparation.initialExperiences) {
     if (experience.actorId !== scope.actorId || experience.fictitiousAt > inputCut.fictionalAt
       || experience.receivedAt > inputCut.fictionalAt
@@ -97,6 +111,9 @@ export function buildContinuistaEvidence(payload: z.infer<typeof ContinuistaCont
     const key = `experience:${experience.experienceId}`;
     if (Object.hasOwn(evidence, key)) throw new Error('Experiencia repetida entre memoria inicial y journal');
     evidence[key] = { kind: 'experience', experienceId: experience.experienceId, contentHash: hashContinuistaValue(experience) };
+  }
+  for (const observation of payload.privateObservations ?? []) {
+    evidence[`observation:${observation.id}`] = { kind: 'observation', perceptionId: observation.id, contentHash: hashContinuistaValue(observation) };
   }
   return evidence;
 }

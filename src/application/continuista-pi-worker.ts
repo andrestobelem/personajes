@@ -14,7 +14,7 @@ import { resolveIcmSessionContext } from './icm-session-context.ts';
 type Journal = Pick<ReturnType<typeof openJournal>,
   'claimActorTurnJob' | 'readWorldConfiguration' | 'readActorJobProposal' | 'loadActorWorldCut'
   | 'readIcmContextBinding' | 'readIcmContextPacket' | 'ensureIcmContextPacket'
-  | 'compareAndSwapActorKnowledge' | 'loadActorPiSession' | 'readExperiences' | 'checkActorJobEligibility'
+  | 'compareAndSwapActorKnowledge' | 'loadActorPiSession' | 'readExperiences' | 'checkActorJobEligibility' | 'readDeliveredWorldPerceptions'
   | 'beginContinuistaJob' | 'registerContinuistaSession' | 'loadContinuistaSession'
   | 'checkContinuistaJobEligibility' | 'reserveContinuistaRequest' | 'transitionContinuistaRequest'
   | 'expireContinuistaRequest' | 'settleContinuistaRequestWallTime' | 'recordContinuistaCheckpoint' | 'stageContinuistaReview' | 'acceptContinuistaReview'

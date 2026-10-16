@@ -208,3 +208,24 @@ test('contexto histórico sin perfil conserva su envelope y hash sin agregar def
     assert.deepEqual(validateContinuistaContextReview({ context: reopened, response: responseFor(reopened) }), responseFor(reopened));
   });
 });
+
+test('las observaciones directas ya entregadas al actor son evidencia citable; las ajenas o futuras se rechazan', async () => {
+  const { buildContinuistaEvidence, hashContinuistaValue } = await import('../src/domain/continuista-review.ts');
+  await withContext((context) => {
+    const observation = { kind: 'observation' as const, id: randomUUID(), runId: context.payload.scope.runId, recipientCharacterId: context.payload.scope.actorId,
+      attemptId: randomUUID(), subjectEntityId: randomUUID(), modality: 'visual' as const,
+      detail: 'Registro de mantenimiento: «Circuito de prueba desconectado para revisión».', fictitiousAt: context.payload.inputCut.fictionalAt };
+    const rebuild = (privateObservations: unknown[]) => {
+      const payload = { ...context.payload, privateObservations } as typeof context.payload;
+      const evidence = buildContinuistaEvidence(payload);
+      return { ...context, payload, evidence, contextHash: hashContinuistaValue({ payload, evidence }) };
+    };
+    const withObservation = validateContinuistaReviewContext(rebuild([observation]));
+    assert.equal(withObservation.evidence[`observation:${observation.id}`]?.kind, 'observation');
+    const cited = { ...responseFor(withObservation), review: { ...responseFor(withObservation).review, evidenceRefs: [`observation:${observation.id}`] } };
+    assert.deepEqual(validateContinuistaContextReview({ context: withObservation, response: cited }), cited);
+    assert.throws(() => validateContinuistaReviewContext(rebuild([{ ...observation, recipientCharacterId: 'otro-actor' }])), /ajena o futura/);
+    assert.throws(() => validateContinuistaReviewContext(rebuild([{ ...observation, fictitiousAt: observation.fictitiousAt + 1 }])), /ajena o futura/);
+    assert.match(buildContinuistaReviewPrompts(withObservation).systemPrompt, /observation:<id>/);
+  });
+});
